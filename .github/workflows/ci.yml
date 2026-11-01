@@ -6,6 +6,14 @@ on:
 permissions:
   contents: read
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make lint
   vuln:
     runs-on: ubuntu-latest
     steps:
@@ -55,6 +63,4 @@ jobs:
         run: |
           docker run -d --name dragonfly -p 56381:6379 --ulimit memlock=-1 docker.dragonflydb.io/dragonflydb/dragonfly:v1.32.0 --proactor_threads=2
           sleep 5
-      - run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
       - run: make test-all

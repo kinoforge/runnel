@@ -10,8 +10,9 @@ INTEGRATION = RUNNEL_TEST_POSTGRES='$(RUNNEL_TEST_POSTGRES)' RUNNEL_TEST_MYSQL='
 	RUNNEL_TEST_DRAGONFLY='$(RUNNEL_TEST_DRAGONFLY)'
 
 FUZZTIME ?= 30s
+GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 
-.PHONY: build test test-all up down lint vuln fuzz bench docker release-check
+.PHONY: build test test-all up down lint fmt vuln fuzz bench docker release-check
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o bin/runnel ./cmd/runnel
@@ -29,8 +30,10 @@ down:
 	docker compose -f deploy/compose.yml down -v
 
 lint:
-	test -z "$$(gofmt -l .)"
-	go vet ./...
+	$(GOLANGCI_LINT) run ./...
+
+fmt:
+	$(GOLANGCI_LINT) fmt ./...
 
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
