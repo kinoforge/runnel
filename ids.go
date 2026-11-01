@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
@@ -41,13 +40,3 @@ func defaultWorkerID() string {
 }
 
 var specParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-
-func parseSpec(spec, tz string) (cron.Schedule, error) {
-	if tz != "" {
-		if _, err := time.LoadLocation(tz); err != nil {
-			return nil, err
-		}
-		spec = "CRON_TZ=" + tz + " " + spec
-	}
-	return specParser.Parse(spec)
-}

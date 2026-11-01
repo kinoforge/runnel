@@ -1,0 +1,114 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/kinoforge/runnel"
+)
+
+type problemBody struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func (s *Server) problem(w http.ResponseWriter, status int, title, detail string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(problemBody{Type: "about:blank", Title: title, Status: status, Detail: detail})
+}
+
+func (s *Server) fail(w http.ResponseWriter, err error) {
+	var tooBig *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooBig):
+		s.problem(w, http.StatusRequestEntityTooLarge, "too large", "request body too large")
+	case errors.Is(err, runnel.ErrInvalid):
+		s.problem(w, http.StatusBadRequest, "invalid", err.Error())
+	case errors.Is(err, runnel.ErrNotFound):
+		s.problem(w, http.StatusNotFound, "not found", "")
+	case errors.Is(err, runnel.ErrTenantFull):
+		w.Header().Set("Retry-After", s.retryAfter())
+		s.problem(w, http.StatusTooManyRequests, "tenant full", err.Error())
+	case errors.Is(err, runnel.ErrQueueFull):
+		w.Header().Set("Retry-After", s.retryAfter())
+		s.problem(w, http.StatusTooManyRequests, "queue full", err.Error())
+	case errors.Is(err, runnel.ErrDependency):
+		s.problem(w, http.StatusUnprocessableEntity, "dependency", err.Error())
+	case errors.Is(err, runnel.ErrConflict), errors.Is(err, runnel.ErrFinal), errors.Is(err, runnel.ErrNotFinal):
+		s.problem(w, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, context.Canceled):
+		s.problem(w, 499, "cancelled", "")
+	default:
+		s.log.Error("runnel: request failed", "err", err)
+		s.problem(w, http.StatusInternalServerError, "internal error", "")
+	}
+}
+
+func (s *Server) retryAfter() string {
+	return strconv.Itoa(int(max(1, s.cfg.RetryAfter.Round(time.Second)/time.Second)))
+}
+
+func (s *Server) preferWait(r *http.Request) time.Duration {
+	for _, h := range r.Header.Values("Prefer") {
+		for _, part := range strings.FieldsFunc(h, func(c rune) bool { return c == ',' || c == ';' }) {
+			v, ok := strings.CutPrefix(strings.TrimSpace(part), "wait=")
+			if !ok {
+				continue
+			}
+			n, err := strconv.Atoi(strings.Trim(v, `"`))
+			if err != nil || n <= 0 {
+				return 0
+			}
+			if most := int(s.cfg.MaxResultWait / time.Second); n > most {
+				return s.cfg.MaxResultWait
+			}
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 0
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decode(r *http.Request, v any) error {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			return err
+		}
+		return fmt.Errorf("%w: body: %v", runnel.ErrInvalid, err)
+	}
+	if dec.More() {
+		return fmt.Errorf("%w: body must hold one JSON value", runnel.ErrInvalid)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%w: trailing data after body", runnel.ErrInvalid)
+	}
+	return nil
+}
+
+func (s *Server) checkWebhook(u string) error {
+	if err := runnel.ValidWebhookURL(u, s.cfg.Limits.MaxWebhookURL); err != nil {
+		return err
+	}
+	if !s.cfg.AllowHTTPWebhooks && !strings.HasPrefix(u, "https://") {
+		return fmt.Errorf("%w: webhook must use https", runnel.ErrInvalid)
+	}
+	return nil
+}

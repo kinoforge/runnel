@@ -1,0 +1,134 @@
+package runnel
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
+)
+
+var (
+	namePattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	namespacePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+	tenantPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$`)
+)
+
+// ValidName reports whether s can name a queue, kind, pool or schedule: 1 to 128
+// letters, digits, dots, dashes or underscores, starting with a letter or digit.
+func ValidName(s string) bool { return namePattern.MatchString(s) }
+
+// ValidNamespace reports whether s can name a namespace: 1 to 63 lowercase
+// letters, digits, dashes or underscores.
+func ValidNamespace(s string) bool { return namespacePattern.MatchString(s) }
+
+// ValidTenant reports whether s can name a tenant.
+func ValidTenant(s string) bool { return tenantPattern.MatchString(s) }
+
+func invalid(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+}
+
+func checkName(field, v string, optional bool) error {
+	if v == "" && optional {
+		return nil
+	}
+	if !ValidName(v) {
+		return invalid("%s %q must match %s", field, v, namePattern)
+	}
+	return nil
+}
+
+func (j *Job) validate(l Limits) error {
+	if err := checkName("queue", j.Queue, false); err != nil {
+		return err
+	}
+	if err := checkName("kind", j.Kind, false); err != nil {
+		return err
+	}
+	if err := checkName("pool", j.Pool, true); err != nil {
+		return err
+	}
+	if j.Tenant != "" && !ValidTenant(j.Tenant) {
+		return invalid("tenant %q must match %s", j.Tenant, tenantPattern)
+	}
+	if len(j.Payload) > l.MaxPayload {
+		return invalid("payload is %d bytes, limit %d", len(j.Payload), l.MaxPayload)
+	}
+	if len(j.Payload) > 0 && !json.Valid(j.Payload) {
+		return invalid("payload must be valid JSON")
+	}
+	if j.Priority < -1000 || j.Priority > 1000 {
+		return invalid("priority must be between -1000 and 1000")
+	}
+	if j.MaxAttempts < 1 || j.MaxAttempts > 1000 {
+		return invalid("max_attempts must be between 1 and 1000")
+	}
+	if j.Timeout < 0 || j.StartWithin < 0 || j.UniqueFor < 0 {
+		return invalid("durations must not be negative")
+	}
+	if len(j.Fallbacks) > l.MaxFallbacks {
+		return invalid("at most %d fallbacks", l.MaxFallbacks)
+	}
+	for _, t := range j.Fallbacks {
+		if t == (Target{}) {
+			return invalid("fallback target is empty")
+		}
+		if err := checkName("fallback queue", t.Queue, true); err != nil {
+			return err
+		}
+		if err := checkName("fallback kind", t.Kind, true); err != nil {
+			return err
+		}
+		if err := checkName("fallback pool", t.Pool, true); err != nil {
+			return err
+		}
+	}
+	if len(j.DependsOn) > l.MaxDependsOn {
+		return invalid("at most %d dependencies", l.MaxDependsOn)
+	}
+	for _, d := range j.DependsOn {
+		if !ValidID(d) {
+			return invalid("dependency %q is not a job id", d)
+		}
+	}
+	if len(j.UniqueKey) > l.MaxUniqueKey || strings.ContainsAny(j.UniqueKey, "|\x00") {
+		return invalid("unique key must be at most %d bytes without '|'", l.MaxUniqueKey)
+	}
+	if err := ValidMeta(j.Meta, l); err != nil {
+		return err
+	}
+	if j.Webhook != "" {
+		if err := ValidWebhookURL(j.Webhook, l.MaxWebhookURL); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidMeta checks meta against the limits: at most MaxMeta entries, keys of
+// 1 to 64 bytes and values of at most 512.
+func ValidMeta(meta map[string]string, l Limits) error {
+	if len(meta) > l.MaxMeta {
+		return invalid("at most %d meta entries", l.MaxMeta)
+	}
+	for k, v := range meta {
+		if len(k) == 0 || len(k) > 64 || len(v) > 512 {
+			return invalid("meta keys must be 1-64 bytes and values at most 512")
+		}
+	}
+	return nil
+}
+
+// ValidWebhookURL checks that raw is an absolute http or https URL without
+// credentials, at most maxLen bytes.
+func ValidWebhookURL(raw string, maxLen int) error {
+	if len(raw) > maxLen {
+		return invalid("webhook url too long")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
+		return invalid("webhook must be an absolute http(s) url without credentials")
+	}
+	return nil
+}
