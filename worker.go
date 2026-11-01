@@ -57,7 +57,7 @@ type Worker struct {
 	mu    sync.Mutex
 	runs  map[string]*inflight
 	held  int
-	base  context.Context
+	base  context.Context //nolint:containedctx // Do runs jobs under the context of the active Run
 	wg    *sync.WaitGroup
 	freed chan struct{}
 }
