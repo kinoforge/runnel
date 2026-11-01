@@ -20,6 +20,21 @@ import (
 )
 
 const (
+	defaultWebhookConcurrency = 4
+	defaultWebhookTimeout     = 10 * time.Second
+	webhookMaxAttempts        = 10
+	webhookUniqueFor          = 48 * time.Hour
+	webhookBackoffBase        = 5 * time.Second
+	webhookBackoffMax         = 30 * time.Minute
+	secretCacheTTL            = 30 * time.Second
+	maxDrainBody              = 64 << 10
+	maxRetryAfterSeconds      = 3600
+	dialKeepAlive             = 30 * time.Second
+	maxIdleConns              = 50
+	idleConnTimeout           = 90 * time.Second
+)
+
+const (
 	// WebhookKind is the kind of the jobs that deliver webhooks.
 	WebhookKind = "runnel.webhook"
 	// WebhookQueue is the queue webhook deliveries run on. It is reserved.
@@ -42,10 +57,10 @@ func (c WebhookConfig) withDefaults() WebhookConfig {
 		c.Queue = WebhookQueue
 	}
 	if c.Concurrency <= 0 {
-		c.Concurrency = 4
+		c.Concurrency = defaultWebhookConcurrency
 	}
 	if c.Timeout <= 0 {
-		c.Timeout = 10 * time.Second
+		c.Timeout = defaultWebhookTimeout
 	}
 	return c
 }
@@ -93,9 +108,9 @@ func NewWebhookJob(j *Job, event string, delivery int64, queue string) (*Job, er
 	if err != nil {
 		return nil, err
 	}
-	return &Job{Queue: queue, Kind: WebhookKind, Payload: body, MaxAttempts: 10,
-		UniqueKey: fmt.Sprintf("webhook:%d", delivery), UniqueFor: Duration(48 * time.Hour),
-		Backoff: Backoff{Base: Duration(5 * time.Second), Max: Duration(30 * time.Minute)}}, nil
+	return &Job{Queue: queue, Kind: WebhookKind, Payload: body, MaxAttempts: webhookMaxAttempts,
+		UniqueKey: fmt.Sprintf("webhook:%d", delivery), UniqueFor: Duration(webhookUniqueFor),
+		Backoff: Backoff{Base: Duration(webhookBackoffBase), Max: Duration(webhookBackoffMax)}}, nil
 }
 
 // SecretFunc returns the webhook secret of a namespace.
@@ -129,7 +144,7 @@ func NewWebhookHandler(s Store, cfg WebhookConfig) Handler {
 	return NewWebhookSender(func(ctx context.Context, ns string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if cache == nil || time.Since(loaded) > 30*time.Second {
+		if cache == nil || time.Since(loaded) > secretCacheTTL {
 			all, err := Namespaces(ctx, s)
 			if err != nil {
 				return "", err
@@ -188,13 +203,13 @@ func (h *webhookHandler) Work(ctx context.Context, j *Job) error {
 		}
 		return err
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainBody))
 	_ = resp.Body.Close()
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode >= 500:
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 && s <= 3600 {
+		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 && s <= maxRetryAfterSeconds {
 			return RetryIn(time.Duration(s)*time.Second, fmt.Errorf("webhook answered %d", resp.StatusCode))
 		}
 		return fmt.Errorf("webhook answered %d", resp.StatusCode)
@@ -235,7 +250,7 @@ func PublicAddress(a netip.Addr) bool {
 // allowPrivate is set, refuses to connect to addresses that are not public. The
 // check runs on every connection, after DNS resolution.
 func SafeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
-	dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
+	dialer := &net.Dialer{Timeout: timeout, KeepAlive: dialKeepAlive}
 	if !allowPrivate {
 		dialer.Control = func(_, address string, _ syscall.RawConn) error {
 			host, _, err := net.SplitHostPort(address)
@@ -249,7 +264,7 @@ func SafeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 			return nil
 		}
 	}
-	tr := &http.Transport{DialContext: dialer.DialContext, Proxy: nil, MaxIdleConns: 50, IdleConnTimeout: 90 * time.Second,
+	tr := &http.Transport{DialContext: dialer.DialContext, Proxy: nil, MaxIdleConns: maxIdleConns, IdleConnTimeout: idleConnTimeout,
 		TLSHandshakeTimeout: timeout, ResponseHeaderTimeout: timeout}
 	return &http.Client{Transport: tr, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse

@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+const (
+	clockResync       = 30 * time.Second
+	clockReadTimeout  = 2 * time.Second
+	clockRetryBackoff = 5 * time.Second
+)
+
 // Clock tells the time that leases, schedules and retries are measured in.
 type Clock interface {
 	Now() time.Time
@@ -41,7 +47,7 @@ type StoreClock struct {
 
 // NewStoreClock returns a clock that follows src.
 func NewStoreClock(src TimeSource) *StoreClock {
-	return &StoreClock{src: src, resync: 30 * time.Second, timeout: 2 * time.Second}
+	return &StoreClock{src: src, resync: clockResync, timeout: clockReadTimeout}
 }
 
 // Now returns the source's current time. The first read waits for one sample;
@@ -93,7 +99,7 @@ func (c *StoreClock) sync() {
 	defer c.mu.Unlock()
 	c.busy = false
 	if !ok {
-		c.next = time.Now().Add(5 * time.Second)
+		c.next = time.Now().Add(clockRetryBackoff)
 		return
 	}
 	c.offset, c.next = best, time.Now().Add(c.resync)

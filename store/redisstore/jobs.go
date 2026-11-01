@@ -10,6 +10,12 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	scanFactor = 4
+	minScan    = 32
+	maxScan    = 500
+)
+
 func (s *Store) Insert(ctx context.Context, ns string, jobs []*runnel.Job, now time.Time) ([]runnel.Inserted, error) {
 	payload := make([]map[string]any, len(jobs))
 	for i, j := range jobs {
@@ -91,7 +97,7 @@ func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) (
 		return nil, err
 	}
 	now := runnel.Millis(req.Now)
-	scan := min(max(req.Limit*4, 32), 500)
+	scan := min(max(req.Limit*scanFactor, minScan), maxScan)
 	raw, err := s.claim.Run(ctx, s.rdb, []string{s.p(ns)}, now, now+req.Lease.Milliseconds(), req.Worker, req.Limit, scan, qs, ids).Result()
 	if err != nil {
 		return nil, err

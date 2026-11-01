@@ -14,6 +14,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	listChunkFactor = 2
+	minListChunk    = 50
+	maxListRounds   = 50
+)
+
 func (s *Store) Get(ctx context.Context, ns string, ids []string) ([]*runnel.Job, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -54,8 +60,8 @@ func (s *Store) List(ctx context.Context, ns string, q runnel.Query) ([]*runnel.
 		maxLex = "(" + q.Cursor
 	}
 	var out []*runnel.Job
-	chunk := int64(max(q.Limit*2, 50))
-	for range 50 {
+	chunk := int64(max(q.Limit*listChunkFactor, minListChunk))
+	for range maxListRounds {
 		ids, err := s.rdb.ZRevRangeByLex(ctx, key, &redis.ZRangeBy{Max: maxLex, Min: "-", Count: chunk}).Result()
 		if err != nil {
 			return nil, "", err

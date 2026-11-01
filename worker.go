@@ -12,6 +12,18 @@ import (
 	"time"
 )
 
+const (
+	defaultConcurrency     = 10
+	defaultLease           = 30 * time.Second
+	minLease               = 3 * time.Second
+	defaultPollInterval    = time.Second
+	defaultShutdownTimeout = 30 * time.Second
+	claimRetryMin          = 100 * time.Millisecond
+	claimRetryMax          = 30 * time.Second
+	finishTries            = 6
+	finishRetryMin         = 200 * time.Millisecond
+)
+
 // WorkerConfig configures a worker. Concurrency is how many jobs it runs at once
 // (default 10). Lease is how long a claim lasts without a heartbeat (default
 // 30s); heartbeats run every third of it. ShutdownTimeout bounds how long Run
@@ -61,17 +73,17 @@ func NewSourceWorker(src Source, cfg WorkerConfig) *Worker {
 		cfg.ID = defaultWorkerID()
 	}
 	if cfg.Concurrency <= 0 {
-		cfg.Concurrency = 10
+		cfg.Concurrency = defaultConcurrency
 	}
 	if cfg.Lease <= 0 {
-		cfg.Lease = 30 * time.Second
+		cfg.Lease = defaultLease
 	}
-	cfg.Lease = max(cfg.Lease, 3*time.Second)
+	cfg.Lease = max(cfg.Lease, minLease)
 	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = time.Second
+		cfg.PollInterval = defaultPollInterval
 	}
 	if cfg.ShutdownTimeout <= 0 {
-		cfg.ShutdownTimeout = 30 * time.Second
+		cfg.ShutdownTimeout = defaultShutdownTimeout
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -114,7 +126,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.mu.Lock()
 	w.base, w.wg, w.freed = base, &wg, freed
 	w.mu.Unlock()
-	pause := 100 * time.Millisecond
+	pause := claimRetryMin
 	for ctx.Err() == nil {
 		free := w.reserve(w.cfg.Concurrency)
 		if free > 0 {
@@ -126,10 +138,10 @@ func (w *Worker) Run(ctx context.Context) error {
 				}
 				w.log.Error("runnel: claim failed", "err", err)
 				sleepCtx(ctx, pause)
-				pause = min(pause*2, 30*time.Second)
+				pause = min(pause*2, claimRetryMax)
 				continue
 			}
-			pause = 100 * time.Millisecond
+			pause = claimRetryMin
 			for _, j := range jobs {
 				w.start(base, j, &wg, freed)
 			}
@@ -292,8 +304,8 @@ func (w *Worker) execute(base, jctx context.Context, r *inflight) {
 	o := Classify(ctx, work, err)
 	done := orig.Clone()
 	done.Payload, done.Meta, done.Result = work.Payload, work.Meta, work.Result
-	pause := 200 * time.Millisecond
-	for i := range 6 {
+	pause := finishRetryMin
+	for i := range finishTries {
 		ferr := w.src.Finish(base, w.cfg.ID, done, o)
 		if ferr == nil || errors.Is(ferr, ErrConflict) {
 			if ferr != nil {

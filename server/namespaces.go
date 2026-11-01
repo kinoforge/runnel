@@ -11,6 +11,10 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	maxKeysPerNamespace = 100
+)
+
 type namespaceView struct {
 	Name      string              `json:"name"`
 	HasSecret bool                `json:"has_webhook_secret"`
@@ -157,8 +161,8 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, _ principal) 
 	if err != nil {
 		return err
 	}
-	if len(existing) >= 100 {
-		return fmt.Errorf("%w: at most 100 keys per namespace", runnel.ErrInvalid)
+	if len(existing) >= maxKeysPerNamespace {
+		return fmt.Errorf("%w: at most %d keys per namespace", runnel.ErrInvalid, maxKeysPerNamespace)
 	}
 	token, key, err := runnel.NewAPIKey(ns, body.Name, body.Roles, body.ExpiresAt)
 	if err != nil {

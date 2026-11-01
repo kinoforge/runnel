@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+const (
+	keyPrefix      = "rnk_"
+	keyIDBytes     = 6
+	keySecretBytes = 32
+	maxKeyName     = 100
+)
+
 // HashSecret returns the hex SHA-256 of a key secret.
 func HashSecret(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
@@ -19,22 +26,22 @@ func HashSecret(secret string) string {
 // NewAPIKey makes a key for the namespace and returns its bearer token, which is
 // not stored, and the key to store.
 func NewAPIKey(ns, name string, roles []string, expires time.Time) (string, APIKey, error) {
-	id, secret := randomHex(6), randomHex(32)
+	id, secret := randomHex(keyIDBytes), randomHex(keySecretBytes)
 	k := APIKey{ID: id, Namespace: ns, Name: name, Hash: HashSecret(secret), Roles: slices.Clone(roles), CreatedAt: time.Now().UTC(), ExpiresAt: expires}
 	if err := k.Validate(); err != nil {
 		return "", APIKey{}, err
 	}
-	return "rnk_" + id + "_" + secret, k, nil
+	return keyPrefix + id + "_" + secret, k, nil
 }
 
 // ParseAPIKey splits a token of the form rnk_<id>_<secret>.
 func ParseAPIKey(token string) (id, secret string, ok bool) {
-	rest, found := strings.CutPrefix(token, "rnk_")
+	rest, found := strings.CutPrefix(token, keyPrefix)
 	if !found {
 		return "", "", false
 	}
 	id, secret, found = strings.Cut(rest, "_")
-	if !found || len(id) != 12 || len(secret) != 64 {
+	if !found || len(id) != 2*keyIDBytes || len(secret) != 2*keySecretBytes {
 		return "", "", false
 	}
 	return id, secret, true
@@ -86,7 +93,7 @@ func (k APIKey) Validate() error {
 	if !ValidNamespace(k.Namespace) {
 		return invalid("namespace %q must match %s", k.Namespace, namespacePattern)
 	}
-	if len(k.ID) != 12 || k.Hash == "" {
+	if len(k.ID) != 2*keyIDBytes || k.Hash == "" {
 		return invalid("key id and hash are required")
 	}
 	if len(k.Roles) == 0 {
@@ -97,7 +104,7 @@ func (k APIKey) Validate() error {
 			return invalid("unknown role %q", r)
 		}
 	}
-	if len(k.Name) > 100 {
+	if len(k.Name) > maxKeyName {
 		return invalid("key name too long")
 	}
 	return nil

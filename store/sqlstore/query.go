@@ -13,6 +13,8 @@ import (
 
 const jobCols = "id, ns, queue, kind, state, priority, tenant, pool, attempt, max_attempts, run_at, waiting_since, start_by, start_within, worker, lease_until, version, pending, unique_key, created_at, updated_at, started_at, finished_at, data"
 
+var jobColCount = strings.Count(jobCols, ",") + 1
+
 type scanner interface{ Scan(dest ...any) error }
 
 func scanJob(sc scanner) (*runnel.Job, error) {

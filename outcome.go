@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+const (
+	maxOutcomeDays = 30
+)
+
+const (
+	maxHandleLen    = 1024
+	maxOutcomeDelay = maxOutcomeDays * 24 * time.Hour
+)
+
 // OutcomeKind is what an attempt asks to happen next.
 type OutcomeKind string
 
@@ -110,14 +119,14 @@ func (o Outcome) Validate() error {
 	switch o.Kind {
 	case OutcomeDone, OutcomeRetry, OutcomeFail, OutcomeFallback, OutcomeBusy, OutcomeRelease:
 	case OutcomePending:
-		if len(o.Handle) > 1024 {
+		if len(o.Handle) > maxHandleLen {
 			return invalid("handle too long")
 		}
 	default:
 		return invalid("unknown outcome %q", o.Kind)
 	}
-	if o.Delay < 0 || o.Delay.D() > 30*24*time.Hour {
-		return invalid("delay must be between 0 and 30 days")
+	if o.Delay < 0 || o.Delay.D() > maxOutcomeDelay {
+		return invalid("delay must be between 0 and %d days", maxOutcomeDays)
 	}
 	if len(o.Result) > 0 && !json.Valid(o.Result) {
 		return invalid("result must be valid JSON")

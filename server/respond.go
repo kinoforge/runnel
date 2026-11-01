@@ -14,6 +14,10 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	statusClientClosed = 499
+)
+
 type problemBody struct {
 	Type   string `json:"type"`
 	Title  string `json:"title"`
@@ -47,7 +51,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, runnel.ErrConflict), errors.Is(err, runnel.ErrFinal), errors.Is(err, runnel.ErrNotFinal):
 		s.problem(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, context.Canceled):
-		s.problem(w, 499, "cancelled", "")
+		s.problem(w, statusClientClosed, "cancelled", "")
 	default:
 		s.log.Error("runnel: request failed", "err", err)
 		s.problem(w, http.StatusInternalServerError, "internal error", "")

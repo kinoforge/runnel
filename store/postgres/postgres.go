@@ -14,6 +14,15 @@ import (
 	"github.com/kinoforge/runnel/store/sqlstore"
 )
 
+const (
+	maxOpenConns    = 20
+	maxIdleConns    = 10
+	connMaxIdleTime = 5 * time.Minute
+	endedBuffer     = 256
+	listenRetryMin  = time.Second
+	listenRetryMax  = 30 * time.Second
+)
+
 // Store is a Postgres store. Besides the runnel.Store methods it wakes workers
 // and waiters through LISTEN/NOTIFY on one shared connection.
 type Store struct {
@@ -33,9 +42,9 @@ func Open(dsn string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(20)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 	return &Store{Store: sqlstore.New(db, sqlstore.Postgres()), dsn: dsn,
 		wakes: map[string][]chan struct{}{}, ends: map[string][]chan string{}}, nil
 }
@@ -49,7 +58,7 @@ func (s *Store) Subscribe(ctx context.Context, ns string) (<-chan struct{}, erro
 
 // Ended sends the id of each job in ns that reaches a final state.
 func (s *Store) Ended(ctx context.Context, ns string) (<-chan string, error) {
-	ch := make(chan string, 256)
+	ch := make(chan string, endedBuffer)
 	s.register(ctx, func() { s.ends[ns] = append(s.ends[ns], ch) }, func() { s.ends[ns] = without(s.ends[ns], ch) })
 	return ch, nil
 }
@@ -93,7 +102,7 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) loop(ctx context.Context) {
-	pause := time.Second
+	pause := listenRetryMin
 	for {
 		err := s.listenOnce(ctx)
 		if ctx.Err() != nil {
@@ -105,7 +114,7 @@ func (s *Store) loop(ctx context.Context) {
 				return
 			case <-time.After(pause):
 			}
-			pause = min(pause*2, 30*time.Second)
+			pause = min(pause*2, listenRetryMax)
 			continue
 		}
 		pause = time.Second

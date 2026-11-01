@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+const (
+	maxPruneRounds = 20
+)
+
 func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error {
 	if err := m.pruneEvents(ctx, ns, now); err != nil {
 		return err
@@ -28,7 +32,7 @@ func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error 
 			if keep <= 0 || st.Counts[state] == 0 {
 				continue
 			}
-			for range 20 {
+			for range maxPruneRounds {
 				n, err := m.store.Prune(ctx, ns, PruneRequest{Queue: st.Queue, States: []State{state}, Before: now.Add(-keep),
 					Limit: m.cfg.Batch, Archive: m.cfg.Archive})
 				if err != nil {
@@ -71,7 +75,7 @@ func (m *Maintainer) pruneEvents(ctx context.Context, ns string, now time.Time) 
 
 func (m *Maintainer) drainEvents(ctx context.Context, ns string, req EventPruneRequest) (int, error) {
 	total := 0
-	for range 20 {
+	for range maxPruneRounds {
 		n, err := m.store.PruneEvents(ctx, ns, req)
 		total += n
 		if err != nil || n < req.Limit {

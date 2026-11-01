@@ -11,6 +11,12 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+const (
+	defaultMaintainInterval = time.Second
+	defaultPruneEvery       = time.Minute
+	defaultMaintainBatch    = 500
+)
+
 // Retention says how long finished jobs and events are kept. Undelivered bounds
 // how long events wait for webhook delivery before they are dropped and logged.
 type Retention struct {
@@ -63,10 +69,10 @@ type Maintainer struct {
 // NewMaintainer returns a maintainer for s.
 func NewMaintainer(s Store, cfg MaintainerConfig) *Maintainer {
 	if cfg.Interval <= 0 {
-		cfg.Interval = time.Second
+		cfg.Interval = defaultMaintainInterval
 	}
 	if cfg.PruneEvery <= 0 {
-		cfg.PruneEvery = time.Minute
+		cfg.PruneEvery = defaultPruneEvery
 	}
 	if cfg.Retention.Completed == 0 && cfg.Retention.Cancelled == 0 && cfg.Retention.Dead == 0 {
 		cfg.Retention.Completed, cfg.Retention.Cancelled, cfg.Retention.Dead = DefaultRetention.Completed, DefaultRetention.Cancelled, DefaultRetention.Dead
@@ -79,7 +85,7 @@ func NewMaintainer(s Store, cfg MaintainerConfig) *Maintainer {
 	}
 	cfg.Retention.Undelivered = max(cfg.Retention.Undelivered, cfg.Retention.Events)
 	if cfg.Batch <= 0 {
-		cfg.Batch = 500
+		cfg.Batch = defaultMaintainBatch
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()

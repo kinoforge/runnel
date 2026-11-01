@@ -10,6 +10,11 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	scanFactor = 4
+	minScan    = 32
+)
+
 func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) ([]*runnel.Job, error) {
 	if req.Limit <= 0 || len(req.Queues) == 0 {
 		return nil, nil
@@ -71,7 +76,7 @@ func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) (
 			if len(queues) == 0 {
 				break
 			}
-			cands, err := t.scan(ctx, runnel.StateWaiting, queues, ex, max(need*4, 32))
+			cands, err := t.scan(ctx, runnel.StateWaiting, queues, ex, max(need*scanFactor, minScan))
 			if err != nil {
 				return err
 			}

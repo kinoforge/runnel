@@ -8,6 +8,13 @@ import (
 	"strings"
 )
 
+const (
+	maxPriority      = 1000
+	maxAttemptsLimit = 1000
+	maxMetaKey       = 64
+	maxMetaValue     = 512
+)
+
 var (
 	namePattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 	namespacePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
@@ -58,11 +65,11 @@ func (j *Job) validate(l Limits) error {
 	if len(j.Payload) > 0 && !json.Valid(j.Payload) {
 		return invalid("payload must be valid JSON")
 	}
-	if j.Priority < -1000 || j.Priority > 1000 {
-		return invalid("priority must be between -1000 and 1000")
+	if j.Priority < -maxPriority || j.Priority > maxPriority {
+		return invalid("priority must be between %d and %d", -maxPriority, maxPriority)
 	}
-	if j.MaxAttempts < 1 || j.MaxAttempts > 1000 {
-		return invalid("max_attempts must be between 1 and 1000")
+	if j.MaxAttempts < 1 || j.MaxAttempts > maxAttemptsLimit {
+		return invalid("max_attempts must be between 1 and %d", maxAttemptsLimit)
 	}
 	if j.Timeout < 0 || j.StartWithin < 0 || j.UniqueFor < 0 {
 		return invalid("durations must not be negative")
@@ -113,8 +120,8 @@ func ValidMeta(meta map[string]string, l Limits) error {
 		return invalid("at most %d meta entries", l.MaxMeta)
 	}
 	for k, v := range meta {
-		if len(k) == 0 || len(k) > 64 || len(v) > 512 {
-			return invalid("meta keys must be 1-64 bytes and values at most 512")
+		if len(k) == 0 || len(k) > maxMetaKey || len(v) > maxMetaValue {
+			return invalid("meta keys must be 1-%d bytes and values at most %d", maxMetaKey, maxMetaValue)
 		}
 	}
 	return nil

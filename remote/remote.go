@@ -16,6 +16,15 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	httpTimeout     = 60 * time.Second
+	maxErrorBody    = 64 << 10
+	resultWait      = 30 * time.Second
+	quickPoll       = 500 * time.Millisecond
+	workerPoll      = 50 * time.Millisecond
+	workerClaimWait = 10 * time.Second
+)
+
 // Client talks to a Runnel server for one namespace.
 type Client struct {
 	base string
@@ -27,7 +36,7 @@ type Client struct {
 // New returns a client for the server at baseURL, authenticating with an API
 // key.
 func New(baseURL, key, namespace string) *Client {
-	return &Client{base: strings.TrimRight(baseURL, "/"), key: key, ns: namespace, http: &http.Client{Timeout: 60 * time.Second}}
+	return &Client{base: strings.TrimRight(baseURL, "/"), key: key, ns: namespace, http: &http.Client{Timeout: httpTimeout}}
 }
 
 // WithHTTPClient replaces the HTTP client. Its timeout must exceed the long-poll
@@ -100,7 +109,7 @@ func (c *Client) send(ctx context.Context, method, path string, in, out any, hea
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		e := &APIError{Status: resp.StatusCode}
-		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(e)
+		_ = json.NewDecoder(io.LimitReader(resp.Body, maxErrorBody)).Decode(e)
 		e.Status = resp.StatusCode
 		return resp.StatusCode, e
 	}
@@ -169,7 +178,7 @@ func (c *Client) EnqueueAndWait(ctx context.Context, queue, kind string, payload
 		return nil, err
 	}
 	var raw json.RawMessage
-	status, err := c.send(ctx, http.MethodPost, c.path("/jobs"), request(j), &raw, waitHeader(ctx, 30*time.Second))
+	status, err := c.send(ctx, http.MethodPost, c.path("/jobs"), request(j), &raw, waitHeader(ctx, resultWait))
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +198,7 @@ func (c *Client) Wait(ctx context.Context, id string) (*runnel.Job, error) {
 	for {
 		began := time.Now()
 		var j runnel.Job
-		_, err := c.send(ctx, http.MethodGet, c.path("/jobs/"+url.PathEscape(id)), nil, &j, waitHeader(ctx, 30*time.Second))
+		_, err := c.send(ctx, http.MethodGet, c.path("/jobs/"+url.PathEscape(id)), nil, &j, waitHeader(ctx, resultWait))
 		if err != nil {
 			if last != nil && ctx.Err() != nil {
 				return last, ctx.Err()
@@ -200,7 +209,7 @@ func (c *Client) Wait(ctx context.Context, id string) (*runnel.Job, error) {
 			return &j, nil
 		}
 		last = &j
-		if quick := 500*time.Millisecond - time.Since(began); quick > 0 {
+		if quick := quickPoll - time.Since(began); quick > 0 {
 			t := time.NewTimer(quick)
 			select {
 			case <-ctx.Done():
@@ -307,7 +316,7 @@ func (s *source) Wake(context.Context) <-chan struct{} { return nil }
 // share the server's limits.
 func NewWorker(c *Client, cfg runnel.WorkerConfig) *runnel.Worker {
 	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = 50 * time.Millisecond
+		cfg.PollInterval = workerPoll
 	}
-	return runnel.NewSourceWorker(c.Source(10*time.Second), cfg)
+	return runnel.NewSourceWorker(c.Source(workerClaimWait), cfg)
 }

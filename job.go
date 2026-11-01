@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+const (
+	defaultBackoffBase   = time.Second
+	defaultBackoffMax    = 10 * time.Minute
+	defaultBackoffFactor = 2
+	defaultBackoffJitter = 0.2
+	maxErrorLen          = 4096
+)
+
 // State is where a job is in its life.
 type State string
 
@@ -104,16 +112,16 @@ func (b Backoff) IsZero() bool { return b == Backoff{} }
 func (b Backoff) Delay(attempt int) time.Duration {
 	base, maxd, factor, jitter := b.Base.D(), b.Max.D(), b.Factor, b.Jitter
 	if base <= 0 {
-		base = time.Second
+		base = defaultBackoffBase
 	}
 	if maxd <= 0 {
-		maxd = 10 * time.Minute
+		maxd = defaultBackoffMax
 	}
 	if factor < 1 {
-		factor = 2
+		factor = defaultBackoffFactor
 	}
 	if jitter == 0 {
-		jitter = 0.2
+		jitter = defaultBackoffJitter
 	}
 	if jitter < 0 || jitter > 1 {
 		jitter = 0
@@ -303,8 +311,8 @@ func (j *Job) Clone() *Job {
 }
 
 func (j *Job) addError(msg string, now time.Time) {
-	if len(msg) > 4096 {
-		msg = msg[:4096]
+	if len(msg) > maxErrorLen {
+		msg = msg[:maxErrorLen]
 	}
 	j.Errors = append(j.Errors, AttemptError{Attempt: j.Attempt, Queue: j.Queue, Kind: j.Kind, At: now, Error: msg})
 	if len(j.Errors) > maxErrors {

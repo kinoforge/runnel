@@ -9,6 +9,17 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	maxClaimQueues   = 64
+	maxClaimLimit    = 100
+	minLease         = 5 * time.Second
+	maxLease         = 10 * time.Minute
+	defaultLease     = 30 * time.Second
+	claimPollEvery   = 250 * time.Millisecond
+	maxExtendIDs     = 1000
+	maxDependencyIDs = 256
+)
+
 func (s *Server) claim(w http.ResponseWriter, r *http.Request, p principal) error {
 	var body struct {
 		Worker string          `json:"worker"`
@@ -24,18 +35,18 @@ func (s *Server) claim(w http.ResponseWriter, r *http.Request, p principal) erro
 	if err != nil {
 		return err
 	}
-	if len(body.Queues) == 0 || len(body.Queues) > 64 {
-		return fmt.Errorf("%w: claim 1 to 64 queues", runnel.ErrInvalid)
+	if len(body.Queues) == 0 || len(body.Queues) > maxClaimQueues {
+		return fmt.Errorf("%w: claim 1 to %d queues", runnel.ErrInvalid, maxClaimQueues)
 	}
 	for _, q := range body.Queues {
 		if !runnel.ValidName(q) {
 			return fmt.Errorf("%w: bad queue %q", runnel.ErrInvalid, q)
 		}
 	}
-	body.Limit = min(max(body.Limit, 1), 100)
-	lease := min(max(body.Lease.D(), 5*time.Second), 10*time.Minute)
+	body.Limit = min(max(body.Limit, 1), maxClaimLimit)
+	lease := clampLease(body.Lease.D())
 	if body.Lease == 0 {
-		lease = 30 * time.Second
+		lease = defaultLease
 	}
 	deadline := time.Now().Add(min(max(body.Wait.D(), 0), s.cfg.MaxClaimWait))
 	ns := r.PathValue("ns")
@@ -56,7 +67,7 @@ func (s *Server) claim(w http.ResponseWriter, r *http.Request, p principal) erro
 			writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 			return nil
 		}
-		t := time.NewTimer(min(250*time.Millisecond, time.Until(deadline)))
+		t := time.NewTimer(min(claimPollEvery, time.Until(deadline)))
 		select {
 		case <-r.Context().Done():
 			t.Stop()
@@ -81,15 +92,15 @@ func (s *Server) extend(w http.ResponseWriter, r *http.Request, p principal) err
 	if err != nil {
 		return err
 	}
-	if len(body.IDs) > 1000 {
-		return fmt.Errorf("%w: at most 1000 ids", runnel.ErrInvalid)
+	if len(body.IDs) > maxExtendIDs {
+		return fmt.Errorf("%w: at most %d ids", runnel.ErrInvalid, maxExtendIDs)
 	}
 	for _, id := range body.IDs {
 		if !runnel.ValidID(id) {
 			return fmt.Errorf("%w: bad id", runnel.ErrInvalid)
 		}
 	}
-	lease := min(max(body.Lease.D(), 5*time.Second), 10*time.Minute)
+	lease := clampLease(body.Lease.D())
 	lost, err := s.store.Extend(r.Context(), r.PathValue("ns"), worker, body.IDs, s.clock.Now().Add(lease))
 	if err != nil {
 		return err
@@ -154,8 +165,8 @@ func (s *Server) dependencies(w http.ResponseWriter, r *http.Request, _ principa
 	if err := decode(r, &body); err != nil {
 		return err
 	}
-	if len(body.IDs) > 256 {
-		return fmt.Errorf("%w: at most 256 ids", runnel.ErrInvalid)
+	if len(body.IDs) > maxDependencyIDs {
+		return fmt.Errorf("%w: at most %d ids", runnel.ErrInvalid, maxDependencyIDs)
 	}
 	jobs, err := s.store.Get(r.Context(), r.PathValue("ns"), body.IDs)
 	if err != nil {
@@ -167,3 +178,5 @@ func (s *Server) dependencies(w http.ResponseWriter, r *http.Request, _ principa
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 	return nil
 }
+
+func clampLease(d time.Duration) time.Duration { return min(max(d, minLease), maxLease) }

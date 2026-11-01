@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+const (
+	notifyBatchDelay = 2 * time.Millisecond
+	notifyTimeout    = 5 * time.Second
+)
+
 func (s *Store) notify(ns string, wake bool, ends []string) {
 	if s.d.Notify == nil || (!wake && len(ends) == 0) {
 		return
@@ -35,7 +40,7 @@ func (s *Store) notify(ns string, wake bool, ends []string) {
 func (s *Store) flushLoop(kick chan struct{}, stopped chan struct{}) {
 	defer close(stopped)
 	for range kick {
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(notifyBatchDelay)
 		s.flush()
 	}
 	s.flush()
@@ -53,7 +58,7 @@ func (s *Store) flush() {
 	for ns := range wakes {
 		list = append(list, ns)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()
 	_ = s.d.Notify(ctx, s.db, list, ends)
 }

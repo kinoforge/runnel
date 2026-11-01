@@ -14,6 +14,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const (
+	defaultMaxBody       = 4 << 20
+	defaultMaxClaimWait  = 30 * time.Second
+	defaultMaxResultWait = 60 * time.Second
+	defaultRetryAfter    = time.Second
+)
+
 //go:embed openapi.yaml
 var openAPI []byte
 
@@ -59,19 +66,19 @@ type Server struct {
 // New returns a server over store.
 func New(store runnel.Store, cfg Config) *Server {
 	if cfg.MaxBody <= 0 {
-		cfg.MaxBody = 4 << 20
+		cfg.MaxBody = defaultMaxBody
 	}
 	if cfg.Limits == (runnel.Limits{}) {
 		cfg.Limits = runnel.DefaultLimits
 	}
 	if cfg.MaxClaimWait <= 0 {
-		cfg.MaxClaimWait = 30 * time.Second
+		cfg.MaxClaimWait = defaultMaxClaimWait
 	}
 	if cfg.MaxResultWait <= 0 {
-		cfg.MaxResultWait = 60 * time.Second
+		cfg.MaxResultWait = defaultMaxResultWait
 	}
 	if cfg.RetryAfter <= 0 {
-		cfg.RetryAfter = time.Second
+		cfg.RetryAfter = defaultRetryAfter
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -108,7 +115,7 @@ func (s *Server) handle(pattern, role string, h handler) {
 	route := pattern
 	s.patterns = append(s.patterns, pattern)
 	s.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		rw := &statusWriter{ResponseWriter: w, code: 200}
+		rw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
 		defer func() { s.reqs.WithLabelValues(route, strconv.Itoa(rw.code)).Inc() }()
 		p, ok := s.authenticate(r)
 		if !ok {

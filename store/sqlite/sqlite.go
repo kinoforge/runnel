@@ -10,6 +10,10 @@ import (
 	"github.com/kinoforge/runnel/store/sqlstore"
 )
 
+const (
+	busyTimeout = "10000"
+)
+
 // Open opens or creates the SQLite file at path in WAL mode, or a private in-
 // memory database for "" and ":memory:". One process should own the file.
 func Open(path string) (*sqlstore.Store, error) {
@@ -23,7 +27,7 @@ func Open(path string) (*sqlstore.Store, error) {
 		sep = "&"
 	}
 	params := url.Values{}
-	params.Add("_pragma", "busy_timeout(10000)")
+	params.Add("_pragma", "busy_timeout("+busyTimeout+")")
 	params.Add("_pragma", "journal_mode(WAL)")
 	params.Add("_pragma", "synchronous(NORMAL)")
 	params.Add("_pragma", "foreign_keys(OFF)")

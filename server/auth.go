@@ -15,6 +15,12 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	maxTokenLen  = 512
+	keyCacheTTL  = 5 * time.Second
+	keyMissRetry = time.Second
+)
+
 type keyEntry struct {
 	ns  string
 	key runnel.APIKey
@@ -42,7 +48,7 @@ func (p principal) can(ns, role string) bool {
 
 func (s *Server) authenticate(r *http.Request) (principal, bool) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || token == "" || len(token) > 512 {
+	if !ok || token == "" || len(token) > maxTokenLen {
 		return principal{}, false
 	}
 	if s.hasRoot {
@@ -65,7 +71,7 @@ func (s *Server) authenticate(r *http.Request) (principal, bool) {
 func (s *Server) lookupKey(ctx context.Context, id string) (keyEntry, bool) {
 	s.mu.Lock()
 	e, ok := s.keys[id]
-	stale := time.Since(s.loaded) > 5*time.Second || (!ok && time.Since(s.loaded) > time.Second)
+	stale := time.Since(s.loaded) > keyCacheTTL || (!ok && time.Since(s.loaded) > keyMissRetry)
 	s.mu.Unlock()
 	if !stale {
 		return e, ok

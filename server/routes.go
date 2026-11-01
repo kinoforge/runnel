@@ -10,9 +10,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+const (
+	healthTimeout = 2 * time.Second
+)
+
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
 		defer cancel()
 		if _, err := s.store.Configs(ctx, "", runnel.ConfigNamespace); err != nil {
 			s.problem(w, http.StatusServiceUnavailable, "unavailable", "store unreachable")

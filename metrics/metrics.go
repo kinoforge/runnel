@@ -10,6 +10,11 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	statsTTL     = 5 * time.Second
+	statsTimeout = 5 * time.Second
+)
+
 // Observer counts attempts in Prometheus: runnel_jobs_started_total,
 // runnel_jobs_finished_total by outcome and runnel_job_duration_seconds.
 type Observer struct {
@@ -70,7 +75,7 @@ func (c *StatsCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
 func (c *StatsCollector) Collect(ch chan<- prometheus.Metric) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if time.Since(c.at) > 5*time.Second {
+	if time.Since(c.at) > statsTTL {
 		c.cached = c.load()
 		c.at = time.Now()
 	}
@@ -80,7 +85,7 @@ func (c *StatsCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (c *StatsCollector) load() []prometheus.Metric {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), statsTimeout)
 	defer cancel()
 	nss, err := c.namespaces(ctx)
 	if err != nil {

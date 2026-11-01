@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+const (
+	queueConfigTTL    = 5 * time.Second
+	defaultListLimit  = 50
+	maxListLimit      = 500
+	defaultEventLimit = 100
+)
+
 // DefaultMaxAttempts is the attempt cap of jobs whose queue and options set
 // none.
 const DefaultMaxAttempts = 5
@@ -53,7 +60,7 @@ func (c *Client) queueConfig(ctx context.Context, name string) (QueueConfig, err
 func (c *Client) queueConfigFrom(name string, load func() (map[string][]byte, error)) (QueueConfig, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.queues == nil || time.Since(c.loaded) > 5*time.Second {
+	if c.queues == nil || time.Since(c.loaded) > queueConfigTTL {
 		raw, err := load()
 		if err != nil {
 			return QueueConfig{}, err
@@ -180,9 +187,9 @@ func (c *Client) Get(ctx context.Context, id string) (*Job, error) {
 // List returns a page of jobs, newest first, and the cursor of the next page.
 func (c *Client) List(ctx context.Context, q Query) ([]*Job, string, error) {
 	if q.Limit <= 0 {
-		q.Limit = 50
+		q.Limit = defaultListLimit
 	}
-	q.Limit = min(q.Limit, 500)
+	q.Limit = min(q.Limit, maxListLimit)
 	if q.State != "" && !q.State.Valid() {
 		return nil, "", invalid("unknown state %q", q.State)
 	}
@@ -252,8 +259,8 @@ func (c *Client) Stats(ctx context.Context) ([]QueueStats, error) { return c.sto
 
 // Events returns up to limit final-state events after the sequence number after.
 func (c *Client) Events(ctx context.Context, after int64, limit int) ([]Event, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 100
+	if limit <= 0 || limit > maxBatch {
+		limit = defaultEventLimit
 	}
 	return c.store.Events(ctx, c.ns, after, limit)
 }

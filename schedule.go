@@ -10,6 +10,11 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+const (
+	maxCatchUp    = 1000
+	cronUniqueFor = 24 * time.Hour
+)
+
 // Schedule enqueues a job on a cron spec. Each firing is enqueued once, even
 // with many maintainers running.
 type Schedule struct {
@@ -97,7 +102,7 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 		if fire.IsZero() || fire.After(now) {
 			continue
 		}
-		for range 1000 {
+		for range maxCatchUp {
 			n := sp.Next(fire)
 			if n.IsZero() || n.After(now) {
 				break
@@ -113,7 +118,7 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 		}
 		j := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Tenant: s.Tenant, Pool: s.Pool,
 			MaxAttempts: s.MaxAttempts, Timeout: s.Timeout, Fallbacks: s.Fallbacks, Webhook: s.Webhook,
-			UniqueKey: "cron:" + name + ":" + strconv.FormatInt(fire.Unix(), 10), UniqueFor: Duration(24 * time.Hour)}
+			UniqueKey: "cron:" + name + ":" + strconv.FormatInt(fire.Unix(), 10), UniqueFor: Duration(cronUniqueFor)}
 		j.Meta = map[string]string{"schedule": name, "fire_at": fire.UTC().Format(time.RFC3339)}
 		maps.Copy(j.Meta, s.Meta)
 		if _, err := m.client(ns).EnqueueJobs(ctx, []*Job{j}); err != nil {

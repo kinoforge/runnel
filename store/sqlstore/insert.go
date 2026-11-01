@@ -276,7 +276,7 @@ func (s *Store) insertRow(ctx context.Context, tx *txn, j *runnel.Job) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, s.q("INSERT INTO rn_jobs ("+jobCols+") VALUES ("+placeholders(24)+")"),
+	_, err = tx.ExecContext(ctx, s.q("INSERT INTO rn_jobs ("+jobCols+") VALUES ("+placeholders(jobColCount)+")"),
 		j.ID, j.Namespace, j.Queue, j.Kind, string(j.State), j.Priority, j.Tenant, j.Pool, j.Attempt, j.MaxAttempts,
 		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartWindow().Milliseconds(),
 		j.Worker, runnel.Millis(j.LeaseUntil), j.Version, j.Pending, j.UniqueKey,

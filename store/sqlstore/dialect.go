@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+const (
+	pgMigrateLock    = "727366"
+	mysqlLockWait    = "60"
+	maxNotifyPayload = 7000
+)
+
 // Dialect holds what differs between SQL databases.
 type Dialect struct {
 	Name        string
@@ -53,10 +59,10 @@ func Postgres() Dialect {
 		LockRows: true, Upsert: conflictUpsert, Ignore: conflictIgnore,
 		NowQuery: "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT",
 		MigrateLock: func(ctx context.Context, c *sql.Conn) (func(), error) {
-			if _, err := c.ExecContext(ctx, "SELECT pg_advisory_lock(727366)"); err != nil {
+			if _, err := c.ExecContext(ctx, "SELECT pg_advisory_lock("+pgMigrateLock+")"); err != nil {
 				return nil, err
 			}
-			return func() { _, _ = c.ExecContext(context.Background(), "SELECT pg_advisory_unlock(727366)") }, nil
+			return func() { _, _ = c.ExecContext(context.Background(), "SELECT pg_advisory_unlock("+pgMigrateLock+")") }, nil
 		},
 		Notify:      postgresNotify,
 		LightCommit: "SET LOCAL synchronous_commit TO OFF",
@@ -87,7 +93,7 @@ func MySQL() Dialect {
 		},
 		MigrateLock: func(ctx context.Context, c *sql.Conn) (func(), error) {
 			var got sql.NullInt64
-			if err := c.QueryRowContext(ctx, "SELECT GET_LOCK('runnel_migrate', 60)").Scan(&got); err != nil {
+			if err := c.QueryRowContext(ctx, "SELECT GET_LOCK('runnel_migrate', "+mysqlLockWait+")").Scan(&got); err != nil {
 				return nil, err
 			}
 			if got.Int64 != 1 {
@@ -122,7 +128,7 @@ func postgresNotify(ctx context.Context, db *sql.DB, wakes []string, ends map[st
 	for ns, ids := range ends {
 		var b strings.Builder
 		for _, id := range ids {
-			if b.Len() > 0 && b.Len()+len(id) > 7000 {
+			if b.Len() > 0 && b.Len()+len(id) > maxNotifyPayload {
 				channels, payloads = append(channels, "runnel_end"), append(payloads, ns+"|"+b.String())
 				b.Reset()
 			}

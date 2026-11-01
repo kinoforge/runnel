@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+const (
+	maxWebhookSecret = 256
+)
+
 // Namespace is one isolated queue system, usually one per service. WebhookSecret
 // signs its webhooks.
 type Namespace struct {
@@ -18,7 +22,7 @@ func (n Namespace) Validate() error {
 	if !ValidNamespace(n.Name) {
 		return invalid("namespace %q must match %s", n.Name, namespacePattern)
 	}
-	if len(n.WebhookSecret) > 256 {
+	if len(n.WebhookSecret) > maxWebhookSecret {
 		return invalid("webhook secret too long")
 	}
 	return nil

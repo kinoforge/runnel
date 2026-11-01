@@ -9,6 +9,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	endedBuffer = 256
+)
+
 const defaultPrefix = "rn"
 
 // Store keeps jobs in Redis, Valkey or Dragonfly. Every operation is one Lua
@@ -80,7 +84,7 @@ func (s *Store) Subscribe(ctx context.Context, ns string) (<-chan struct{}, erro
 
 // Ended sends the id of each job in ns that reaches a final state.
 func (s *Store) Ended(ctx context.Context, ns string) (<-chan string, error) {
-	ch := make(chan string, 256)
+	ch := make(chan string, endedBuffer)
 	return ch, s.listen(ctx, s.p(ns)+"end", func(id string) {
 		select {
 		case ch <- id:

@@ -13,6 +13,11 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	maxDelayDays   = 365
+	maxEnqueueJobs = 1000
+)
+
 // JobRequest is the JSON body that enqueues a job.
 type JobRequest struct {
 	Queue       string            `json:"queue"`
@@ -41,8 +46,8 @@ func (s *Server) toJob(req JobRequest) (*runnel.Job, error) {
 			return nil, err
 		}
 	}
-	if req.Delay < 0 || req.Delay.D() > 365*24*time.Hour {
-		return nil, fmt.Errorf("%w: delay must be between 0 and 365 days", runnel.ErrInvalid)
+	if req.Delay < 0 || req.Delay.D() > maxDelayDays*24*time.Hour {
+		return nil, fmt.Errorf("%w: delay must be between 0 and %d days", runnel.ErrInvalid, maxDelayDays)
 	}
 	if req.Queue == runnel.WebhookQueue || req.Kind == runnel.WebhookKind {
 		return nil, fmt.Errorf("%w: %s is reserved", runnel.ErrInvalid, runnel.WebhookQueue)
@@ -94,8 +99,8 @@ func (s *Server) enqueue(w http.ResponseWriter, r *http.Request, _ principal) er
 		}
 		batch.Jobs = []JobRequest{one}
 	}
-	if len(batch.Jobs) == 0 || len(batch.Jobs) > 1000 {
-		return fmt.Errorf("%w: send 1 to 1000 jobs", runnel.ErrInvalid)
+	if len(batch.Jobs) == 0 || len(batch.Jobs) > maxEnqueueJobs {
+		return fmt.Errorf("%w: send 1 to %d jobs", runnel.ErrInvalid, maxEnqueueJobs)
 	}
 	jobs := make([]*runnel.Job, len(batch.Jobs))
 	for i, req := range batch.Jobs {

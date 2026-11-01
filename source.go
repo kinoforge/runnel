@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	finishBatch   = 500
+	finishTimeout = 30 * time.Second
+)
+
 // Source is where a worker gets jobs: a store directly, or a server through the
 // remote package.
 type Source interface {
@@ -71,7 +76,7 @@ func (s *storeSource) Finish(ctx context.Context, worker string, j *Job, o Outco
 func (s *storeSource) finisher() {
 	for {
 		s.mu.Lock()
-		batch := s.pending[:min(len(s.pending), 500)]
+		batch := s.pending[:min(len(s.pending), finishBatch)]
 		s.pending = s.pending[len(batch):]
 		if len(batch) == 0 {
 			s.running = false
@@ -92,7 +97,7 @@ func (s *storeSource) apply(batch []finishing) error {
 	for i, f := range batch {
 		changes[i] = f.change
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), finishTimeout)
 	defer cancel()
 	ok, err := s.store.Apply(ctx, s.ns, changes, s.clock.Now())
 	if err != nil && len(batch) > 1 {

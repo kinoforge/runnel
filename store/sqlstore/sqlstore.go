@@ -11,6 +11,11 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
+const (
+	configTTL    = time.Second
+	retryBackoff = 5 * time.Millisecond
+)
+
 // Store keeps jobs in a SQL database, in the rn_ tables its migrations create.
 // Claims of queues without limits take rows with SKIP LOCKED; claims under
 // limits serialize per namespace so counts stay exact.
@@ -58,7 +63,7 @@ func (s *Store) configs(ctx context.Context, q querier, ns string) (*nsConfig, e
 	s.mu.Lock()
 	c := s.cfgs[ns]
 	s.mu.Unlock()
-	if c != nil && time.Since(c.at) < time.Second {
+	if c != nil && time.Since(c.at) < configTTL {
 		return c, nil
 	}
 	queues, err := s.queueConfigs(ctx, q, ns)
@@ -161,7 +166,7 @@ func (s *Store) tx(ctx context.Context, ns string, lock bool, fn func(tx *txn) e
 	var err error
 	for try := range 4 {
 		if try > 0 {
-			t := time.NewTimer(time.Duration(try*try) * 5 * time.Millisecond)
+			t := time.NewTimer(time.Duration(try*try) * retryBackoff)
 			select {
 			case <-ctx.Done():
 				t.Stop()

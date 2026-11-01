@@ -54,8 +54,8 @@ func (q QueueConfig) Validate() error {
 	if q.Rate < 0 || q.TenantRate < 0 || q.Rate > 1e6 || q.TenantRate > 1e6 {
 		return invalid("rates must be between 0 and 1e6 per second")
 	}
-	if q.MaxAttempts < 0 || q.MaxAttempts > 1000 {
-		return invalid("max_attempts must be between 0 and 1000")
+	if q.MaxAttempts < 0 || q.MaxAttempts > maxAttemptsLimit {
+		return invalid("max_attempts must be between 0 and %d", maxAttemptsLimit)
 	}
 	if q.Timeout < 0 || q.StartWithin < 0 || q.Retention < 0 || q.DeadRetention < 0 {
 		return invalid("durations must not be negative")

@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+const (
+	hubIdleTimeout = time.Minute
+	waitPollMin    = 50 * time.Millisecond
+	waitPollMax    = time.Second
+)
+
 type endHub struct {
 	src EndWatcher
 	ns  string
@@ -50,7 +56,7 @@ func (h *endHub) watch(id string) (<-chan struct{}, bool, func()) {
 			delete(h.subs, id)
 		}
 		if h.n--; h.n == 0 && h.stop != nil {
-			h.idle = time.AfterFunc(time.Minute, h.shutdown)
+			h.idle = time.AfterFunc(hubIdleTimeout, h.shutdown)
 		}
 	}
 }
@@ -107,7 +113,7 @@ func (c *Client) Wait(ctx context.Context, id string) (*Job, error) {
 		signal, live, done = h.watch(id)
 		defer done()
 	}
-	pause := 50 * time.Millisecond
+	pause := waitPollMin
 	if live {
 		pause = time.Second
 	}
@@ -134,7 +140,7 @@ func (c *Client) Wait(ctx context.Context, id string) (*Job, error) {
 		}
 		t.Stop()
 		if !live {
-			pause = min(pause*2, time.Second)
+			pause = min(pause*2, waitPollMax)
 		}
 	}
 }

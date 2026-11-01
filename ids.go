@@ -10,12 +10,18 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+const (
+	uuidLen       = 36
+	maxHostLen    = 64
+	workerIDBytes = 3
+)
+
 // NewID returns a new job id: a time-ordered UUID v7.
 func NewID() string { return uuid.Must(uuid.NewV7()).String() }
 
 // ValidID reports whether s is a UUID in its canonical form.
 func ValidID(s string) bool {
-	if len(s) != 36 {
+	if len(s) != uuidLen {
 		return false
 	}
 	_, err := uuid.Parse(s)
@@ -33,10 +39,10 @@ func defaultWorkerID() string {
 	if host == "" {
 		host = "worker"
 	}
-	if len(host) > 64 {
-		host = host[:64]
+	if len(host) > maxHostLen {
+		host = host[:maxHostLen]
 	}
-	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), randomHex(3))
+	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), randomHex(workerIDBytes))
 }
 
 var specParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
