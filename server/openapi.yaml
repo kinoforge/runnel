@@ -1,0 +1,943 @@
+openapi: 3.1.0
+info:
+  title: Runnel API
+  version: 0.0.1
+  summary: Job queues for every service, over HTTP.
+  description: |
+    Producers enqueue jobs, workers claim them under a lease, heartbeat and
+    finish them. Every namespace is an isolated queue system with its own keys.
+
+    Authentication is a bearer token: the server's admin token for the
+    namespace and key routes, or an API key (`rnk_<id>_<secret>`) whose roles
+    allow the call. Errors are RFC 9457 problem documents.
+
+    Waiting for a result uses RFC 7240: send `Prefer: wait=N` (seconds) to
+    enqueue a job or read one and the server holds the request until the job
+    finishes or N passes.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://localhost:8700
+security:
+  - bearer: []
+tags:
+  - name: admin
+    description: Namespaces and keys. Admin token only.
+  - name: jobs
+    description: Enqueue, read, cancel and retry jobs.
+  - name: workers
+    description: The lease protocol remote workers speak.
+  - name: config
+    description: Queues, pools and schedules of a namespace.
+  - name: ops
+    description: Health, metrics and this document.
+paths:
+  /healthz:
+    get:
+      tags: [ops]
+      summary: Liveness and store reachability
+      security: []
+      responses:
+        "200":
+          description: The store answers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, const: ok}
+        "503": {$ref: "#/components/responses/Problem"}
+  /metrics:
+    get:
+      tags: [ops]
+      summary: Prometheus metrics
+      security: []
+      responses:
+        "200":
+          description: Metrics in the Prometheus text format.
+          content:
+            text/plain: {}
+  /openapi.yaml:
+    get:
+      tags: [ops]
+      summary: This document
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/yaml: {}
+
+  /v1/namespaces:
+    get:
+      tags: [admin]
+      summary: List namespaces
+      responses:
+        "200":
+          description: Every namespace with its keys (never their secrets).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Namespace"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/namespaces/{name}:
+    parameters:
+      - $ref: "#/components/parameters/NamespaceName"
+    put:
+      tags: [admin]
+      summary: Create a namespace or set its webhook secret
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                webhook_secret: {type: string, maxLength: 256}
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Namespace"}
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Namespace"}
+        default: {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [admin]
+      summary: Read a namespace with its keys and queue counts
+      responses:
+        "200":
+          description: The namespace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Namespace"}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [admin]
+      summary: Delete a namespace and revoke its keys
+      description: Jobs stay in the store until they are pruned.
+      responses:
+        "204": {description: Deleted.}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/namespaces/{name}/keys:
+    parameters:
+      - $ref: "#/components/parameters/NamespaceName"
+    post:
+      tags: [admin]
+      summary: Create an API key
+      description: The token is returned once. Only its SHA-256 hash is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roles]
+              properties:
+                name: {type: string, maxLength: 100}
+                roles:
+                  type: array
+                  minItems: 1
+                  items: {$ref: "#/components/schemas/Role"}
+                expires_at: {type: string, format: date-time}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string}
+                  key: {type: string, description: "The bearer token, shown only here."}
+                  roles:
+                    type: array
+                    items: {$ref: "#/components/schemas/Role"}
+                  expires_at: {type: string, format: date-time}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/namespaces/{name}/keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/NamespaceName"
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      tags: [admin]
+      summary: Revoke an API key
+      responses:
+        "204": {description: Revoked.}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /v1/ns/{ns}/jobs:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+    post:
+      tags: [jobs]
+      summary: Enqueue one job or a batch
+      description: |
+        One job answers 201 with its id, or 200 when a unique key matched a job
+        already held. With `Prefer: wait=N` a single job answers 200 with the
+        finished job, or 202 with its id when N passed first; `Location` names
+        the job either way. A batch (`{"jobs": [...]}`, up to 1000) answers 200
+        with one result per job and ignores `Prefer`.
+      parameters:
+        - $ref: "#/components/parameters/Prefer"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/JobRequest"
+                - type: object
+                  additionalProperties: false
+                  required: [jobs]
+                  properties:
+                    jobs:
+                      type: array
+                      minItems: 1
+                      maxItems: 1000
+                      items: {$ref: "#/components/schemas/JobRequest"}
+      responses:
+        "200":
+          description: A duplicate, the finished job when waiting, or batch results.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+            Preference-Applied: {$ref: "#/components/headers/PreferenceApplied"}
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Inserted"
+                  - $ref: "#/components/schemas/Job"
+                  - type: object
+                    properties:
+                      results:
+                        type: array
+                        items: {$ref: "#/components/schemas/Inserted"}
+        "201":
+          description: Enqueued.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Inserted"}
+        "202":
+          description: Enqueued and still running when the wait ended.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+            Retry-After: {$ref: "#/components/headers/RetryAfter"}
+            Preference-Applied: {$ref: "#/components/headers/PreferenceApplied"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Inserted"}
+        "429": {$ref: "#/components/responses/Full"}
+        default: {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [jobs]
+      summary: List jobs, newest first
+      parameters:
+        - {name: queue, in: query, schema: {type: string}}
+        - {name: kind, in: query, schema: {type: string}}
+        - {name: tenant, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {$ref: "#/components/schemas/State"}}
+        - {name: cursor, in: query, schema: {type: string}, description: "The `next` value of the previous page."}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 50}}
+      responses:
+        "200":
+          description: A page of jobs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Job"}
+                  next: {type: string}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/flows:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+    post:
+      tags: [jobs]
+      summary: Enqueue a workflow of dependent jobs
+      description: Steps name the steps they wait for. The flow is accepted whole or not at all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [steps]
+              properties:
+                steps:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    allOf:
+                      - $ref: "#/components/schemas/JobRequest"
+                      - type: object
+                        required: [name]
+                        properties:
+                          name: {type: string}
+                          after:
+                            type: array
+                            items: {type: string}
+      responses:
+        "200":
+          description: The id of each step.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  steps:
+                    type: object
+                    additionalProperties: {$ref: "#/components/schemas/Inserted"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/jobs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/JobID"
+    get:
+      tags: [jobs]
+      summary: Read a job, optionally waiting for it to finish
+      description: "With `Prefer: wait=N` the answer comes as soon as the job is final, or after N seconds with the job as it stands."
+      parameters:
+        - $ref: "#/components/parameters/Prefer"
+      responses:
+        "200":
+          description: The job.
+          headers:
+            Preference-Applied: {$ref: "#/components/headers/PreferenceApplied"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Job"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/jobs/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/JobID"
+    post:
+      tags: [jobs]
+      summary: Cancel a job that has not finished
+      description: A running job is told through its lease; its jobs downstream are cancelled.
+      responses:
+        "200":
+          description: The cancelled job.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Job"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/jobs/{id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/JobID"
+    post:
+      tags: [jobs]
+      summary: Run a dead or cancelled job again from attempt one
+      responses:
+        "200":
+          description: The job, waiting again.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Job"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/stats:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+    get:
+      tags: [jobs]
+      summary: Job counts per queue and state
+      responses:
+        "200":
+          description: Counts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queues:
+                    type: array
+                    items: {$ref: "#/components/schemas/QueueStats"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/events:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+    get:
+      tags: [jobs]
+      summary: Jobs that reached a final state, in order
+      parameters:
+        - {name: after, in: query, schema: {type: integer, format: int64}, description: "Return events after this sequence number."}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
+      responses:
+        "200":
+          description: Events.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Event"}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /v1/ns/{ns}/claim:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+    post:
+      tags: [workers]
+      summary: Claim jobs under a lease, long-polling until some are ready
+      description: |
+        Returns as soon as at least one job is claimed or `wait` passes. The
+        worker id is scoped to the calling key, so two keys cannot act as the
+        same worker.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [worker, queues]
+              properties:
+                worker: {type: string, pattern: "^[A-Za-z0-9._:-]{1,100}$"}
+                queues:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  items: {type: string}
+                limit: {type: integer, minimum: 1, maximum: 100, default: 1}
+                lease: {$ref: "#/components/schemas/Duration"}
+                wait: {$ref: "#/components/schemas/Duration"}
+      responses:
+        "200":
+          description: Claimed jobs, possibly none.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: {$ref: "#/components/schemas/Job"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/extend:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+    post:
+      tags: [workers]
+      summary: Heartbeat leases
+      description: Ids the worker no longer holds come back as `lost`; stop working on them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [worker, ids]
+              properties:
+                worker: {type: string}
+                ids:
+                  type: array
+                  maxItems: 1000
+                  items: {type: string}
+                lease: {$ref: "#/components/schemas/Duration"}
+      responses:
+        "200":
+          description: Leases extended.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lost:
+                    type: array
+                    items: {type: string}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/jobs/{id}/finish:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/JobID"
+    post:
+      tags: [workers]
+      summary: Report the outcome of an attempt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [worker, version, outcome]
+              properties:
+                worker: {type: string}
+                version: {type: integer, format: int64, description: "The version the claim returned."}
+                outcome: {$ref: "#/components/schemas/Outcome"}
+                payload: {description: "Replaces the payload, for handlers that keep progress in it."}
+                meta:
+                  type: object
+                  additionalProperties: {type: string}
+      responses:
+        "200":
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+        "409": {$ref: "#/components/responses/Problem"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/dependencies:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+    post:
+      tags: [workers]
+      summary: Read the jobs a job depends on, with their results
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  maxItems: 256
+                  items: {type: string}
+      responses:
+        "200":
+          description: The jobs found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: {$ref: "#/components/schemas/Job"}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /v1/ns/{ns}/queues:
+    parameters: [{$ref: "#/components/parameters/Namespace"}]
+    get:
+      tags: [config]
+      summary: List queue settings
+      responses:
+        "200": {$ref: "#/components/responses/QueueList"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/queues/{name}:
+    parameters: [{$ref: "#/components/parameters/Namespace"}, {$ref: "#/components/parameters/ConfigName"}]
+    get:
+      tags: [config]
+      summary: Read a queue's settings
+      responses:
+        "200": {description: Settings., content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    put:
+      tags: [config]
+      summary: Set a queue's settings
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
+      responses:
+        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [config]
+      summary: Remove a queue's settings
+      responses:
+        "204": {description: Removed.}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/pools:
+    parameters: [{$ref: "#/components/parameters/Namespace"}]
+    get:
+      tags: [config]
+      summary: List pools
+      responses:
+        "200": {$ref: "#/components/responses/PoolList"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/pools/{name}:
+    parameters: [{$ref: "#/components/parameters/Namespace"}, {$ref: "#/components/parameters/ConfigName"}]
+    get:
+      tags: [config]
+      summary: Read a pool
+      responses:
+        "200": {description: The pool., content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    put:
+      tags: [config]
+      summary: Set a pool
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+      responses:
+        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [config]
+      summary: Remove a pool
+      responses:
+        "204": {description: Removed.}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/schedules:
+    parameters: [{$ref: "#/components/parameters/Namespace"}]
+    get:
+      tags: [config]
+      summary: List schedules
+      responses:
+        "200": {$ref: "#/components/responses/ScheduleList"}
+        default: {$ref: "#/components/responses/Problem"}
+  /v1/ns/{ns}/schedules/{name}:
+    parameters: [{$ref: "#/components/parameters/Namespace"}, {$ref: "#/components/parameters/ConfigName"}]
+    get:
+      tags: [config]
+      summary: Read a schedule
+      responses:
+        "200": {description: The schedule., content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    put:
+      tags: [config]
+      summary: Set a schedule
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+      responses:
+        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [config]
+      summary: Remove a schedule
+      responses:
+        "204": {description: Removed.}
+        default: {$ref: "#/components/responses/Problem"}
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    Namespace:
+      name: ns
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"}
+    NamespaceName:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"}
+    JobID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ConfigName:
+      name: name
+      in: path
+      required: true
+      schema: {$ref: "#/components/schemas/Name"}
+    Prefer:
+      name: Prefer
+      in: header
+      required: false
+      description: "`wait=N` holds the request up to N seconds (server maximum 60 by default) for the job to finish."
+      schema: {type: string, examples: ["wait=30"]}
+  headers:
+    Location:
+      description: Path of the job.
+      schema: {type: string}
+    RetryAfter:
+      description: Seconds to wait before asking again.
+      schema: {type: integer}
+    PreferenceApplied:
+      description: The wait the server honoured.
+      schema: {type: string}
+  responses:
+    Problem:
+      description: An RFC 9457 problem.
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Full:
+      description: The queue or the tenant has too many waiting jobs. Retry after the given seconds.
+      headers:
+        Retry-After: {$ref: "#/components/headers/RetryAfter"}
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    QueueList:
+      description: Queue settings by name.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              items: {type: object, additionalProperties: {$ref: "#/components/schemas/QueueConfig"}}
+    PoolList:
+      description: Pools by name.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              items: {type: object, additionalProperties: {$ref: "#/components/schemas/PoolConfig"}}
+    ScheduleList:
+      description: Schedules by name.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              items: {type: object, additionalProperties: {$ref: "#/components/schemas/Schedule"}}
+  schemas:
+    Name:
+      type: string
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    Duration:
+      description: 'A Go duration such as "30s" or "5m", or a number of seconds.'
+      oneOf:
+        - {type: string, examples: ["30s"]}
+        - {type: number}
+    Role:
+      type: string
+      enum: [admin, producer, worker, reader]
+    State:
+      type: string
+      enum: [blocked, waiting, running, polling, completed, dead, cancelled]
+    Problem:
+      type: object
+      properties:
+        type: {type: string}
+        title: {type: string, examples: ["queue full"]}
+        status: {type: integer}
+        detail: {type: string}
+    Target:
+      type: object
+      description: Where a job goes next when it falls back. Empty fields keep the current value.
+      properties:
+        queue: {$ref: "#/components/schemas/Name"}
+        kind: {$ref: "#/components/schemas/Name"}
+        pool: {$ref: "#/components/schemas/Name"}
+    Backoff:
+      type: object
+      properties:
+        base: {$ref: "#/components/schemas/Duration"}
+        max: {$ref: "#/components/schemas/Duration"}
+        factor: {type: number, minimum: 1}
+        jitter: {type: number, minimum: 0, maximum: 1}
+    JobRequest:
+      type: object
+      additionalProperties: false
+      required: [queue, kind]
+      properties:
+        queue: {$ref: "#/components/schemas/Name"}
+        kind: {$ref: "#/components/schemas/Name"}
+        payload: {description: Any JSON value, up to 1 MiB.}
+        priority: {type: integer, minimum: -1000, maximum: 1000}
+        tenant: {type: string, description: "Who the job is for; tenant limits apply per value."}
+        pool: {$ref: "#/components/schemas/Name"}
+        run_at: {type: string, format: date-time}
+        delay: {$ref: "#/components/schemas/Duration"}
+        max_attempts: {type: integer, minimum: 1, maximum: 1000}
+        unique_key: {type: string, maxLength: 255}
+        unique_for: {$ref: "#/components/schemas/Duration"}
+        start_within: {$ref: "#/components/schemas/Duration"}
+        timeout: {$ref: "#/components/schemas/Duration"}
+        backoff: {$ref: "#/components/schemas/Backoff"}
+        fallbacks:
+          type: array
+          maxItems: 16
+          items: {$ref: "#/components/schemas/Target"}
+        depends_on:
+          type: array
+          maxItems: 256
+          items: {type: string, format: uuid}
+        webhook: {type: string, format: uri}
+        meta:
+          type: object
+          maxProperties: 32
+          additionalProperties: {type: string, maxLength: 512}
+    Inserted:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        duplicate: {type: boolean}
+        error: {type: string}
+    AttemptError:
+      type: object
+      properties:
+        attempt: {type: integer}
+        queue: {type: string}
+        kind: {type: string}
+        at: {type: string, format: date-time}
+        error: {type: string}
+    Job:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        namespace: {type: string}
+        queue: {type: string}
+        kind: {type: string}
+        payload: {}
+        priority: {type: integer}
+        tenant: {type: string}
+        pool: {type: string}
+        state: {$ref: "#/components/schemas/State"}
+        attempt: {type: integer}
+        max_attempts: {type: integer}
+        run_at: {type: string, format: date-time}
+        waiting_since: {type: string, format: date-time}
+        start_within: {$ref: "#/components/schemas/Duration"}
+        start_by: {type: string, format: date-time}
+        timeout: {$ref: "#/components/schemas/Duration"}
+        backoff: {$ref: "#/components/schemas/Backoff"}
+        worker: {type: string}
+        lease_until: {type: string, format: date-time}
+        version: {type: integer, format: int64}
+        handle: {type: string, description: "Set while the job polls an outside task."}
+        fallbacks:
+          type: array
+          items: {$ref: "#/components/schemas/Target"}
+        fallback: {type: integer, description: "How many fallbacks were used."}
+        unique_key: {type: string}
+        unique_for: {$ref: "#/components/schemas/Duration"}
+        depends_on:
+          type: array
+          items: {type: string}
+        pending: {type: integer, description: "Dependencies not yet completed."}
+        webhook: {type: string}
+        meta:
+          type: object
+          additionalProperties: {type: string}
+        result: {}
+        errors:
+          type: array
+          items: {$ref: "#/components/schemas/AttemptError"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+    Outcome:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [done, retry, fail, fallback, busy, pending, release]
+          description: |
+            done: finished. retry: try again after backoff (or `delay`).
+            fail: no more attempts. fallback: move to the next target now.
+            busy: the resource is full, try later without using an attempt.
+            pending: an outside task runs; poll it with `handle` after `delay`.
+            release: give the job back untouched, for shutdowns.
+        error: {type: string}
+        result: {}
+        delay: {$ref: "#/components/schemas/Duration"}
+        handle: {type: string}
+    QueueConfig:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {$ref: "#/components/schemas/Name"}
+        paused: {type: boolean}
+        concurrency: {type: integer, minimum: 0, description: "Running jobs at most, across all workers."}
+        tenant_slots: {type: integer, minimum: 0, description: "Running jobs per tenant at most."}
+        tenant_waiting: {type: integer, minimum: 0, description: "Waiting jobs per tenant at most; more are refused."}
+        max_waiting: {type: integer, minimum: 0, description: "Waiting jobs at most; more are refused."}
+        rate: {type: number, minimum: 0, description: "Starts per second."}
+        burst: {type: integer, minimum: 0}
+        tenant_rate: {type: number, minimum: 0}
+        tenant_burst: {type: integer, minimum: 0}
+        max_attempts: {type: integer, minimum: 0, maximum: 1000}
+        backoff: {$ref: "#/components/schemas/Backoff"}
+        timeout: {$ref: "#/components/schemas/Duration"}
+        start_within: {$ref: "#/components/schemas/Duration"}
+        retention: {$ref: "#/components/schemas/Duration"}
+        dead_retention: {$ref: "#/components/schemas/Duration"}
+    PoolConfig:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {$ref: "#/components/schemas/Name"}
+        slots: {type: integer, minimum: 0, description: "Running jobs at most across every queue that uses the pool."}
+        tenant_slots: {type: integer, minimum: 0}
+    Schedule:
+      type: object
+      additionalProperties: false
+      required: [name, spec, queue, kind]
+      properties:
+        name: {$ref: "#/components/schemas/Name"}
+        spec: {type: string, description: "Cron with seconds or minutes, or @every 10m.", examples: ["0 */5 * * * *"]}
+        timezone: {type: string, examples: ["Europe/Rome"]}
+        paused: {type: boolean}
+        queue: {$ref: "#/components/schemas/Name"}
+        kind: {$ref: "#/components/schemas/Name"}
+        payload: {}
+        priority: {type: integer}
+        tenant: {type: string}
+        pool: {type: string}
+        max_attempts: {type: integer}
+        timeout: {$ref: "#/components/schemas/Duration"}
+        fallbacks:
+          type: array
+          items: {$ref: "#/components/schemas/Target"}
+        webhook: {type: string}
+        meta:
+          type: object
+          additionalProperties: {type: string}
+    QueueStats:
+      type: object
+      properties:
+        queue: {type: string}
+        counts:
+          type: object
+          additionalProperties: {type: integer}
+    Event:
+      type: object
+      properties:
+        seq: {type: integer, format: int64}
+        namespace: {type: string}
+        job_id: {type: string}
+        queue: {type: string}
+        kind: {type: string}
+        state: {$ref: "#/components/schemas/State"}
+        at: {type: string, format: date-time}
+    Namespace:
+      type: object
+      properties:
+        name: {type: string}
+        has_webhook_secret: {type: boolean}
+        created_at: {type: string, format: date-time}
+        keys:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              name: {type: string}
+              roles:
+                type: array
+                items: {$ref: "#/components/schemas/Role"}
+              created_at: {type: string, format: date-time}
+              expires_at: {type: string, format: date-time}
+        stats:
+          type: array
+          items: {$ref: "#/components/schemas/QueueStats"}

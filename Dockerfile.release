@@ -1,0 +1,7 @@
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/runnel /runnel
+USER nonroot
+EXPOSE 8700
+ENTRYPOINT ["/runnel"]
+CMD ["serve"]

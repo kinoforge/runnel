@@ -1,0 +1,66 @@
+version: 2
+project_name: runnel
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: runnel
+    main: ./cmd/runnel
+    binary: runnel
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, NOTICE, README.md, CHANGELOG.md]
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args: ["sign-blob", "--yes", "--output-signature=${signature}", "--output-certificate=${certificate}", "${artifact}"]
+    artifacts: checksum
+
+dockers_v2:
+  - images: ["ghcr.io/kinoforge/runnel"]
+    tags: ["{{ .Version }}", "{{ if not .Prerelease }}latest{{ end }}"]
+    dockerfile: Dockerfile.release
+    platforms: [linux/amd64, linux/arm64]
+    labels:
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.licenses: Apache-2.0
+
+docker_signs:
+  - cmd: cosign
+    artifacts: images
+    args: ["sign", "--yes", "${artifact}"]
+
+release:
+  prerelease: auto
+  footer: |
+    Verify a download: `cosign verify-blob --certificate checksums.txt.pem --signature checksums.txt.sig
+    --certificate-identity-regexp 'https://github.com/kinoforge/runnel/' --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt`
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^ci:"]
