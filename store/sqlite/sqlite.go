@@ -10,9 +10,7 @@ import (
 	"github.com/kinoforge/runnel/store/sqlstore"
 )
 
-const (
-	busyTimeout = "10000"
-)
+const busyTimeout = "10000"
 
 // Open opens or creates the SQLite file at path in WAL mode, or a private in-
 // memory database for "" and ":memory:". One process should own the file.

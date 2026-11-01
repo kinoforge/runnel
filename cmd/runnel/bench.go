@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -12,6 +11,15 @@ import (
 	"time"
 
 	"github.com/kinoforge/runnel"
+)
+
+const (
+	maxBenchBatch  = 1000
+	benchPoll      = 50 * time.Millisecond
+	benchShutdown  = 5 * time.Second
+	latencyRound   = 10 * time.Microsecond
+	cleanupHorizon = 24 * time.Hour
+	cleanupBatch   = 5000
 )
 
 type counter struct {
@@ -41,8 +49,8 @@ func bench(ctx context.Context, args []string) error {
 	if _, err := c.parse(args, 0); err != nil {
 		return err
 	}
-	if *total <= 0 || *workers <= 0 || *concurrency <= 0 || *batch <= 0 || *batch > 1000 {
-		return errors.New("jobs, workers and concurrency must be positive and batch 1 to 1000")
+	if *total <= 0 || *workers <= 0 || *concurrency <= 0 || *batch <= 0 || *batch > maxBenchBatch {
+		return fmt.Errorf("jobs, workers and concurrency must be positive and batch 1 to %d", maxBenchBatch)
 	}
 	cfg, err := c.settings()
 	if err != nil {
@@ -84,7 +92,7 @@ func bench(ctx context.Context, args []string) error {
 	began = time.Now()
 	for i := range pool {
 		w := runnel.NewWorker(s, ns, runnel.WorkerConfig{Queues: []string{"bench"}, Concurrency: *concurrency,
-			PollInterval: 50 * time.Millisecond, Observer: count, ShutdownTimeout: 5 * time.Second})
+			PollInterval: benchPoll, Observer: count, ShutdownTimeout: benchShutdown})
 		w.HandleFunc("noop", func(context.Context, *runnel.Job) error { return nil })
 		pool[i] = w
 		wg.Go(func() {
@@ -140,7 +148,7 @@ func bench(ctx context.Context, args []string) error {
 func pct(d []time.Duration, p int) time.Duration {
 	s := slices.Clone(d)
 	slices.Sort(s)
-	return s[min(len(s)-1, len(s)*p/100)].Round(10 * time.Microsecond)
+	return s[min(len(s)-1, len(s)*p/100)].Round(latencyRound)
 }
 
 func redact(u string) string {
@@ -157,16 +165,16 @@ func redact(u string) string {
 }
 
 func cleanup(ctx context.Context, s runnel.Store, ns string) {
-	far := time.Now().Add(24 * time.Hour)
+	far := time.Now().Add(cleanupHorizon)
 	final := []runnel.State{runnel.StateCompleted, runnel.StateDead, runnel.StateCancelled}
 	for {
-		n, err := s.Prune(ctx, ns, runnel.PruneRequest{States: final, Before: far, Limit: 5000})
+		n, err := s.Prune(ctx, ns, runnel.PruneRequest{States: final, Before: far, Limit: cleanupBatch})
 		if err != nil || n == 0 {
 			break
 		}
 	}
 	for {
-		n, err := s.PruneEvents(ctx, ns, runnel.EventPruneRequest{Before: far, Limit: 5000})
+		n, err := s.PruneEvents(ctx, ns, runnel.EventPruneRequest{Before: far, Limit: cleanupBatch})
 		if err != nil || n == 0 {
 			break
 		}

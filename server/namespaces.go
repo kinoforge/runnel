@@ -11,9 +11,7 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-const (
-	maxKeysPerNamespace = 100
-)
+const maxKeysPerNamespace = 100
 
 type namespaceView struct {
 	Name      string              `json:"name"`

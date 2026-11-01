@@ -10,10 +10,9 @@ import (
 )
 
 const (
-	endedBuffer = 256
+	defaultPrefix = "rn"
+	endedBuffer   = 256
 )
-
-const defaultPrefix = "rn"
 
 // Store keeps jobs in Redis, Valkey or Dragonfly. Every operation is one Lua
 // script, so it is atomic; a namespace's keys share a hash tag, so a namespace

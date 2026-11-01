@@ -5,9 +5,7 @@ import (
 	"time"
 )
 
-const (
-	maxPruneRounds = 20
-)
+const maxPruneRounds = 20
 
 func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error {
 	if err := m.pruneEvents(ctx, ns, now); err != nil {

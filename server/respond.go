@@ -14,9 +14,7 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-const (
-	statusClientClosed = 499
-)
+const statusClientClosed = 499
 
 type problemBody struct {
 	Type   string `json:"type"`

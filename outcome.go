@@ -8,10 +8,7 @@ import (
 )
 
 const (
-	maxOutcomeDays = 30
-)
-
-const (
+	maxOutcomeDays  = 30
 	maxHandleLen    = 1024
 	maxOutcomeDelay = maxOutcomeDays * 24 * time.Hour
 )

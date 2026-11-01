@@ -5,9 +5,7 @@ import (
 	"time"
 )
 
-const (
-	maxWebhookSecret = 256
-)
+const maxWebhookSecret = 256
 
 // Namespace is one isolated queue system, usually one per service. WebhookSecret
 // signs its webhooks.
