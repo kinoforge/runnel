@@ -85,10 +85,8 @@ const (
 	RoleReader = "reader"
 )
 
-// Roles lists every role.
 var Roles = []string{RoleAdmin, RoleProducer, RoleWorker, RoleReader}
 
-// Validate checks the namespace, id, hash and roles.
 func (k APIKey) Validate() error {
 	if !ValidNamespace(k.Namespace) {
 		return invalid("namespace %q must match %s", k.Namespace, namespacePattern)
@@ -110,7 +108,6 @@ func (k APIKey) Validate() error {
 	return nil
 }
 
-// PutKey stores an API key.
 func PutKey(ctx context.Context, s Store, k APIKey) error {
 	if err := k.Validate(); err != nil {
 		return err
@@ -139,7 +136,6 @@ func NamespaceKeys(ctx context.Context, s Store, ns string) ([]APIKey, error) {
 	return out, nil
 }
 
-// DeleteKey revokes a key of the namespace.
 func DeleteKey(ctx context.Context, s Store, ns, id string) error {
 	all, err := Keys(ctx, s)
 	if err != nil {

@@ -62,12 +62,10 @@ type Worker struct {
 	freed chan struct{}
 }
 
-// NewWorker returns a worker for namespace ns of store s.
 func NewWorker(s Store, ns string, cfg WorkerConfig) *Worker {
 	return NewSourceWorker(NewStoreSource(s, ns), cfg)
 }
 
-// NewSourceWorker returns a worker that reads from src.
 func NewSourceWorker(src Source, cfg WorkerConfig) *Worker {
 	if cfg.ID == "" {
 		cfg.ID = defaultWorkerID()
@@ -97,13 +95,11 @@ func NewSourceWorker(src Source, cfg WorkerConfig) *Worker {
 // ID returns the worker's id, which leases are held under.
 func (w *Worker) ID() string { return w.cfg.ID }
 
-// Handle registers the handler for a kind.
 func (w *Worker) Handle(kind string, h Handler) *Worker {
 	w.mux.Handle(kind, h)
 	return w
 }
 
-// HandleFunc registers a function as the handler for a kind.
 func (w *Worker) HandleFunc(kind string, fn HandlerFunc) *Worker { return w.Handle(kind, fn) }
 
 // Run claims and runs jobs until ctx ends, then waits up to ShutdownTimeout for

@@ -17,7 +17,6 @@ type Namespace struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-// Validate checks the name and secret length.
 func (n Namespace) Validate() error {
 	if !ValidNamespace(n.Name) {
 		return invalid("namespace %q must match %s", n.Name, namespacePattern)

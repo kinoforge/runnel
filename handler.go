@@ -18,10 +18,8 @@ type Poller interface {
 	Poll(ctx context.Context, j *Job) error
 }
 
-// HandlerFunc adapts a function to Handler.
 type HandlerFunc func(ctx context.Context, j *Job) error
 
-// Work calls f.
 func (f HandlerFunc) Work(ctx context.Context, j *Job) error { return f(ctx, j) }
 
 type asyncHandler struct{ submit, poll HandlerFunc }
@@ -53,10 +51,8 @@ type Mux struct {
 // NewMux returns a mux that wraps handlers in mw, outermost first.
 func NewMux(mw ...Middleware) *Mux { return &Mux{handlers: map[string]Handler{}, middleware: mw} }
 
-// Handle registers the handler for a kind.
 func (m *Mux) Handle(kind string, h Handler) { m.handlers[kind] = h }
 
-// Len returns how many kinds have handlers.
 func (m *Mux) Len() int { return len(m.handlers) }
 
 // Run calls the job's handler, or its poller for a polling job. A panic becomes

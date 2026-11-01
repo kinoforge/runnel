@@ -63,7 +63,6 @@ type Server struct {
 	hubs    map[string]*hub
 }
 
-// New returns a server over store.
 func New(store runnel.Store, cfg Config) *Server {
 	if cfg.MaxBody <= 0 {
 		cfg.MaxBody = defaultMaxBody
@@ -102,7 +101,6 @@ func New(store runnel.Store, cfg Config) *Server {
 // attempts are counted with the remote ones.
 func (s *Server) Observer() runnel.Observer { return s.obs }
 
-// ServeHTTP serves the API.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")

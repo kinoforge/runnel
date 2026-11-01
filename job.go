@@ -40,7 +40,6 @@ const (
 	StateCancelled State = "cancelled"
 )
 
-// States lists every state.
 var States = []State{StateBlocked, StateWaiting, StateRunning, StatePolling, StateCompleted, StateDead, StateCancelled}
 
 // Final reports whether the job can no longer change state on its own.
@@ -53,7 +52,6 @@ func (s State) Active() bool {
 	return s == StateRunning || s == StatePolling
 }
 
-// Valid reports whether s is a known state.
 func (s State) Valid() bool {
 	return slices.Contains(States, s)
 }
@@ -62,18 +60,14 @@ func (s State) Valid() bool {
 // it as "30s".
 type Duration time.Duration
 
-// D returns the duration as a time.Duration.
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
-// String formats the duration like time.Duration.
 func (d Duration) String() string { return time.Duration(d).String() }
 
-// MarshalJSON writes the duration as a string such as "1m30s".
 func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Duration(d).String())
 }
 
-// UnmarshalJSON reads a duration string or a number of seconds.
 func (d *Duration) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {
@@ -105,10 +99,8 @@ type Backoff struct {
 	Jitter float64  `json:"jitter,omitempty"`
 }
 
-// IsZero reports whether no field is set.
 func (b Backoff) IsZero() bool { return b == Backoff{} }
 
-// Delay returns the wait before the given attempt.
 func (b Backoff) Delay(attempt int) time.Duration {
 	base, maxd, factor, jitter := b.Base.D(), b.Max.D(), b.Factor, b.Jitter
 	if base <= 0 {
@@ -280,7 +272,6 @@ func (j *Job) Prepare(now time.Time, l Limits) error {
 // Polling reports whether the job is waiting on an outside task.
 func (j *Job) Polling() bool { return j.Handle != "" }
 
-// Bind decodes the payload into v.
 func (j *Job) Bind(v any) error {
 	if len(j.Payload) == 0 {
 		return nil
@@ -288,7 +279,6 @@ func (j *Job) Bind(v any) error {
 	return json.Unmarshal(j.Payload, v)
 }
 
-// SetResult stores v as the job's JSON result.
 func (j *Job) SetResult(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -336,5 +326,4 @@ func FromMillis(ms int64) time.Time {
 	return time.UnixMilli(ms).UTC()
 }
 
-// MillisString formats Millis(t) in decimal.
 func MillisString(t time.Time) string { return strconv.FormatInt(Millis(t), 10) }

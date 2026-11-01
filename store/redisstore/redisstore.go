@@ -45,7 +45,6 @@ func New(rdb redis.UniversalClient, prefix string) *Store {
 	return &Store{rdb: rdb, prefix: prefix, scripts: newScripts()}
 }
 
-// Client returns the Redis client.
 func (s *Store) Client() redis.UniversalClient { return s.rdb }
 
 func (s *Store) p(ns string) string {

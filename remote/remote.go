@@ -54,7 +54,6 @@ type APIError struct {
 	Detail string `json:"detail"`
 }
 
-// Error formats the status, title and detail.
 func (e *APIError) Error() string {
 	return fmt.Sprintf("runnel api: %d %s: %s", e.Status, e.Title, e.Detail)
 }
@@ -154,7 +153,6 @@ func request(j *runnel.Job) jobRequest {
 		Timeout: j.Timeout, Backoff: j.Backoff, Fallbacks: j.Fallbacks, DependsOn: j.DependsOn, Webhook: j.Webhook, Meta: j.Meta}
 }
 
-// Enqueue adds one job and returns its id.
 func (c *Client) Enqueue(ctx context.Context, queue, kind string, payload any, opts ...runnel.Option) (runnel.Inserted, error) {
 	j, err := runnel.NewJob(queue, kind, payload, opts...)
 	if err != nil {
@@ -223,7 +221,6 @@ func (c *Client) Wait(ctx context.Context, id string) (*runnel.Job, error) {
 	}
 }
 
-// Get returns a job.
 func (c *Client) Get(ctx context.Context, id string) (*runnel.Job, error) {
 	var j runnel.Job
 	if err := c.do(ctx, http.MethodGet, c.path("/jobs/"+url.PathEscape(id)), nil, &j); err != nil {
@@ -253,7 +250,6 @@ func (c *Client) List(ctx context.Context, q runnel.Query) ([]*runnel.Job, strin
 	return out.Items, out.Next, nil
 }
 
-// Cancel cancels a job that has not finished.
 func (c *Client) Cancel(ctx context.Context, id string) (*runnel.Job, error) {
 	var j runnel.Job
 	return &j, c.do(ctx, http.MethodPost, c.path("/jobs/"+url.PathEscape(id)+"/cancel"), struct{}{}, &j)
@@ -265,7 +261,6 @@ func (c *Client) Retry(ctx context.Context, id string) (*runnel.Job, error) {
 	return &j, c.do(ctx, http.MethodPost, c.path("/jobs/"+url.PathEscape(id)+"/retry"), struct{}{}, &j)
 }
 
-// Stats counts jobs per queue and state.
 func (c *Client) Stats(ctx context.Context) ([]runnel.QueueStats, error) {
 	var out struct {
 		Queues []runnel.QueueStats `json:"queues"`

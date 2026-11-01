@@ -153,7 +153,6 @@ func (l Log) level() (slog.Level, error) {
 	return lvl, err
 }
 
-// NewLogger returns a logger writing to w in the configured format and level.
 func (l Log) NewLogger(w io.Writer) *slog.Logger {
 	lvl, _ := l.level()
 	opts := &slog.HandlerOptions{Level: lvl}

@@ -40,7 +40,6 @@ type finishing struct {
 	done   chan error
 }
 
-// NewStoreSource returns a source reading namespace ns of store s.
 func NewStoreSource(s Store, ns string) Source {
 	return &storeSource{store: s, ns: ns, clock: ClockOf(s), log: slog.Default()}
 }

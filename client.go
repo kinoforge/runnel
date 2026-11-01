@@ -36,7 +36,6 @@ type Client struct {
 	hub    *endHub
 }
 
-// NewClient returns a client for namespace ns on store s.
 func NewClient(s Store, ns string) *Client {
 	return &Client{store: s, ns: ns, limits: DefaultLimits, now: ClockOf(s).Now}
 }
@@ -47,10 +46,8 @@ func (c *Client) WithLimits(l Limits) *Client {
 	return c
 }
 
-// Namespace returns the client's namespace.
 func (c *Client) Namespace() string { return c.ns }
 
-// Store returns the client's store.
 func (c *Client) Store() Store { return c.store }
 
 func (c *Client) queueConfig(ctx context.Context, name string) (QueueConfig, error) {
@@ -254,7 +251,6 @@ func (c *Client) Retry(ctx context.Context, id string) (*Job, error) {
 	})
 }
 
-// Stats counts the namespace's jobs per queue and state.
 func (c *Client) Stats(ctx context.Context) ([]QueueStats, error) { return c.store.Stats(ctx, c.ns) }
 
 // Events returns up to limit final-state events after the sequence number after.
@@ -275,7 +271,6 @@ func (c *Client) SetQueue(ctx context.Context, q QueueConfig) error {
 	return PutTyped(ctx, c.store, c.ns, ConfigQueue, q.Name, q)
 }
 
-// Queues returns every queue's settings.
 func (c *Client) Queues(ctx context.Context) (map[string]QueueConfig, error) {
 	return LoadTyped[QueueConfig](ctx, c.store, c.ns, ConfigQueue)
 }
@@ -286,7 +281,6 @@ func (c *Client) DeleteQueue(ctx context.Context, name string) error {
 	return c.store.DeleteConfig(ctx, c.ns, ConfigQueue, name)
 }
 
-// SetPool stores a pool.
 func (c *Client) SetPool(ctx context.Context, p PoolConfig) error {
 	if err := p.Validate(); err != nil {
 		return err
@@ -294,17 +288,14 @@ func (c *Client) SetPool(ctx context.Context, p PoolConfig) error {
 	return PutTyped(ctx, c.store, c.ns, ConfigPool, p.Name, p)
 }
 
-// Pools returns every pool.
 func (c *Client) Pools(ctx context.Context) (map[string]PoolConfig, error) {
 	return LoadTyped[PoolConfig](ctx, c.store, c.ns, ConfigPool)
 }
 
-// DeletePool removes a pool.
 func (c *Client) DeletePool(ctx context.Context, name string) error {
 	return c.store.DeleteConfig(ctx, c.ns, ConfigPool, name)
 }
 
-// SetSchedule stores a schedule.
 func (c *Client) SetSchedule(ctx context.Context, s Schedule) error {
 	if err := s.Validate(); err != nil {
 		return err
@@ -312,15 +303,12 @@ func (c *Client) SetSchedule(ctx context.Context, s Schedule) error {
 	return PutTyped(ctx, c.store, c.ns, ConfigSchedule, s.Name, s)
 }
 
-// Schedules returns every schedule.
 func (c *Client) Schedules(ctx context.Context) (map[string]Schedule, error) {
 	return LoadTyped[Schedule](ctx, c.store, c.ns, ConfigSchedule)
 }
 
-// DeleteSchedule removes a schedule.
 func (c *Client) DeleteSchedule(ctx context.Context, name string) error {
 	return c.store.DeleteConfig(ctx, c.ns, ConfigSchedule, name)
 }
 
-// String names the client and its namespace.
 func (c *Client) String() string { return fmt.Sprintf("runnel.Client(%s)", c.ns) }

@@ -28,7 +28,6 @@ type systemClock struct{}
 
 func (systemClock) Now() time.Time { return time.Now().UTC() }
 
-// SystemClock is the local wall clock.
 var SystemClock Clock = systemClock{}
 
 // StoreClock follows the clock of a TimeSource. Every 30 seconds it samples the
@@ -45,7 +44,6 @@ type StoreClock struct {
 	busy   bool
 }
 
-// NewStoreClock returns a clock that follows src.
 func NewStoreClock(src TimeSource) *StoreClock {
 	return &StoreClock{src: src, resync: clockResync, timeout: clockReadTimeout}
 }

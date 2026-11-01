@@ -43,7 +43,6 @@ type PoolConfig struct {
 	TenantSlots int    `json:"tenant_slots,omitempty"`
 }
 
-// Validate checks names, limits and durations.
 func (q QueueConfig) Validate() error {
 	if err := checkName("queue", q.Name, false); err != nil {
 		return err
@@ -63,7 +62,6 @@ func (q QueueConfig) Validate() error {
 	return nil
 }
 
-// Validate checks the name and slots.
 func (p PoolConfig) Validate() error {
 	if err := checkName("pool", p.Name, false); err != nil {
 		return err

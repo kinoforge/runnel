@@ -66,7 +66,6 @@ type Maintainer struct {
 	hooks     map[string]context.CancelFunc
 }
 
-// NewMaintainer returns a maintainer for s.
 func NewMaintainer(s Store, cfg MaintainerConfig) *Maintainer {
 	if cfg.Interval <= 0 {
 		cfg.Interval = defaultMaintainInterval

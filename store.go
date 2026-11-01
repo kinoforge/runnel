@@ -127,7 +127,6 @@ const (
 	ConfigKey ConfigKind = "key"
 )
 
-// QueueStats counts the jobs of one queue by state.
 type QueueStats struct {
 	Queue  string          `json:"queue"`
 	Counts map[State]int64 `json:"counts"`
@@ -140,7 +139,6 @@ type Store interface {
 	// Migrate creates or upgrades the store's schema. It is safe to run from many
 	// processes at once.
 	Migrate(ctx context.Context) error
-	// Close releases the store's connections.
 	Close() error
 	// Insert adds prepared jobs atomically, applying unique keys, dependencies and
 	// waiting caps, and returns one result per job.
@@ -173,13 +171,10 @@ type Store interface {
 	// SwapCursor sets a named position to next if it still is old, and reports
 	// whether it did.
 	SwapCursor(ctx context.Context, ns, name string, old, next int64) (bool, error)
-	// PutConfig stores a configuration value.
 	PutConfig(ctx context.Context, ns string, kind ConfigKind, name string, value []byte) error
 	// Configs returns every value of a configuration kind by name.
 	Configs(ctx context.Context, ns string, kind ConfigKind) (map[string][]byte, error)
-	// DeleteConfig removes a configuration value.
 	DeleteConfig(ctx context.Context, ns string, kind ConfigKind, name string) error
-	// Stats counts jobs per queue and state.
 	Stats(ctx context.Context, ns string) ([]QueueStats, error)
 }
 

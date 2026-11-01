@@ -54,7 +54,6 @@ func limited(q runnel.QueueConfig) bool {
 	return q.Concurrency > 0 || q.TenantSlots > 0 || q.Rate > 0 || q.TenantRate > 0
 }
 
-// New returns a store over db speaking dialect d.
 func New(db *sql.DB, d Dialect) *Store {
 	return &Store{db: db, d: d, cfgs: map[string]*nsConfig{}, wakes: map[string]bool{}, ends: map[string][]string{}}
 }
@@ -91,7 +90,6 @@ func (s *Store) forget(ns string) {
 // InsertTx.
 func (s *Store) DB() *sql.DB { return s.db }
 
-// Dialect returns the store's dialect.
 func (s *Store) Dialect() Dialect { return s.d }
 
 func (s *Store) q(query string) string { return s.d.rebind(query) }

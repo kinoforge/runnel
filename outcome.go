@@ -39,7 +39,6 @@ const (
 	OutcomeRelease OutcomeKind = "release"
 )
 
-// OutcomeKinds lists every outcome kind.
 var OutcomeKinds = []OutcomeKind{OutcomeDone, OutcomeRetry, OutcomeFail, OutcomeFallback, OutcomeBusy, OutcomePending, OutcomeRelease}
 
 // Outcome is the result of an attempt, as a worker reports it.
@@ -114,7 +113,6 @@ func OutcomeOf(err error, result json.RawMessage) Outcome {
 	return Outcome{Kind: OutcomeRetry, Error: err.Error()}
 }
 
-// Validate checks the kind, delay, handle and result.
 func (o Outcome) Validate() error {
 	switch o.Kind {
 	case OutcomeDone, OutcomeRetry, OutcomeFail, OutcomeFallback, OutcomeBusy, OutcomeRelease:

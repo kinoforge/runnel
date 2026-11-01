@@ -29,7 +29,6 @@ func ValidName(s string) bool { return namePattern.MatchString(s) }
 // letters, digits, dashes or underscores.
 func ValidNamespace(s string) bool { return namespacePattern.MatchString(s) }
 
-// ValidTenant reports whether s can name a tenant.
 func ValidTenant(s string) bool { return tenantPattern.MatchString(s) }
 
 func invalid(format string, args ...any) error {

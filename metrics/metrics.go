@@ -37,12 +37,10 @@ func NewObserver(reg prometheus.Registerer) *Observer {
 	return o
 }
 
-// Started counts a started attempt.
 func (o *Observer) Started(j *runnel.Job) {
 	o.started.WithLabelValues(j.Namespace, j.Queue, j.Kind).Inc()
 }
 
-// Finished counts a finished attempt and its run time.
 func (o *Observer) Finished(j *runnel.Job, out runnel.Outcome, took time.Duration) {
 	o.finished.WithLabelValues(j.Namespace, j.Queue, j.Kind, string(out.Kind)).Inc()
 	if took > 0 {

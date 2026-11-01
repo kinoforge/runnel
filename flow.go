@@ -19,7 +19,6 @@ type flowStep struct {
 	after []string
 }
 
-// NewFlow returns an empty flow.
 func NewFlow() *Flow { return &Flow{names: map[string]int{}} }
 
 // Add adds a step named name that waits for the steps in after. Errors are
