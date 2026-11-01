@@ -21,6 +21,15 @@ type Retention struct {
 	Undelivered time.Duration
 }
 
+// DefaultRetention is used for every Retention field left at zero.
+var DefaultRetention = Retention{
+	Completed:   24 * time.Hour,
+	Cancelled:   24 * time.Hour,
+	Dead:        7 * 24 * time.Hour,
+	Events:      24 * time.Hour,
+	Undelivered: 7 * 24 * time.Hour,
+}
+
 // MaintainerConfig configures a Maintainer. Namespaces limits it to those
 // namespaces; empty means all.
 type MaintainerConfig struct {
@@ -60,13 +69,13 @@ func NewMaintainer(s Store, cfg MaintainerConfig) *Maintainer {
 		cfg.PruneEvery = time.Minute
 	}
 	if cfg.Retention.Completed == 0 && cfg.Retention.Cancelled == 0 && cfg.Retention.Dead == 0 {
-		cfg.Retention.Completed, cfg.Retention.Cancelled, cfg.Retention.Dead = 24*time.Hour, 24*time.Hour, 7*24*time.Hour
+		cfg.Retention.Completed, cfg.Retention.Cancelled, cfg.Retention.Dead = DefaultRetention.Completed, DefaultRetention.Cancelled, DefaultRetention.Dead
 	}
 	if cfg.Retention.Events <= 0 {
-		cfg.Retention.Events = 24 * time.Hour
+		cfg.Retention.Events = DefaultRetention.Events
 	}
 	if cfg.Retention.Undelivered <= 0 {
-		cfg.Retention.Undelivered = 7 * 24 * time.Hour
+		cfg.Retention.Undelivered = DefaultRetention.Undelivered
 	}
 	cfg.Retention.Undelivered = max(cfg.Retention.Undelivered, cfg.Retention.Events)
 	if cfg.Batch <= 0 {
