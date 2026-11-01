@@ -40,7 +40,7 @@ signs:
 dockers_v2:
   - images: ["ghcr.io/kinoforge/runnel"]
     tags: ["{{ .Version }}", "{{ if not .Prerelease }}latest{{ end }}"]
-    dockerfile: Dockerfile.release
+    dockerfile: deploy/Dockerfile.release
     platforms: [linux/amd64, linux/arm64]
     labels:
       org.opencontainers.image.version: "{{ .Version }}"

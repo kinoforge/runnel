@@ -16,7 +16,7 @@
 // A caller chooses how to wait for the result: come back later (Get), wait
 // (Client.Wait, EnqueueAndWait), or be called (a webhook).
 //
-// SPEC.md lists every rule Runnel follows and DESIGN.md explains why.
+// docs/SPEC.md lists every rule Runnel follows and docs/DESIGN.md explains why.
 //
 //	c := runnel.NewClient(store, "billing")
 //	c.Enqueue(ctx, "invoices", "invoice.render", Invoice{ID: 42}, runnel.Tenant("acme"))

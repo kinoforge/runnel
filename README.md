@@ -237,9 +237,9 @@ make bench       # RUNNEL_STORE=... make bench
 RUNNEL_RULES=C04,W make test-all   # only the tests of rule C04 and area W
 ```
 
-[SPEC.md](SPEC.md) lists every rule Runnel follows, each checked by tests. [DESIGN.md](DESIGN.md) explains the decisions and the known limits.
+[SPEC.md](docs/SPEC.md) lists every rule Runnel follows, each checked by tests. [DESIGN.md](docs/DESIGN.md) explains the decisions and the known limits.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go through [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md). Security reports go through [SECURITY.md](.github/SECURITY.md).
 
 ## Roadmap
 

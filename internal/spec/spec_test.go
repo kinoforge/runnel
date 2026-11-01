@@ -21,7 +21,7 @@ var ruleLine = regexp.MustCompile(`(?m)^- \*\*([A-Z]\d{2})\*\*`)
 
 func rules(t *testing.T) []string {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(root, "SPEC.md"))
+	b, err := os.ReadFile(filepath.Join(root, "docs", "SPEC.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

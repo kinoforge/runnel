@@ -24,9 +24,9 @@ make down        # stop the services and drop their data
 
 ## What a pull request needs
 
-- A rule in [SPEC.md](SPEC.md) for any behaviour change, and tests that name it with `spec.Rule(t, "C04")`. `go test ./internal/spec` fails when a rule has no test or a test names a rule that does not exist. Run one rule's tests with `RUNNEL_RULES=C04 make test-all`.
+- A rule in [SPEC.md](../docs/SPEC.md) for any behaviour change, and tests that name it with `spec.Rule(t, "C04")`. `go test ./internal/spec` fails when a rule has no test or a test names a rule that does not exist. Run one rule's tests with `RUNNEL_RULES=C04 make test-all`.
 - Tests. A behaviour change in a store goes in the shared conformance suite (`store/storetest`), so every backend proves it.
-- A note in [DESIGN.md](DESIGN.md) when the change is a decision someone could make differently.
+- A note in [DESIGN.md](../docs/DESIGN.md) when the change is a decision someone could make differently.
 - `make lint` and `make test-all` passing.
 - Code that reads like the code around it. Exported identifiers have doc comments. Function bodies carry no comments: if a block needs explaining, give it a name.
 - No new dependency without a reason in the pull request.

@@ -39,7 +39,7 @@ bench: build
 	./bin/runnel bench --store "$${RUNNEL_STORE:-sqlite:bench.db}"
 
 docker:
-	docker build --build-arg VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t runnel:dev .
+	docker build -f deploy/Dockerfile --build-arg VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t runnel:dev .
 
 release-check:
 	go run github.com/goreleaser/goreleaser/v2@v2.12.7 check
