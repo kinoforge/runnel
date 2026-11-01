@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"slices"
 	"strconv"
@@ -136,12 +137,7 @@ func Run(t *testing.T, open Opener) {
 		"WorkerConcurrency":          testWorkerConcurrency,
 		"WebhookDeliveryJobs":        testWebhookJobs,
 	}
-	names := make([]string, 0, len(tests))
-	for n := range tests {
-		names = append(names, n)
-	}
-	slices.Sort(names)
-	for _, n := range names {
+	for _, n := range slices.Sorted(maps.Keys(tests)) {
 		t.Run(n, func(t *testing.T) { tests[n](t, open) })
 	}
 }
@@ -708,9 +704,7 @@ func testConcurrentClaims(t *testing.T, open Opener) {
 	seen := map[string]int{}
 	var wg sync.WaitGroup
 	for w := range 6 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 10 {
 				got, err := e.s.Claim(e.ctx, e.ns, runnel.ClaimRequest{Queues: []string{"q"}, Worker: fmt.Sprintf("w%d", w), Limit: 3, Lease: time.Minute, Now: e.now()})
 				if err != nil {
@@ -723,7 +717,7 @@ func testConcurrentClaims(t *testing.T, open Opener) {
 				}
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if len(seen) != 60 {

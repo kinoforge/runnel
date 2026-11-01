@@ -91,7 +91,7 @@ func MySQL() Dialect {
 				return nil, err
 			}
 			if got.Int64 != 1 {
-				return nil, fmt.Errorf("runnel: could not take the migration lock")
+				return nil, errors.New("runnel: could not take the migration lock")
 			}
 			return func() { _, _ = c.ExecContext(context.Background(), "SELECT RELEASE_LOCK('runnel_migrate')") }, nil
 		},

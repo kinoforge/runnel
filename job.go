@@ -2,6 +2,7 @@ package runnel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -77,10 +78,10 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	}
 	var secs float64
 	if err := json.Unmarshal(b, &secs); err != nil {
-		return fmt.Errorf("duration must be a string like \"30s\" or seconds")
+		return errors.New("duration must be a string like \"30s\" or seconds")
 	}
 	if math.IsNaN(secs) || math.IsInf(secs, 0) || math.Abs(secs) > math.MaxInt64/float64(time.Second) {
-		return fmt.Errorf("duration out of range")
+		return errors.New("duration out of range")
 	}
 	*d = Duration(secs * float64(time.Second))
 	return nil

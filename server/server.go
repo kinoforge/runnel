@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -346,12 +347,7 @@ func (s *Server) namespaceNames(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(all))
-	for n := range all {
-		out = append(out, n)
-	}
-	slices.Sort(out)
-	return out, nil
+	return slices.Sorted(maps.Keys(all)), nil
 }
 
 func (s *Server) source(ns string) runnel.Source {

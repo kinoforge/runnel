@@ -287,11 +287,9 @@ func TestConcurrentKeysAndNamespaceDelete(t *testing.T) {
 	tokens := make(chan string, n)
 	var wg sync.WaitGroup
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			tokens <- key(t, srv, "race", "reader")
-		}()
+		})
 	}
 	wg.Wait()
 	close(tokens)

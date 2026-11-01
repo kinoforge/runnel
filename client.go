@@ -13,6 +13,8 @@ import (
 // none.
 const DefaultMaxAttempts = 5
 
+const maxBatch = 1000
+
 // Client enqueues and manages the jobs of one namespace on a store. It is safe
 // for concurrent use.
 type Client struct {
@@ -119,16 +121,24 @@ func (c *Client) EnqueueJobs(ctx context.Context, jobs []*Job) ([]Inserted, erro
 	if len(jobs) == 0 {
 		return nil, nil
 	}
-	if len(jobs) > 1000 {
-		return nil, invalid("at most 1000 jobs per call")
+	if len(jobs) > maxBatch {
+		return nil, invalid("at most %d jobs per call", maxBatch)
 	}
+	now, err := c.prepareAll(ctx, jobs)
+	if err != nil {
+		return nil, err
+	}
+	return c.store.Insert(ctx, c.ns, jobs, now)
+}
+
+func (c *Client) prepareAll(ctx context.Context, jobs []*Job) (time.Time, error) {
 	now := c.now().Truncate(time.Millisecond)
 	for _, j := range jobs {
 		if err := c.prepare(ctx, j, now); err != nil {
-			return nil, err
+			return time.Time{}, err
 		}
 	}
-	return c.store.Insert(ctx, c.ns, jobs, now)
+	return now, nil
 }
 
 // EnqueueTx enqueues jobs inside tx, a transaction on the database that holds
@@ -139,17 +149,15 @@ func (c *Client) EnqueueTx(ctx context.Context, tx *sql.Tx, jobs ...*Job) ([]Ins
 	if !ok {
 		return nil, invalid("store cannot enqueue inside a transaction")
 	}
-	if len(jobs) == 0 || len(jobs) > 1000 {
-		return nil, invalid("send 1 to 1000 jobs")
+	if len(jobs) == 0 || len(jobs) > maxBatch {
+		return nil, invalid("send 1 to %d jobs", maxBatch)
 	}
 	if _, err := c.queueConfigFrom("", func() (map[string][]byte, error) { return ti.ConfigsTx(ctx, tx, c.ns, ConfigQueue) }); err != nil {
 		return nil, err
 	}
-	now := c.now().Truncate(time.Millisecond)
-	for _, j := range jobs {
-		if err := c.prepare(ctx, j, now); err != nil {
-			return nil, err
-		}
+	now, err := c.prepareAll(ctx, jobs)
+	if err != nil {
+		return nil, err
 	}
 	return ti.InsertTx(ctx, tx, c.ns, jobs, now)
 }
@@ -352,8 +360,8 @@ func (f *Flow) order() ([]int, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	if len(f.steps) == 0 || len(f.steps) > 1000 {
-		return nil, invalid("a flow needs 1 to 1000 steps")
+	if len(f.steps) == 0 || len(f.steps) > maxBatch {
+		return nil, invalid("a flow needs 1 to %d steps", maxBatch)
 	}
 	indeg := make([]int, len(f.steps))
 	next := make([][]int, len(f.steps))

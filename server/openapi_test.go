@@ -71,7 +71,7 @@ func resolves(root map[string]any, ref string) bool {
 		return false
 	}
 	var node any = root
-	for _, part := range strings.Split(path, "/") {
+	for part := range strings.SplitSeq(path, "/") {
 		m, ok := node.(map[string]any)
 		if !ok {
 			return false

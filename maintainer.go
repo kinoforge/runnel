@@ -3,6 +3,7 @@ package runnel
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -99,12 +100,7 @@ func (m *Maintainer) namespaces(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(all))
-	for n := range all {
-		out = append(out, n)
-	}
-	slices.Sort(out)
-	return out, nil
+	return slices.Sorted(maps.Keys(all)), nil
 }
 
 // Run does a Tick for every namespace each Interval until ctx ends. With
@@ -292,9 +288,7 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 			MaxAttempts: s.MaxAttempts, Timeout: s.Timeout, Fallbacks: s.Fallbacks, Webhook: s.Webhook,
 			UniqueKey: "cron:" + name + ":" + strconv.FormatInt(fire.Unix(), 10), UniqueFor: Duration(24 * time.Hour)}
 		j.Meta = map[string]string{"schedule": name, "fire_at": fire.UTC().Format(time.RFC3339)}
-		for k, v := range s.Meta {
-			j.Meta[k] = v
-		}
+		maps.Copy(j.Meta, s.Meta)
 		if _, err := m.client(ns).EnqueueJobs(ctx, []*Job{j}); err != nil {
 			m.log.Error("runnel: scheduled job rejected", "namespace", ns, "schedule", name, "err", err)
 		}

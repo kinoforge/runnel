@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -87,9 +88,7 @@ func (c *Client) send(ctx context.Context, method, path string, in, out any, hea
 	if err != nil {
 		return 0, err
 	}
-	for k, v := range header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, header)
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")

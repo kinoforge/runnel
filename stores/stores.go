@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -54,7 +55,7 @@ func Open(ctx context.Context, dsn string) (runnel.Store, error) {
 func openMySQL(dsn string) (runnel.Store, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("runnel: bad mysql url")
+		return nil, errors.New("runnel: bad mysql url")
 	}
 	pass, _ := u.User.Password()
 	host := u.Host

@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"text/tabwriter"
 	"time"
 
 	"github.com/kinoforge/runnel"
@@ -43,7 +42,7 @@ func bench(ctx context.Context, args []string) error {
 		return err
 	}
 	if *total <= 0 || *workers <= 0 || *concurrency <= 0 || *batch <= 0 || *batch > 1000 {
-		return fmt.Errorf("jobs, workers and concurrency must be positive and batch 1 to 1000")
+		return errors.New("jobs, workers and concurrency must be positive and batch 1 to 1000")
 	}
 	s, err := c.open(ctx)
 	if err != nil {
@@ -84,11 +83,9 @@ func bench(ctx context.Context, args []string) error {
 			PollInterval: 50 * time.Millisecond, Observer: count, ShutdownTimeout: 5 * time.Second})
 		w.HandleFunc("noop", func(context.Context, *runnel.Job) error { return nil })
 		pool[i] = w
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = w.Run(wctx)
-		}()
+		})
 	}
 	select {
 	case <-count.done:
@@ -123,7 +120,7 @@ func bench(ctx context.Context, args []string) error {
 	stop()
 	wg.Wait()
 
-	tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	tw := table()
 	fmt.Fprintf(tw, "store\t%s\n", redact(*c.store))
 	fmt.Fprintf(tw, "jobs\t%d (batch %d, %d tenants, tenant slots %d)\n", *total, *batch, *tenants, *tenantSlots)
 	fmt.Fprintf(tw, "workers\t%d x %d slots\n", *workers, *concurrency)

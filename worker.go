@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"runtime/debug"
 	"slices"
 	"sync"
@@ -124,7 +125,6 @@ func (s *storeSource) finisher() {
 			for _, f := range batch {
 				_ = s.apply([]finishing{f})
 			}
-			continue
 		}
 	}
 }
@@ -443,11 +443,7 @@ func (w *Worker) track(base context.Context, j *Job) (*inflight, context.Context
 
 func (w *Worker) start(base context.Context, j *Job, wg *sync.WaitGroup, freed chan struct{}) {
 	r, jctx := w.track(base, j)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.runOne(base, jctx, r, freed)
-	}()
+	wg.Go(func() { w.runOne(base, jctx, r, freed) })
 }
 
 func (w *Worker) runOne(base, jctx context.Context, r *inflight, freed chan struct{}) {
@@ -564,10 +560,7 @@ func (w *Worker) heartbeat(ctx context.Context, stop <-chan struct{}, done chan<
 		case <-t.C:
 		}
 		w.mu.Lock()
-		ids := make([]string, 0, len(w.runs))
-		for id := range w.runs {
-			ids = append(ids, id)
-		}
+		ids := slices.Collect(maps.Keys(w.runs))
 		w.mu.Unlock()
 		if len(ids) == 0 {
 			continue

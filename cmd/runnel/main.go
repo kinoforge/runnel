@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -102,16 +104,26 @@ func (c *cmd) parse(args []string, positional int) ([]string, error) {
 
 func (c *cmd) open(ctx context.Context) (runnel.Store, error) { return stores.Open(ctx, *c.store) }
 
+func (c *cmd) start(ctx context.Context, args []string, positional int) ([]string, runnel.Store, error) {
+	pos, err := c.parse(args, positional)
+	if err != nil {
+		return nil, nil, err
+	}
+	s, err := c.open(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pos, s, nil
+}
+
+func table() *tabwriter.Writer { return tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0) }
+
 func run(ctx context.Context, name string, args []string) error {
 	switch name {
 	case "serve":
 		return serve(ctx, args)
 	case "migrate":
-		c := newCmd(name)
-		if _, err := c.parse(args, 0); err != nil {
-			return err
-		}
-		s, err := c.open(ctx)
+		_, s, err := newCmd(name).start(ctx, args, 0)
 		if err != nil {
 			return err
 		}
@@ -136,11 +148,11 @@ func run(ctx context.Context, name string, args []string) error {
 		fmt.Println("runnel", buildVersion())
 		return nil
 	case "queue":
-		return configCommand[runnel.QueueConfig](ctx, name, runnel.ConfigQueue, args, func(v runnel.QueueConfig) (string, error) { return v.Name, v.Validate() })
+		return configCommand[runnel.QueueConfig](ctx, name, runnel.ConfigQueue, args)
 	case "pool":
-		return configCommand[runnel.PoolConfig](ctx, name, runnel.ConfigPool, args, func(v runnel.PoolConfig) (string, error) { return v.Name, v.Validate() })
+		return configCommand[runnel.PoolConfig](ctx, name, runnel.ConfigPool, args)
 	case "schedule":
-		return configCommand[runnel.Schedule](ctx, name, runnel.ConfigSchedule, args, func(v runnel.Schedule) (string, error) { return v.Name, v.Validate() })
+		return configCommand[runnel.Schedule](ctx, name, runnel.ConfigSchedule, args)
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", name, usage)
 }
@@ -204,23 +216,25 @@ func namespaces(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("ns needs create, list or delete")
 	}
+	need, ok := map[string]int{"create": 1, "list": 0, "delete": 1}[args[0]]
+	if !ok {
+		return fmt.Errorf("unknown ns command %q", args[0])
+	}
 	c := newCmd("ns " + args[0])
 	secret := c.fs.String("webhook-secret", "", "secret used to sign webhooks")
-	switch args[0] {
-	case "create":
-		pos, err := c.parse(args[1:], 1)
-		if err != nil {
-			return err
-		}
-		s, err := c.open(ctx)
-		if err != nil {
-			return err
-		}
-		defer s.Close()
-		all, err := runnel.Namespaces(ctx, s)
-		if err != nil {
-			return err
-		}
+	pos, s, err := c.start(ctx, args[1:], need)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	if args[0] == "delete" {
+		return runnel.DeleteNamespace(ctx, s, pos[0])
+	}
+	all, err := runnel.Namespaces(ctx, s)
+	if err != nil {
+		return err
+	}
+	if args[0] == "create" {
 		n, ok := all[pos[0]]
 		if !ok {
 			n = runnel.Namespace{Name: pos[0]}
@@ -233,51 +247,21 @@ func namespaces(ctx context.Context, args []string) error {
 		}
 		fmt.Println("namespace", pos[0], "ready")
 		return nil
-	case "list":
-		if _, err := c.parse(args[1:], 0); err != nil {
-			return err
-		}
-		s, err := c.open(ctx)
-		if err != nil {
-			return err
-		}
-		defer s.Close()
-		all, err := runnel.Namespaces(ctx, s)
-		if err != nil {
-			return err
-		}
-		names := make([]string, 0, len(all))
-		for n := range all {
-			names = append(names, n)
-		}
-		slices.Sort(names)
-		keys, err := runnel.Keys(ctx, s)
-		if err != nil {
-			return err
-		}
-		count := map[string]int{}
-		for _, k := range keys {
-			count[k.Namespace]++
-		}
-		tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tKEYS\tCREATED")
-		for _, n := range names {
-			fmt.Fprintf(tw, "%s\t%d\t%s\n", n, count[n], all[n].CreatedAt.Format(time.RFC3339))
-		}
-		return tw.Flush()
-	case "delete":
-		pos, err := c.parse(args[1:], 1)
-		if err != nil {
-			return err
-		}
-		s, err := c.open(ctx)
-		if err != nil {
-			return err
-		}
-		defer s.Close()
-		return runnel.DeleteNamespace(ctx, s, pos[0])
 	}
-	return fmt.Errorf("unknown ns command %q", args[0])
+	keys, err := runnel.Keys(ctx, s)
+	if err != nil {
+		return err
+	}
+	count := map[string]int{}
+	for _, k := range keys {
+		count[k.Namespace]++
+	}
+	tw := table()
+	fmt.Fprintln(tw, "NAME\tKEYS\tCREATED")
+	for _, n := range slices.Sorted(maps.Keys(all)) {
+		fmt.Fprintf(tw, "%s\t%d\t%s\n", n, count[n], all[n].CreatedAt.Format(time.RFC3339))
+	}
+	return tw.Flush()
 }
 
 func keys(ctx context.Context, args []string) error {
@@ -288,15 +272,11 @@ func keys(ctx context.Context, args []string) error {
 	roles := c.fs.String("roles", "producer", "comma separated roles: admin, producer, worker, reader")
 	name := c.fs.String("name", "", "label for the key")
 	expires := c.fs.Duration("expires", 0, "lifetime, for example 720h (default never)")
-	need := map[string]int{"create": 1, "list": 1, "delete": 2}[args[0]]
-	if need == 0 {
+	need, ok := map[string]int{"create": 1, "list": 1, "delete": 2}[args[0]]
+	if !ok {
 		return fmt.Errorf("unknown key command %q", args[0])
 	}
-	pos, err := c.parse(args[1:], need)
-	if err != nil {
-		return err
-	}
-	s, err := c.open(ctx)
+	pos, s, err := c.start(ctx, args[1:], need)
 	if err != nil {
 		return err
 	}
@@ -324,7 +304,7 @@ func keys(ctx context.Context, args []string) error {
 		fmt.Println(token)
 		fmt.Fprintln(os.Stderr, "key", k.ID, "created; the token is shown only once")
 	case "list":
-		tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+		tw := table()
 		fmt.Fprintln(tw, "ID\tNAME\tROLES\tEXPIRES")
 		list, err := runnel.NamespaceKeys(ctx, s, pos[0])
 		if err != nil {
@@ -354,11 +334,7 @@ func enqueue(ctx context.Context, args []string) error {
 	tenant := c.fs.String("tenant", "", "tenant")
 	pool := c.fs.String("pool", "", "pool")
 	attempts := c.fs.Int("max-attempts", 0, "max attempts")
-	pos, err := c.parse(args, 3)
-	if err != nil {
-		return err
-	}
-	s, err := c.open(ctx)
+	pos, s, err := c.start(ctx, args, 3)
 	if err != nil {
 		return err
 	}
@@ -391,11 +367,7 @@ func listJobs(ctx context.Context, args []string) error {
 	queue := c.fs.String("queue", "", "queue")
 	state := c.fs.String("state", "", "state")
 	limit := c.fs.Int("limit", 20, "rows")
-	pos, err := c.parse(args, 1)
-	if err != nil {
-		return err
-	}
-	s, err := c.open(ctx)
+	pos, s, err := c.start(ctx, args, 1)
 	if err != nil {
 		return err
 	}
@@ -404,7 +376,7 @@ func listJobs(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	tw := table()
 	fmt.Fprintln(tw, "ID\tQUEUE\tKIND\tSTATE\tATTEMPT\tCREATED")
 	for _, j := range jobs {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d/%d\t%s\n", j.ID, j.Queue, j.Kind, j.State, j.Attempt, j.MaxAttempts, j.CreatedAt.Format(time.RFC3339))
@@ -417,11 +389,7 @@ func listJobs(ctx context.Context, args []string) error {
 
 func jobCommand(ctx context.Context, name string, args []string) error {
 	c := newCmd(name)
-	pos, err := c.parse(args, 2)
-	if err != nil {
-		return err
-	}
-	s, err := c.open(ctx)
+	pos, s, err := c.start(ctx, args, 2)
 	if err != nil {
 		return err
 	}
@@ -444,11 +412,7 @@ func jobCommand(ctx context.Context, name string, args []string) error {
 
 func stats(ctx context.Context, args []string) error {
 	c := newCmd("stats")
-	pos, err := c.parse(args, 1)
-	if err != nil {
-		return err
-	}
-	s, err := c.open(ctx)
+	pos, s, err := c.start(ctx, args, 1)
 	if err != nil {
 		return err
 	}
@@ -457,7 +421,7 @@ func stats(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	tw := table()
 	header := []string{"QUEUE"}
 	for _, state := range runnel.States {
 		header = append(header, strings.ToUpper(string(state)))
@@ -473,21 +437,17 @@ func stats(ctx context.Context, args []string) error {
 	return tw.Flush()
 }
 
-func configCommand[T any](ctx context.Context, name string, kind runnel.ConfigKind, args []string, check func(T) (string, error)) error {
+func configCommand[T interface{ Validate() error }](ctx context.Context, name string, kind runnel.ConfigKind, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("%s needs set, list or delete", name)
 	}
 	c := newCmd(name + " " + args[0])
 	raw := c.fs.String("json", "", "JSON body")
-	need := map[string]int{"set": 2, "list": 1, "delete": 2}[args[0]]
-	if need == 0 {
+	need, ok := map[string]int{"set": 2, "list": 1, "delete": 2}[args[0]]
+	if !ok {
 		return fmt.Errorf("unknown %s command %q", name, args[0])
 	}
-	pos, err := c.parse(args[1:], need)
-	if err != nil {
-		return err
-	}
-	s, err := c.open(ctx)
+	pos, s, err := c.start(ctx, args[1:], need)
 	if err != nil {
 		return err
 	}
@@ -503,12 +463,12 @@ func configCommand[T any](ctx context.Context, name string, kind runnel.ConfigKi
 		}
 		body["name"] = pos[1]
 		b, _ := json.Marshal(body)
-		dec := json.NewDecoder(strings.NewReader(string(b)))
+		dec := json.NewDecoder(bytes.NewReader(b))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&v); err != nil {
 			return fmt.Errorf("--json: %w", err)
 		}
-		if _, err := check(v); err != nil {
+		if err := v.Validate(); err != nil {
 			return err
 		}
 		if err := runnel.PutTyped(ctx, s, pos[0], kind, pos[1], v); err != nil {

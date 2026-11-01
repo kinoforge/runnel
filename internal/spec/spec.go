@@ -25,7 +25,7 @@ func Rule(t testing.TB, ids ...string) {
 
 // Selected reports whether a RUNNEL_RULES value picks any of ids.
 func Selected(want string, ids []string) bool {
-	for _, w := range strings.Split(want, ",") {
+	for w := range strings.SplitSeq(want, ",") {
 		w = strings.TrimSpace(w)
 		for _, id := range ids {
 			if w != "" && strings.HasPrefix(id, w) {
