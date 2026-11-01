@@ -65,114 +65,152 @@ func capped(cfg *nsConfig, jobs []*runnel.Job) bool {
 }
 
 func (s *Store) insertWith(ctx context.Context, tx *txn, ns string, cfg *nsConfig, jobs []*runnel.Job, now time.Time) ([]runnel.Inserted, error) {
+	b := &batchInsert{s: s, ctx: ctx, tx: tx, ns: ns, cfg: cfg, nowMs: runnel.Millis(now),
+		remap: map[string]string{}, waiting: map[string]int{}}
 	out := make([]runnel.Inserted, len(jobs))
-	nowMs := runnel.Millis(now)
-	err := func() error {
-		remap := map[string]string{}
-		inserted := false
-		waiting := map[string]int{}
-		count := func(key string, query string, args ...any) (int, error) {
-			if n, ok := waiting[key]; ok {
-				return n, nil
-			}
-			var n int
-			err := tx.QueryRowContext(ctx, s.q(query), args...).Scan(&n)
-			waiting[key] = n
-			return n, err
+	inserted := false
+	for i, j := range jobs {
+		res, written, err := b.insert(j)
+		if err != nil {
+			return nil, err
 		}
-		for i, j := range jobs {
-			out[i] = runnel.Inserted{ID: j.ID}
-			deps, failed := remapDeps(j.DependsOn, remap)
-			pending, waitOn := 0, []string(nil)
-			if !failed && len(deps) > 0 {
-				var err error
-				pending, waitOn, err = s.depState(ctx, tx, ns, deps)
-				if errors.Is(err, runnel.ErrDependency) {
-					failed = true
-				} else if err != nil {
-					return err
-				}
-			}
-			if failed {
-				out[i].Err, remap[j.ID] = runnel.ErrDependency, ""
-				continue
-			}
-			if j.UniqueKey != "" {
-				holder, err := s.uniqueHolder(ctx, tx, ns, j.UniqueKey, nowMs, false)
-				if err != nil {
-					return err
-				}
-				if holder != "" {
-					out[i], remap[j.ID] = runnel.Inserted{ID: holder, Duplicate: true}, holder
-					continue
-				}
-			}
-			q := cfg.queues[j.Queue]
-			if q.MaxWaiting > 0 {
-				n, err := count("q|"+j.Queue, "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND state IN (?, ?) AND queue=?",
-					ns, string(runnel.StateWaiting), string(runnel.StateBlocked), j.Queue)
-				if err != nil {
-					return err
-				}
-				if n >= q.MaxWaiting {
-					out[i].Err, remap[j.ID] = runnel.ErrQueueFull, ""
-					continue
-				}
-			}
-			if q.TenantWaiting > 0 && j.Tenant != "" {
-				n, err := count("t|"+j.Queue+"|"+j.Tenant, "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND queue=? AND tenant=? AND state IN (?, ?)",
-					ns, j.Queue, j.Tenant, string(runnel.StateWaiting), string(runnel.StateBlocked))
-				if err != nil {
-					return err
-				}
-				if n >= q.TenantWaiting {
-					out[i].Err, remap[j.ID] = runnel.ErrTenantFull, ""
-					continue
-				}
-			}
-			if j.UniqueKey != "" {
-				var until int64
-				if j.UniqueFor > 0 {
-					until = nowMs + j.UniqueFor.D().Milliseconds()
-				}
-				holder, err := s.claimUnique(ctx, tx, ns, j.UniqueKey, j.ID, until, nowMs)
-				if err != nil {
-					return err
-				}
-				if holder != "" {
-					out[i], remap[j.ID] = runnel.Inserted{ID: holder, Duplicate: true}, holder
-					continue
-				}
-			}
-			j.DependsOn, j.Pending = deps, pending
-			if pending > 0 {
-				j.State, j.StartBy = runnel.StateBlocked, time.Time{}
-			} else {
-				j.State = runnel.StateWaiting
-			}
-			if err := s.insertRow(ctx, tx, j); err != nil {
-				return err
-			}
-			if _, ok := waiting["q|"+j.Queue]; ok {
-				waiting["q|"+j.Queue]++
-			}
-			if _, ok := waiting["t|"+j.Queue+"|"+j.Tenant]; ok {
-				waiting["t|"+j.Queue+"|"+j.Tenant]++
-			}
-			for _, d := range waitOn {
-				if _, err := tx.ExecContext(ctx, s.q(s.d.Ignore("rn_deps", []string{"ns", "dep_id", "job_id"})), ns, d, j.ID); err != nil {
-					return err
-				}
-			}
-			inserted = true
-		}
-		tx.wake = tx.wake || inserted
-		return nil
-	}()
-	if err != nil {
-		return nil, err
+		out[i], inserted = res, inserted || written
 	}
+	tx.wake = tx.wake || inserted
 	return out, nil
+}
+
+// batchInsert holds what the jobs of one Insert call share: ids remapped to
+// duplicates or rejections, and waiting counts already read.
+type batchInsert struct {
+	s       *Store
+	ctx     context.Context
+	tx      *txn
+	ns      string
+	cfg     *nsConfig
+	nowMs   int64
+	remap   map[string]string
+	waiting map[string]int
+}
+
+type depInfo struct {
+	deps    []string
+	pending int
+	waitOn  []string
+}
+
+func (b *batchInsert) insert(j *runnel.Job) (runnel.Inserted, bool, error) {
+	d, ok, err := b.dependencies(j)
+	if err != nil || !ok {
+		return b.reject(j, runnel.ErrDependency), false, err
+	}
+	if j.UniqueKey != "" {
+		holder, err := b.s.uniqueHolder(b.ctx, b.tx, b.ns, j.UniqueKey, b.nowMs, false)
+		if err != nil || holder != "" {
+			return b.duplicate(j, holder), false, err
+		}
+	}
+	rejected, err := b.overCap(j)
+	if err != nil || rejected != nil {
+		return b.reject(j, rejected), false, err
+	}
+	if j.UniqueKey != "" {
+		holder, err := b.claimUnique(j)
+		if err != nil || holder != "" {
+			return b.duplicate(j, holder), false, err
+		}
+	}
+	return runnel.Inserted{ID: j.ID}, true, b.write(j, d)
+}
+
+func (b *batchInsert) reject(j *runnel.Job, err error) runnel.Inserted {
+	b.remap[j.ID] = ""
+	return runnel.Inserted{ID: j.ID, Err: err}
+}
+
+func (b *batchInsert) duplicate(j *runnel.Job, holder string) runnel.Inserted {
+	b.remap[j.ID] = holder
+	return runnel.Inserted{ID: holder, Duplicate: true}
+}
+
+func (b *batchInsert) dependencies(j *runnel.Job) (depInfo, bool, error) {
+	deps, failed := remapDeps(j.DependsOn, b.remap)
+	if failed {
+		return depInfo{}, false, nil
+	}
+	d := depInfo{deps: deps}
+	if len(deps) == 0 {
+		return d, true, nil
+	}
+	var err error
+	d.pending, d.waitOn, err = b.s.depState(b.ctx, b.tx, b.ns, deps)
+	if errors.Is(err, runnel.ErrDependency) {
+		return depInfo{}, false, nil
+	}
+	return d, err == nil, err
+}
+
+func queueKey(j *runnel.Job) string  { return "q|" + j.Queue }
+func tenantKey(j *runnel.Job) string { return "t|" + j.Queue + "|" + j.Tenant }
+
+func (b *batchInsert) overCap(j *runnel.Job) (rejected, err error) {
+	q := b.cfg.queues[j.Queue]
+	if q.MaxWaiting > 0 {
+		n, err := b.count(queueKey(j), "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND state IN (?, ?) AND queue=?",
+			b.ns, string(runnel.StateWaiting), string(runnel.StateBlocked), j.Queue)
+		if err != nil || n >= q.MaxWaiting {
+			return runnel.ErrQueueFull, err
+		}
+	}
+	if q.TenantWaiting > 0 && j.Tenant != "" {
+		n, err := b.count(tenantKey(j), "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND queue=? AND tenant=? AND state IN (?, ?)",
+			b.ns, j.Queue, j.Tenant, string(runnel.StateWaiting), string(runnel.StateBlocked))
+		if err != nil || n >= q.TenantWaiting {
+			return runnel.ErrTenantFull, err
+		}
+	}
+	return nil, nil
+}
+
+func (b *batchInsert) count(key, query string, args ...any) (int, error) {
+	if n, ok := b.waiting[key]; ok {
+		return n, nil
+	}
+	var n int
+	err := b.tx.QueryRowContext(b.ctx, b.s.q(query), args...).Scan(&n)
+	b.waiting[key] = n
+	return n, err
+}
+
+func (b *batchInsert) claimUnique(j *runnel.Job) (string, error) {
+	var until int64
+	if j.UniqueFor > 0 {
+		until = b.nowMs + j.UniqueFor.D().Milliseconds()
+	}
+	return b.s.claimUnique(b.ctx, b.tx, b.ns, j.UniqueKey, j.ID, until, b.nowMs)
+}
+
+func (b *batchInsert) write(j *runnel.Job, d depInfo) error {
+	j.DependsOn, j.Pending = d.deps, d.pending
+	if d.pending > 0 {
+		j.State, j.StartBy = runnel.StateBlocked, time.Time{}
+	} else {
+		j.State = runnel.StateWaiting
+	}
+	if err := b.s.insertRow(b.ctx, b.tx, j); err != nil {
+		return err
+	}
+	for _, key := range []string{queueKey(j), tenantKey(j)} {
+		if _, ok := b.waiting[key]; ok {
+			b.waiting[key]++
+		}
+	}
+	for _, dep := range d.waitOn {
+		if _, err := b.tx.ExecContext(b.ctx, b.s.q(b.s.d.Ignore("rn_deps", []string{"ns", "dep_id", "job_id"})), b.ns, dep, j.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) claimUnique(ctx context.Context, tx *txn, ns, key, id string, until, now int64) (string, error) {

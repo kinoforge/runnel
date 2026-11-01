@@ -19,24 +19,30 @@ type email struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	store, err := sqlite.Open("example.db")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer store.Close()
 	if err := store.Migrate(ctx); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	client := runnel.NewClient(store, "mailer")
 	if err := client.SetQueue(ctx, runnel.QueueConfig{Name: "emails", Concurrency: 5, TenantSlots: 1, Rate: 20}); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := client.SetPool(ctx, runnel.PoolConfig{Name: "smtp-primary", Slots: 3}); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	worker := runnel.NewWorker(store, "mailer", runnel.WorkerConfig{Queues: []string{"emails", "emails-backup"}, Concurrency: 8})
@@ -65,13 +71,14 @@ func main() {
 		runnel.Unique("welcome:ada@example.com", 24*time.Hour),
 		runnel.StartWithin(30*time.Second), runnel.Fallbacks(runnel.Target{Queue: "emails-backup", Pool: "smtp-backup"}))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	j, err := client.Wait(wctx, res.ID)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	fmt.Println("job", j.ID, j.State, string(j.Result))
+	return nil
 }

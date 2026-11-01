@@ -46,6 +46,15 @@ func checkName(field, v string, optional bool) error {
 }
 
 func (j *Job) validate(l Limits) error {
+	for _, check := range []func(Limits) error{j.validateNames, j.validateSettings, j.validateFallbacks, j.validateExtras} {
+		if err := check(l); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (j *Job) validateNames(Limits) error {
 	if err := checkName("queue", j.Queue, false); err != nil {
 		return err
 	}
@@ -58,6 +67,10 @@ func (j *Job) validate(l Limits) error {
 	if j.Tenant != "" && !ValidTenant(j.Tenant) {
 		return invalid("tenant %q must match %s", j.Tenant, tenantPattern)
 	}
+	return nil
+}
+
+func (j *Job) validateSettings(l Limits) error {
 	if len(j.Payload) > l.MaxPayload {
 		return invalid("payload is %d bytes, limit %d", len(j.Payload), l.MaxPayload)
 	}
@@ -73,6 +86,10 @@ func (j *Job) validate(l Limits) error {
 	if j.Timeout < 0 || j.StartWithin < 0 || j.UniqueFor < 0 {
 		return invalid("durations must not be negative")
 	}
+	return nil
+}
+
+func (j *Job) validateFallbacks(l Limits) error {
 	if len(j.Fallbacks) > l.MaxFallbacks {
 		return invalid("at most %d fallbacks", l.MaxFallbacks)
 	}
@@ -90,6 +107,10 @@ func (j *Job) validate(l Limits) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (j *Job) validateExtras(l Limits) error {
 	if len(j.DependsOn) > l.MaxDependsOn {
 		return invalid("at most %d dependencies", l.MaxDependsOn)
 	}
@@ -105,9 +126,7 @@ func (j *Job) validate(l Limits) error {
 		return err
 	}
 	if j.Webhook != "" {
-		if err := ValidWebhookURL(j.Webhook, l.MaxWebhookURL); err != nil {
-			return err
-		}
+		return ValidWebhookURL(j.Webhook, l.MaxWebhookURL)
 	}
 	return nil
 }

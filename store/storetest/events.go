@@ -13,7 +13,7 @@ func testPrune(t *testing.T, open Opener) {
 	spec.Rule(t, "T03")
 	e := setup(t, open)
 	for range 3 {
-		e.add("q", "k")
+		e.add("q")
 	}
 	got := e.claim([]string{"q"}, 2)
 	for _, j := range got {
@@ -38,8 +38,8 @@ func testPrune(t *testing.T, open Opener) {
 func testEvents(t *testing.T, open Opener) {
 	spec.Rule(t, "M01", "M05", "M06")
 	e := setup(t, open)
-	e.add("q", "k")
-	e.add("q", "k")
+	e.add("q")
+	e.add("q")
 	got := e.claim([]string{"q"}, 2)
 	e.finish(got[0], runnel.Outcome{Kind: runnel.OutcomeDone})
 	if _, err := e.c.Cancel(e.ctx, got[1].ID); err != nil {
@@ -80,7 +80,7 @@ func testMaintainer(t *testing.T, open Opener) {
 	spec.Rule(t, "L02", "T01")
 	e := setup(t, open)
 	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}})
-	e.add("q", "k", runnel.MaxAttempts(3))
+	e.add("q", runnel.MaxAttempts(3))
 	got, err := e.s.Claim(e.ctx, e.ns, runnel.ClaimRequest{Queues: []string{"q"}, Worker: "ghost", Limit: 1, Lease: 50 * time.Millisecond, Now: e.now()})
 	if err != nil || len(got) != 1 {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func testMaintainer(t *testing.T, open Opener) {
 	if j.State != runnel.StateWaiting || j.Attempt != 1 || len(j.Errors) != 1 {
 		t.Fatalf("not reaped: %+v", j)
 	}
-	moved := e.add("slow", "k", runnel.StartWithin(50*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "fast"}))
+	moved := e.add("slow", runnel.StartWithin(50*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "fast"}))
 	time.Sleep(80 * time.Millisecond)
 	if err := m.Tick(e.ctx, e.ns); err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func testEventsOutlivePrune(t *testing.T, open Opener) {
 	spec.Rule(t, "T04")
 	e := setup(t, open)
 	for range 4 {
-		e.add("q", "k")
+		e.add("q")
 	}
 	for _, j := range e.claim([]string{"q"}, 4) {
 		e.finish(j, runnel.Outcome{Kind: runnel.OutcomeDone})
@@ -175,7 +175,7 @@ func testMaintainerEvents(t *testing.T, open Opener) {
 		t.Fatal(err)
 	}
 	for range 3 {
-		e.add("short", "k")
+		e.add("short")
 	}
 	for _, j := range e.claim([]string{"short"}, 3) {
 		e.finish(j, runnel.Outcome{Kind: runnel.OutcomeDone})
@@ -200,8 +200,8 @@ func testMaintainerEvents(t *testing.T, open Opener) {
 func testWebhookJobs(t *testing.T, open Opener) {
 	spec.Rule(t, "H01")
 	e := setup(t, open)
-	hooked := e.add("q", "k", runnel.Webhook("https://example.com/hook"))
-	e.add("q", "k")
+	hooked := e.add("q", runnel.Webhook("https://example.com/hook"))
+	e.add("q")
 	for _, j := range e.claim([]string{"q"}, 2) {
 		e.finish(j, runnel.Outcome{Kind: runnel.OutcomeDone})
 	}

@@ -227,7 +227,7 @@ func testWorkerCancel(t *testing.T, open Opener) {
 func testWait(t *testing.T, open Opener) {
 	spec.Rule(t, "W01", "W02")
 	e := setup(t, open)
-	res := e.add("q", "k")
+	res := e.add("q")
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		for _, j := range e.claim([]string{"q"}, 1) {
@@ -243,7 +243,7 @@ func testWait(t *testing.T, open Opener) {
 	if took := time.Since(began); took > 3*time.Second {
 		t.Fatalf("wait noticed the end after %v", took)
 	}
-	other := e.add("q", "k")
+	other := e.add("q")
 	ctx, cancel := context.WithTimeout(e.ctx, 150*time.Millisecond)
 	defer cancel()
 	j, err = e.c.Wait(ctx, other.ID)

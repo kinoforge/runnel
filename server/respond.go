@@ -96,7 +96,7 @@ func decode(r *http.Request, v any) error {
 		if errors.As(err, &tooBig) {
 			return err
 		}
-		return fmt.Errorf("%w: body: %v", runnel.ErrInvalid, err)
+		return fmt.Errorf("%w: body: %w", runnel.ErrInvalid, err)
 	}
 	if dec.More() {
 		return fmt.Errorf("%w: body must hold one JSON value", runnel.ErrInvalid)

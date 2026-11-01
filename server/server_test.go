@@ -99,10 +99,10 @@ func TestAuthAndRoles(t *testing.T) {
 	if strings.Contains(string(raw), "s3cret") || strings.Contains(string(raw), `"hash"`) {
 		t.Fatalf("namespace view leaks secrets: %s", raw)
 	}
-	code, out := call(t, srv, admin, "GET", "/v1/namespaces/billing", nil)
+	_, out := call(t, srv, admin, "GET", "/v1/namespaces/billing", nil)
 	keys := out["keys"].([]any)
 	id := keys[0].(map[string]any)["id"].(string)
-	if code, _ = call(t, srv, admin, "DELETE", "/v1/namespaces/billing/keys/"+id, nil); code != 204 {
+	if code, _ := call(t, srv, admin, "DELETE", "/v1/namespaces/billing/keys/"+id, nil); code != 204 {
 		t.Fatalf("delete key: %d", code)
 	}
 	if code, _ := call(t, srv, reader, "GET", "/v1/ns/billing/stats", nil); code != 401 {
@@ -174,30 +174,33 @@ func TestNoAdminToken(t *testing.T) {
 	}
 }
 
+func get(t *testing.T, url string) (int, string) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
 func TestMetricsAndHealth(t *testing.T) {
 	spec.Rule(t, "S11", "A01")
 	srv, st := setup(t)
 	call(t, srv, admin, "PUT", "/v1/namespaces/m", nil)
-	resp, err := http.Get(srv.URL + "/healthz")
-	if err != nil || resp.StatusCode != 200 {
-		t.Fatalf("healthz %v %v", resp, err)
+	if code, _ := get(t, srv.URL+"/healthz"); code != 200 {
+		t.Fatalf("healthz %d", code)
 	}
-	resp, err = http.Get(srv.URL + "/metrics")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(b), "runnel_http_requests_total") {
+	if _, body := get(t, srv.URL+"/metrics"); !strings.Contains(body, "runnel_http_requests_total") {
 		t.Fatalf("metrics missing")
 	}
-	resp, err = http.Get(srv.URL + "/openapi.yaml")
-	if err != nil || resp.StatusCode != 200 {
-		t.Fatalf("openapi %v %v", resp, err)
+	if code, _ := get(t, srv.URL+"/openapi.yaml"); code != 200 {
+		t.Fatalf("openapi %d", code)
 	}
 	_ = st.Close()
-	resp, err = http.Get(srv.URL + "/healthz")
-	if err != nil || resp.StatusCode != 503 {
-		t.Fatalf("healthz with the store gone %v %v", resp, err)
+	if code, _ := get(t, srv.URL+"/healthz"); code != 503 {
+		t.Fatalf("healthz with the store gone %d", code)
 	}
 }
 

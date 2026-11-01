@@ -11,9 +11,9 @@ import (
 	"github.com/kinoforge/runnel/internal/spec"
 )
 
-func running(attempt, max int) *Job {
+func running(attempt, maxAttempts int) *Job {
 	now := time.Now().UTC()
-	return &Job{ID: NewID(), Queue: "q", Kind: "k", State: StateRunning, Attempt: attempt, MaxAttempts: max,
+	return &Job{ID: NewID(), Queue: "q", Kind: "k", State: StateRunning, Attempt: attempt, MaxAttempts: maxAttempts,
 		Worker: "w", LeaseUntil: now.Add(time.Minute), WaitingSince: now.Add(-time.Second), Version: 3}
 }
 
@@ -198,7 +198,7 @@ func (s skewed) Time(context.Context) (time.Time, error) { return time.Now().Add
 func TestStoreClockFollowsSource(t *testing.T) {
 	spec.Rule(t, "K01", "J05")
 	c := NewStoreClock(skewed{ahead: time.Hour})
-	got := c.Now().Sub(time.Now())
+	got := time.Until(c.Now())
 	if got < time.Hour-time.Second || got > time.Hour+time.Second {
 		t.Fatalf("clock offset %v, want about 1h", got)
 	}

@@ -16,10 +16,10 @@ import (
 func testClaimOrder(t *testing.T, open Opener) {
 	spec.Rule(t, "C01", "C02")
 	e := setup(t, open)
-	low := e.add("q", "k", runnel.Priority(0))
-	high := e.add("q", "k", runnel.Priority(10))
-	mid := e.add("q2", "k", runnel.Priority(5))
-	e.add("other", "k", runnel.Priority(100))
+	low := e.add("q", runnel.Priority(0))
+	high := e.add("q", runnel.Priority(10))
+	mid := e.add("q2", runnel.Priority(5))
+	e.add("other", runnel.Priority(100))
 	got := e.claim([]string{"q", "q2"}, 10)
 	if want := []string{high.ID, mid.ID, low.ID}; !slices.Equal(ids(got), want) {
 		t.Fatalf("order %v want %v", ids(got), want)
@@ -40,12 +40,12 @@ func testTenantWaiting(t *testing.T, open Opener) {
 	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantWaiting: 2}); err != nil {
 		t.Fatal(err)
 	}
-	e.add("q", "k", runnel.Tenant("a"))
-	e.add("q", "k", runnel.Tenant("a"))
+	e.add("q", runnel.Tenant("a"))
+	e.add("q", runnel.Tenant("a"))
 	if _, err := e.c.Enqueue(e.ctx, "q", "k", nil, runnel.Tenant("a")); !errors.Is(err, runnel.ErrTenantFull) {
 		t.Fatalf("want tenant full, got %v", err)
 	}
-	e.add("q", "k", runnel.Tenant("b"))
+	e.add("q", runnel.Tenant("b"))
 	e.claim([]string{"q"}, 1)
 	if _, err := e.c.Enqueue(e.ctx, "q", "k", nil, runnel.Tenant("a")); err != nil {
 		t.Fatalf("slot freed by claim, got %v", err)
@@ -59,7 +59,7 @@ func testConcurrency(t *testing.T, open Opener) {
 		t.Fatal(err)
 	}
 	for range 5 {
-		e.add("q", "k")
+		e.add("q")
 	}
 	got := e.claim([]string{"q"}, 10)
 	if len(got) != 2 {
@@ -83,15 +83,15 @@ func testSlots(t *testing.T, open Opener) {
 	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "gpu", Slots: 2}); err != nil {
 		t.Fatal(err)
 	}
-	a1 := e.add("q", "k", runnel.Tenant("a"))
-	e.add("q", "k", runnel.Tenant("a"))
-	b1 := e.add("q", "k", runnel.Tenant("b"))
+	a1 := e.add("q", runnel.Tenant("a"))
+	e.add("q", runnel.Tenant("a"))
+	b1 := e.add("q", runnel.Tenant("b"))
 	got := e.claim([]string{"q"}, 10)
 	if want := []string{a1.ID, b1.ID}; !slices.Equal(ids(got), want) {
 		t.Fatalf("tenant slots: %v want %v", ids(got), want)
 	}
 	for range 3 {
-		e.add("g", "k", runnel.Pool("gpu"))
+		e.add("g", runnel.Pool("gpu"))
 	}
 	if g := e.claim([]string{"g"}, 10); len(g) != 2 {
 		t.Fatalf("pool slots 2, claimed %d", len(g))
@@ -99,9 +99,9 @@ func testSlots(t *testing.T, open Opener) {
 	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "api", TenantSlots: 1}); err != nil {
 		t.Fatal(err)
 	}
-	p1 := e.add("h", "k", runnel.Pool("api"), runnel.Tenant("a"))
-	e.add("h", "k", runnel.Pool("api"), runnel.Tenant("a"))
-	p3 := e.add("h", "k", runnel.Pool("api"), runnel.Tenant("b"))
+	p1 := e.add("h", runnel.Pool("api"), runnel.Tenant("a"))
+	e.add("h", runnel.Pool("api"), runnel.Tenant("a"))
+	p3 := e.add("h", runnel.Pool("api"), runnel.Tenant("b"))
 	if got, want := e.claim([]string{"h"}, 10), []string{p1.ID, p3.ID}; !slices.Equal(ids(got), want) {
 		t.Fatalf("pool tenant slots: %v want %v", ids(got), want)
 	}
@@ -114,7 +114,7 @@ func testRate(t *testing.T, open Opener) {
 		t.Fatal(err)
 	}
 	for range 6 {
-		e.add("q", "k")
+		e.add("q")
 	}
 	if got := e.claim([]string{"q"}, 10); len(got) != 2 {
 		t.Fatalf("burst 2, claimed %d", len(got))
@@ -134,7 +134,7 @@ func testPaused(t *testing.T, open Opener) {
 	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", Paused: true}); err != nil {
 		t.Fatal(err)
 	}
-	e.add("q", "k")
+	e.add("q")
 	if got := e.claim([]string{"q"}, 10); len(got) != 0 {
 		t.Fatalf("paused queue claimed")
 	}
@@ -152,8 +152,8 @@ func testPolling(t *testing.T, open Opener) {
 	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", Concurrency: 1}); err != nil {
 		t.Fatal(err)
 	}
-	e.add("q", "k")
-	e.add("q", "k")
+	e.add("q")
+	e.add("q")
 	j := e.claim([]string{"q"}, 5)[0]
 	p := e.finish(j, runnel.Outcome{Kind: runnel.OutcomePending, Handle: "remote-1", Delay: runnel.Duration(time.Second)})
 	if p.State != runnel.StatePolling {
@@ -248,7 +248,7 @@ func testQueueWaiting(t *testing.T, open Opener) {
 func testClaimByID(t *testing.T, open Opener) {
 	spec.Rule(t, "C10")
 	e := setup(t, open)
-	a, b, c := e.add("q", "k"), e.add("q", "k", runnel.Priority(-5)), e.add("q", "k")
+	a, b, c := e.add("q"), e.add("q", runnel.Priority(-5)), e.add("q")
 	got, err := e.s.Claim(e.ctx, e.ns, runnel.ClaimRequest{Queues: []string{"q"}, IDs: []string{b.ID}, Worker: "w1", Limit: 1, Lease: time.Minute, Now: e.now()})
 	if err != nil || len(got) != 1 || got[0].ID != b.ID {
 		t.Fatalf("claim by id: %v %v", ids(got), err)
@@ -279,7 +279,7 @@ func testFair(t *testing.T, open Opener) {
 		t.Fatal(err)
 	}
 	for _, tn := range []string{"s1", "s2", "s3"} {
-		e.add("q", "k", runnel.Tenant(tn))
+		e.add("q", runnel.Tenant(tn))
 	}
 	got := e.claim([]string{"q"}, 10)
 	tenants := map[string]int{}
@@ -304,8 +304,8 @@ func testFairPool(t *testing.T, open Opener) {
 	if _, err := e.c.EnqueueJobs(e.ctx, full); err != nil {
 		t.Fatal(err)
 	}
-	e.add("q", "k")
-	e.add("q", "k", runnel.Pool("cpu"))
+	e.add("q")
+	e.add("q", runnel.Pool("cpu"))
 	got := e.claim([]string{"q"}, 10)
 	pools := map[string]int{}
 	for _, j := range got {
@@ -322,9 +322,9 @@ func testTenantRate(t *testing.T, open Opener) {
 	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantRate: 0.01, TenantBurst: 1}); err != nil {
 		t.Fatal(err)
 	}
-	a1 := e.add("q", "k", runnel.Tenant("a"))
-	e.add("q", "k", runnel.Tenant("a"))
-	b1 := e.add("q", "k", runnel.Tenant("b"))
+	a1 := e.add("q", runnel.Tenant("a"))
+	e.add("q", runnel.Tenant("a"))
+	b1 := e.add("q", runnel.Tenant("b"))
 	if got, want := e.claim([]string{"q"}, 10), []string{a1.ID, b1.ID}; !slices.Equal(ids(got), want) {
 		t.Fatalf("tenant rate: %v want %v", ids(got), want)
 	}

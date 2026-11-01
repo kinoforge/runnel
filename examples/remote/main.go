@@ -13,6 +13,12 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	c := remote.New(os.Getenv("RUNNEL_URL"), os.Getenv("RUNNEL_KEY"), os.Getenv("RUNNEL_NAMESPACE"))
@@ -28,7 +34,5 @@ func main() {
 		fmt.Println("resizing", in.URL, "to", in.Width)
 		return j.SetResult(map[string]string{"url": in.URL + "?w=" + fmt.Sprint(in.Width)})
 	})
-	if err := w.Run(ctx); err != nil {
-		log.Fatal(err)
-	}
+	return w.Run(ctx)
 }

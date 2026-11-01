@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	scanFactor = 4
-	minScan    = 32
+	scanFactor     = 4
+	maxClaimRounds = 4
+	minScan        = 32
 )
 
 func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) ([]*runnel.Job, error) {
@@ -23,9 +24,28 @@ func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) (
 	if err != nil {
 		return nil, err
 	}
+	open, locked := openQueues(cfg, req.Queues)
+	t := taker{s: s, ns: ns, worker: req.Worker, now: runnel.Millis(req.Now), only: req.IDs}
+	t.lease = t.now + req.Lease.Milliseconds()
+	var out []*runnel.Job
+	err = s.tx(ctx, ns, locked && s.d.LockRows, func(tx *txn) error {
+		t.tx = tx
+		var err error
+		out, err = t.claim(ctx, cfg, req, open, locked)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// openQueues returns the requested queues that are not paused, and whether
+// any limit applies so the claim must lock.
+func openQueues(cfg *nsConfig, queues []string) ([]string, bool) {
 	locked := cfg.poolLimits()
 	var open []string
-	for _, q := range req.Queues {
+	for _, q := range queues {
 		c := cfg.queues[q]
 		if c.Paused || slices.Contains(open, q) {
 			continue
@@ -33,90 +53,111 @@ func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) (
 		open = append(open, q)
 		locked = locked || limited(c)
 	}
-	t := taker{s: s, ns: ns, worker: req.Worker, now: runnel.Millis(req.Now), only: req.IDs}
-	t.lease = t.now + req.Lease.Milliseconds()
-	var out []*runnel.Job
-	err = s.tx(ctx, ns, locked && s.d.LockRows, func(tx *txn) error {
-		t.tx, out = tx, out[:0]
-		if s.d.LightCommit != "" {
-			if _, err := tx.ExecContext(ctx, s.d.LightCommit); err != nil {
-				return err
-			}
+	return open, locked
+}
+
+func (t *taker) claim(ctx context.Context, cfg *nsConfig, req runnel.ClaimRequest, open []string, locked bool) ([]*runnel.Job, error) {
+	if t.s.d.LightCommit != "" {
+		if _, err := t.tx.ExecContext(ctx, t.s.d.LightCommit); err != nil {
+			return nil, err
 		}
-		polls, err := t.scan(ctx, runnel.StatePolling, unique(req.Queues), nil, req.Limit)
-		if err != nil {
-			return err
-		}
-		got, err := t.take(ctx, polls, true)
-		if err != nil {
-			return err
-		}
-		out = append(out, got...)
-		need := req.Limit - len(out)
-		if need <= 0 || len(open) == 0 {
-			return nil
-		}
-		if !locked {
-			cands, err := t.scan(ctx, runnel.StateWaiting, open, nil, need)
-			if err != nil {
-				return err
-			}
-			got, err := t.take(ctx, cands, false)
-			out = append(out, got...)
-			return err
-		}
-		act, err := s.activeCounts(ctx, tx, ns)
-		if err != nil {
-			return err
-		}
-		lim := &limiter{s: s, tx: tx, ns: ns, now: t.now, buckets: map[string]*bucket{}}
-		ex := &exclusions{}
-		for round := 0; round < 4 && need > 0; round++ {
-			queues := slices.DeleteFunc(slices.Clone(open), func(q string) bool { return ex.queues[q] })
-			if len(queues) == 0 {
-				break
-			}
-			cands, err := t.scan(ctx, runnel.StateWaiting, queues, ex, max(need*scanFactor, minScan))
-			if err != nil {
-				return err
-			}
-			var pick []cand
-			blocked := false
-			for _, c := range cands {
-				if len(pick) == need {
-					break
-				}
-				if ex.skip(c) {
-					continue
-				}
-				why, err := admit(ctx, c, cfg.queues[c.queue], cfg.pools[c.pool], act, lim)
-				if err != nil {
-					return err
-				}
-				if why != admitted {
-					ex.add(why, c)
-					blocked = true
-					continue
-				}
-				act.add(c.queue, c.tenant, c.pool, 1)
-				pick = append(pick, c)
-			}
-			got, err := t.take(ctx, pick, false)
-			if err != nil {
-				return err
-			}
-			out = append(out, got...)
-			need -= len(got)
-			if !blocked {
-				break
-			}
-		}
-		return lim.save(ctx)
-	})
+	}
+	polls, err := t.scan(ctx, runnel.StatePolling, unique(req.Queues), nil, req.Limit)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	out, err := t.take(ctx, polls, true)
+	if err != nil {
+		return nil, err
+	}
+	need := req.Limit - len(out)
+	if need <= 0 || len(open) == 0 {
+		return out, nil
+	}
+	var got []*runnel.Job
+	if locked {
+		got, err = t.claimLimited(ctx, cfg, open, need)
+	} else {
+		got, err = t.claimFree(ctx, open, need)
+	}
+	return append(out, got...), err
+}
+
+func (t *taker) claimFree(ctx context.Context, open []string, need int) ([]*runnel.Job, error) {
+	cands, err := t.scan(ctx, runnel.StateWaiting, open, nil, need)
+	if err != nil {
+		return nil, err
+	}
+	return t.take(ctx, cands, false)
+}
+
+// claimLimited scans in rounds: each round excludes the queues, tenants and
+// pools found full, so jobs behind a capped tenant or pool still run.
+func (t *taker) claimLimited(ctx context.Context, cfg *nsConfig, open []string, need int) ([]*runnel.Job, error) {
+	act, err := t.s.activeCounts(ctx, t.tx, t.ns)
+	if err != nil {
+		return nil, err
+	}
+	adm := admission{cfg: cfg, act: act, ex: &exclusions{},
+		lim: &limiter{s: t.s, tx: t.tx, ns: t.ns, now: t.now, buckets: map[string]*bucket{}}}
+	var out []*runnel.Job
+	for round := 0; round < maxClaimRounds && need > 0; round++ {
+		queues := slices.DeleteFunc(slices.Clone(open), func(q string) bool { return adm.ex.queues[q] })
+		if len(queues) == 0 {
+			break
+		}
+		cands, err := t.scan(ctx, runnel.StateWaiting, queues, adm.ex, max(need*scanFactor, minScan))
+		if err != nil {
+			return nil, err
+		}
+		pick, blocked, err := adm.pick(ctx, cands, need)
+		if err != nil {
+			return nil, err
+		}
+		got, err := t.take(ctx, pick, false)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+		need -= len(got)
+		if !blocked {
+			break
+		}
+	}
+	return out, adm.lim.save(ctx)
+}
+
+type admission struct {
+	cfg *nsConfig
+	act counts
+	lim *limiter
+	ex  *exclusions
+}
+
+// pick admits up to need candidates and reports whether a limit refused any.
+func (a *admission) pick(ctx context.Context, cands []cand, need int) ([]cand, bool, error) {
+	var pick []cand
+	blocked := false
+	for _, c := range cands {
+		if len(pick) == need {
+			break
+		}
+		if a.ex.skip(c) {
+			continue
+		}
+		why, err := admit(ctx, c, a.cfg.queues[c.queue], a.cfg.pools[c.pool], a.act, a.lim)
+		if err != nil {
+			return nil, false, err
+		}
+		if why != admitted {
+			a.ex.add(why, c)
+			blocked = true
+			continue
+		}
+		a.act.add(c.queue, c.tenant, c.pool, 1)
+		pick = append(pick, c)
+	}
+	return pick, blocked, nil
 }
 
 func unique(list []string) []string {

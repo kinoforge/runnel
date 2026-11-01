@@ -37,16 +37,20 @@ the store comes from --store, RUNNEL_STORE or the store key, for example
 `
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] == "-h" || os.Args[1] == "--help" || os.Args[1] == "help" {
-		fmt.Print(usage)
-		return
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := run(ctx, os.Args[1], os.Args[2:]); err != nil {
+	if err := runMain(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "runnel:", err)
 		os.Exit(1)
 	}
+}
+
+func runMain(args []string) error {
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		fmt.Print(usage)
+		return nil
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return run(ctx, args[0], args[1:])
 }
 
 var version = ""

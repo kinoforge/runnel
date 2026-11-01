@@ -14,7 +14,7 @@ import (
 func testRoundTrip(t *testing.T, open Opener) {
 	spec.Rule(t, "J01", "J03")
 	e := setup(t, open)
-	res := e.add("q", "k", runnel.Priority(3), runnel.Tenant("acme"), runnel.Pool("p1"), runnel.MaxAttempts(7),
+	res := e.add("q", runnel.Priority(3), runnel.Tenant("acme"), runnel.Pool("p1"), runnel.MaxAttempts(7),
 		runnel.Meta(map[string]string{"a": "b"}), runnel.Fallbacks(runnel.Target{Queue: "q2"}), runnel.StartWithin(time.Minute),
 		runnel.Webhook("https://example.com/h"), runnel.Timeout(time.Second))
 	j := e.get(res.ID)
@@ -34,7 +34,7 @@ func testRoundTrip(t *testing.T, open Opener) {
 	if _, err := e.c.Get(e.ctx, runnel.NewID()); !errors.Is(err, runnel.ErrNotFound) {
 		t.Fatalf("want not found, got %v", err)
 	}
-	if plain := e.get(e.add("q", "k").ID); plain.MaxAttempts != runnel.DefaultMaxAttempts {
+	if plain := e.get(e.add("q").ID); plain.MaxAttempts != runnel.DefaultMaxAttempts {
 		t.Fatalf("default attempts %d", plain.MaxAttempts)
 	}
 }
@@ -42,11 +42,11 @@ func testRoundTrip(t *testing.T, open Opener) {
 func testScheduled(t *testing.T, open Opener) {
 	spec.Rule(t, "J05")
 	e := setup(t, open)
-	e.add("q", "k", runnel.In(time.Hour))
+	e.add("q", runnel.In(time.Hour))
 	if got := e.claim([]string{"q"}, 5); len(got) != 0 {
 		t.Fatalf("future job claimed")
 	}
-	soon := e.add("q", "k", runnel.In(300*time.Millisecond))
+	soon := e.add("q", runnel.In(300*time.Millisecond))
 	time.Sleep(400 * time.Millisecond)
 	if got := e.claim([]string{"q"}, 5); len(got) != 1 || got[0].ID != soon.ID {
 		t.Fatalf("due job not claimed: %v", ids(got))
@@ -56,14 +56,14 @@ func testScheduled(t *testing.T, open Opener) {
 func testUnique(t *testing.T, open Opener) {
 	spec.Rule(t, "J06")
 	e := setup(t, open)
-	a := e.add("q", "k", runnel.Unique("order-1", 0))
-	b := e.add("q", "k", runnel.Unique("order-1", 0))
+	a := e.add("q", runnel.Unique("order-1", 0))
+	b := e.add("q", runnel.Unique("order-1", 0))
 	if !b.Duplicate || b.ID != a.ID {
 		t.Fatalf("not deduped: %+v %+v", a, b)
 	}
 	got := e.claim([]string{"q"}, 5)
 	e.finish(got[0], runnel.Outcome{Kind: runnel.OutcomeDone})
-	c := e.add("q", "k", runnel.Unique("order-1", 0))
+	c := e.add("q", runnel.Unique("order-1", 0))
 	if c.Duplicate || c.ID == a.ID {
 		t.Fatalf("unique not released after finish: %+v", c)
 	}
@@ -72,16 +72,16 @@ func testUnique(t *testing.T, open Opener) {
 func testUniqueWindow(t *testing.T, open Opener) {
 	spec.Rule(t, "J07")
 	e := setup(t, open)
-	a := e.add("q", "k", runnel.Unique("w", time.Hour))
+	a := e.add("q", runnel.Unique("w", time.Hour))
 	got := e.claim([]string{"q"}, 5)
 	e.finish(got[0], runnel.Outcome{Kind: runnel.OutcomeDone})
-	b := e.add("q", "k", runnel.Unique("w", time.Hour))
+	b := e.add("q", runnel.Unique("w", time.Hour))
 	if !b.Duplicate || b.ID != a.ID {
 		t.Fatalf("window not kept after finish: %+v", b)
 	}
-	e.add("q", "k", runnel.Unique("short", 200*time.Millisecond))
+	e.add("q", runnel.Unique("short", 200*time.Millisecond))
 	time.Sleep(300 * time.Millisecond)
-	if d := e.add("q", "k", runnel.Unique("short", 200*time.Millisecond)); d.Duplicate {
+	if d := e.add("q", runnel.Unique("short", 200*time.Millisecond)); d.Duplicate {
 		t.Fatalf("expired window still deduped")
 	}
 }
@@ -99,7 +99,7 @@ func testDependencyRejects(t *testing.T, open Opener) {
 	if _, err := e.c.EnqueueFlow(e.ctx, f); !errors.Is(err, runnel.ErrInvalid) {
 		t.Fatalf("cycle accepted: %v", err)
 	}
-	dup := e.add("q", "k", runnel.Unique("shared", 0))
+	dup := e.add("q", runnel.Unique("shared", 0))
 	f2 := runnel.NewFlow()
 	s1, _ := runnel.NewJob("q", "k", nil, runnel.Unique("shared", 0))
 	s2, _ := runnel.NewJob("q", "k2", nil)
@@ -187,11 +187,11 @@ func testNamespaces(t *testing.T, open Opener) {
 	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "p", Slots: 1}); err != nil {
 		t.Fatal(err)
 	}
-	res := e.add("q", "k")
+	res := e.add("q")
 	for _, j := range e.claim([]string{"q"}, 1) {
 		e.finish(j, runnel.Outcome{Kind: runnel.OutcomeDone})
 	}
-	e.add("q", "k")
+	e.add("q")
 	if _, err := e.s.SwapCursor(e.ctx, e.ns, "c", 0, 5); err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func testNamespaces(t *testing.T, open Opener) {
 func testMigrateAgain(t *testing.T, open Opener) {
 	spec.Rule(t, "X02")
 	e := setup(t, open)
-	res := e.add("q", "k")
+	res := e.add("q")
 	if err := e.s.Migrate(e.ctx); err != nil {
 		t.Fatalf("migrating a migrated store: %v", err)
 	}

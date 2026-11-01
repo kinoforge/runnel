@@ -164,7 +164,7 @@ func strictUnmarshal(raw json.RawMessage, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		return fmt.Errorf("%w: body: %v", runnel.ErrInvalid, err)
+		return fmt.Errorf("%w: body: %w", runnel.ErrInvalid, err)
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/kinoforge/runnel"
 	"github.com/kinoforge/runnel/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 const (
@@ -84,7 +85,7 @@ func New(store runnel.Store, cfg Config) *Server {
 	}
 	if cfg.Registry == nil {
 		cfg.Registry = prometheus.NewRegistry()
-		cfg.Registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+		cfg.Registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	}
 	s := &Server{store: store, clock: runnel.ClockOf(store), cfg: cfg, log: cfg.Logger, mux: http.NewServeMux(), clients: map[string]*runnel.Client{}, sources: map[string]runnel.Source{}, hubs: map[string]*hub{}}
 	if cfg.AdminToken != "" {

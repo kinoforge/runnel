@@ -91,7 +91,12 @@ func TestRemoteWorkerFlow(t *testing.T) {
 	}
 }
 
-func send(t *testing.T, srv *httptest.Server, token, method, path, prefer string, body any) (*http.Response, map[string]any) {
+type reply struct {
+	StatusCode int
+	Header     http.Header
+}
+
+func send(t *testing.T, srv *httptest.Server, token, method, path, prefer string, body any) (reply, map[string]any) {
 	t.Helper()
 	var r io.Reader
 	if body != nil {
@@ -110,7 +115,7 @@ func send(t *testing.T, srv *httptest.Server, token, method, path, prefer string
 	defer resp.Body.Close()
 	out := map[string]any{}
 	_ = json.NewDecoder(resp.Body).Decode(&out)
-	return resp, out
+	return reply{StatusCode: resp.StatusCode, Header: resp.Header}, out
 }
 
 func TestWaitModes(t *testing.T) {
@@ -133,7 +138,7 @@ func TestWaitModes(t *testing.T) {
 	}
 
 	w := remote.NewWorker(remote.New(srv.URL, workKey, "door"), runnel.WorkerConfig{Queues: []string{"fast"}, Concurrency: 2, Lease: 5 * time.Second, ShutdownTimeout: time.Second})
-	w.HandleFunc("echo", func(ctx context.Context, j *runnel.Job) error { return j.SetResult(json.RawMessage(j.Payload)) })
+	w.HandleFunc("echo", func(ctx context.Context, j *runnel.Job) error { return j.SetResult(j.Payload) })
 	wctx, wcancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {

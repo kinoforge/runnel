@@ -34,9 +34,9 @@ func setup(t *testing.T, open Opener) *env {
 
 func (e *env) now() time.Time { return runnel.ClockOf(e.s).Now() }
 
-func (e *env) add(queue, kind string, opts ...runnel.Option) runnel.Inserted {
+func (e *env) add(queue string, opts ...runnel.Option) runnel.Inserted {
 	e.t.Helper()
-	res, err := e.c.Enqueue(e.ctx, queue, kind, map[string]any{"n": 1}, opts...)
+	res, err := e.c.Enqueue(e.ctx, queue, "k", map[string]any{"n": 1}, opts...)
 	if err != nil {
 		e.t.Fatalf("enqueue: %v", err)
 	}

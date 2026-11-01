@@ -13,7 +13,7 @@ import (
 func testExtend(t *testing.T, open Opener) {
 	spec.Rule(t, "L01")
 	e := setup(t, open)
-	a, b := e.add("q", "k"), e.add("q", "k")
+	a, b := e.add("q"), e.add("q")
 	got := e.claim([]string{"q"}, 2)
 	if _, err := e.c.Cancel(e.ctx, b.ID); err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func testExtend(t *testing.T, open Opener) {
 func testVersionGuard(t *testing.T, open Opener) {
 	spec.Rule(t, "L04")
 	e := setup(t, open)
-	e.add("q", "k")
+	e.add("q")
 	j := e.claim([]string{"q"}, 1)[0]
 	stale := j.Clone()
 	e.finish(j, runnel.Outcome{Kind: runnel.OutcomeRetry, Error: "x"})
@@ -51,7 +51,7 @@ func testVersionGuard(t *testing.T, open Opener) {
 func testLeaseGuard(t *testing.T, open Opener) {
 	spec.Rule(t, "L03")
 	e := setup(t, open)
-	e.add("q", "k")
+	e.add("q")
 	j := e.claim([]string{"q"}, 1)[0]
 	n := runnel.Decide(j, runnel.Outcome{Kind: runnel.OutcomeRetry}, e.now())
 	ok, err := e.s.Apply(e.ctx, e.ns, []runnel.Change{{Job: n, LeaseBefore: e.now()}}, e.now())
@@ -139,8 +139,8 @@ func testCascadeFail(t *testing.T, open Opener) {
 func testDueStart(t *testing.T, open Opener) {
 	spec.Rule(t, "T01", "L02")
 	e := setup(t, open)
-	a := e.add("q", "k", runnel.StartWithin(100*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "q2"}))
-	e.add("q", "k", runnel.StartWithin(100*time.Millisecond))
+	a := e.add("q", runnel.StartWithin(100*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "q2"}))
+	e.add("q", runnel.StartWithin(100*time.Millisecond))
 	time.Sleep(150 * time.Millisecond)
 	due, err := e.s.Due(e.ctx, e.ns, runnel.DueStart, e.now(), 10)
 	if err != nil {
@@ -199,7 +199,7 @@ func testStatsList(t *testing.T, open Opener) {
 		if i%2 == 1 {
 			q = "b"
 		}
-		all = append(all, e.add(q, "k", runnel.Tenant("t")).ID)
+		all = append(all, e.add(q, runnel.Tenant("t")).ID)
 	}
 	jobs, next, err := e.c.List(e.ctx, runnel.Query{Limit: 3})
 	if err != nil || len(jobs) != 3 || next == "" {

@@ -137,28 +137,35 @@ func (s *Store) listenOnce(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		s.mu.Lock()
-		switch n.Channel {
-		case "runnel_wake":
-			for _, ch := range s.wakes[n.Payload] {
-				select {
-				case ch <- struct{}{}:
-				default:
-				}
-			}
-		case "runnel_end":
-			if ns, ids, ok := strings.Cut(n.Payload, "|"); ok {
-				for id := range strings.SplitSeq(ids, ",") {
-					for _, ch := range s.ends[ns] {
-						select {
-						case ch <- id:
-						default:
-						}
-					}
-				}
+		s.dispatch(n.Channel, n.Payload)
+	}
+}
+
+func (s *Store) dispatch(channel, payload string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch channel {
+	case "runnel_wake":
+		for _, ch := range s.wakes[payload] {
+			notify(ch, struct{}{})
+		}
+	case "runnel_end":
+		ns, ids, ok := strings.Cut(payload, "|")
+		if !ok {
+			return
+		}
+		for id := range strings.SplitSeq(ids, ",") {
+			for _, ch := range s.ends[ns] {
+				notify(ch, id)
 			}
 		}
-		s.mu.Unlock()
+	}
+}
+
+func notify[T any](ch chan T, v T) {
+	select {
+	case ch <- v:
+	default:
 	}
 }
 
