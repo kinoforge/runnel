@@ -44,7 +44,11 @@ func bench(ctx context.Context, args []string) error {
 	if *total <= 0 || *workers <= 0 || *concurrency <= 0 || *batch <= 0 || *batch > 1000 {
 		return errors.New("jobs, workers and concurrency must be positive and batch 1 to 1000")
 	}
-	s, err := c.open(ctx)
+	cfg, err := c.settings()
+	if err != nil {
+		return err
+	}
+	s, err := open(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -121,7 +125,7 @@ func bench(ctx context.Context, args []string) error {
 	wg.Wait()
 
 	tw := table()
-	fmt.Fprintf(tw, "store\t%s\n", redact(*c.store))
+	fmt.Fprintf(tw, "store\t%s\n", redact(cfg.Store))
 	fmt.Fprintf(tw, "jobs\t%d (batch %d, %d tenants, tenant slots %d)\n", *total, *batch, *tenants, *tenantSlots)
 	fmt.Fprintf(tw, "workers\t%d x %d slots\n", *workers, *concurrency)
 	fmt.Fprintf(tw, "enqueue\t%.0f jobs/s\n", float64(*total)/enqueued.Seconds())

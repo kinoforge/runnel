@@ -159,6 +159,8 @@ runnel queue set collector collect --json '{"tenant_slots":2,"max_waiting":10000
 runnel serve
 ```
 
+Settings come from built-in defaults, then a YAML file (`--config FILE` or `RUNNEL_CONFIG`), then `RUNNEL_*` variables, then flags. Every key and its default is in [`deploy/runnel.example.yaml`](deploy/runnel.example.yaml); a key's variable is named after its path, so `server.max_body` is `RUNNEL_SERVER_MAX_BODY`. For local development, copy `.env.example` to `.env`.
+
 Enqueue from any language, and wait up to 30 seconds for the answer:
 
 ```

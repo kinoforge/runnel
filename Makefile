@@ -1,8 +1,13 @@
-INTEGRATION = RUNNEL_TEST_POSTGRES='postgres://runnel:runnel@localhost:55432/runnel?sslmode=disable' \
-	RUNNEL_TEST_MYSQL='root:runnel@tcp(localhost:53306)/runnel' \
-	RUNNEL_TEST_REDIS=redis://localhost:56379/0 \
-	RUNNEL_TEST_VALKEY=redis://localhost:56380/0 \
-	RUNNEL_TEST_DRAGONFLY=redis://localhost:56381/0
+-include .env
+
+RUNNEL_TEST_POSTGRES ?= postgres://runnel:runnel@localhost:55432/runnel?sslmode=disable
+RUNNEL_TEST_MYSQL ?= root:runnel@tcp(localhost:53306)/runnel
+RUNNEL_TEST_REDIS ?= redis://localhost:56379/0
+RUNNEL_TEST_VALKEY ?= redis://localhost:56380/0
+RUNNEL_TEST_DRAGONFLY ?= redis://localhost:56381/0
+INTEGRATION = RUNNEL_TEST_POSTGRES='$(RUNNEL_TEST_POSTGRES)' RUNNEL_TEST_MYSQL='$(RUNNEL_TEST_MYSQL)' \
+	RUNNEL_TEST_REDIS='$(RUNNEL_TEST_REDIS)' RUNNEL_TEST_VALKEY='$(RUNNEL_TEST_VALKEY)' \
+	RUNNEL_TEST_DRAGONFLY='$(RUNNEL_TEST_DRAGONFLY)'
 
 FUZZTIME ?= 30s
 

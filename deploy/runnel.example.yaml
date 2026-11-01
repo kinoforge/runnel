@@ -1,0 +1,53 @@
+# runnel serve settings. Load with --config FILE or RUNNEL_CONFIG=FILE.
+# Order: built-in defaults, this file, RUNNEL_* variables, command-line flags.
+# Each key has a variable named after its path: server.max_body -> RUNNEL_SERVER_MAX_BODY.
+# Exceptions: server.addr -> RUNNEL_ADDR, server.admin_token -> RUNNEL_ADMIN_TOKEN.
+# A duration or number left at 0 uses the library default shown.
+
+store: sqlite:runnel.db # postgres://..., mysql://..., redis://...
+
+log:
+  format: text # text or json
+  level: info  # debug, info, warn, error
+
+server:
+  addr: ":8700"
+  admin_token: "" # at least 24 characters; prefer RUNNEL_ADMIN_TOKEN
+  max_body: 0           # 4 MiB
+  max_claim_wait: 0s    # 30s
+  max_result_wait: 0s   # 60s
+  retry_after: 0s       # 1s
+  allow_http_webhooks: false
+  read_header_timeout: 10s
+  read_timeout: 1m
+  write_timeout: 2m
+  idle_timeout: 2m
+  max_header_bytes: 65536
+  shutdown_timeout: 15s
+
+maintainer:
+  enabled: true
+  interval: 0s    # 1s
+  prune_every: 0s # 1m
+  batch: 0        # 500
+  archive: false
+  retention:
+    completed: 24h
+    cancelled: 24h
+    dead: 168h
+    events: 24h
+    undelivered: 168h
+
+webhooks:
+  enabled: true
+  concurrency: 0 # 4
+  timeout: 0s    # 10s
+  allow_private: false
+
+limits:
+  max_payload: 1048576
+  max_fallbacks: 16
+  max_depends_on: 256
+  max_meta: 32
+  max_unique_key: 255
+  max_webhook_url: 2048

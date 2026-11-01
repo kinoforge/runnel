@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/internal/config"
 	"github.com/kinoforge/runnel/stores"
 )
 
@@ -29,7 +30,9 @@ usage:
   runnel version
   runnel bench [--jobs 20000] [--workers 4] [--concurrency 25] [--batch 100] [--tenants N] [--tenant-slots N]
 
-every command reads the store from --store or RUNNEL_STORE, for example
+every command reads settings from defaults, then --config FILE or RUNNEL_CONFIG
+(YAML, see deploy/runnel.example.yaml), then RUNNEL_* variables, then flags.
+the store comes from --store, RUNNEL_STORE or the store key, for example
   postgres://user:pass@host/db  mysql://user:pass@host/db  sqlite:runnel.db  redis://host:6379/0
 `
 
@@ -58,21 +61,30 @@ func buildVersion() string {
 	return "dev"
 }
 
-func env(name, def string) string {
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	return def
-}
-
 type cmd struct {
-	fs    *flag.FlagSet
-	store *string
+	fs     *flag.FlagSet
+	store  *string
+	config *string
 }
 
 func newCmd(name string) *cmd {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	return &cmd{fs: fs, store: fs.String("store", env("RUNNEL_STORE", "sqlite:runnel.db"), "store url")}
+	return &cmd{
+		fs:     fs,
+		store:  fs.String("store", "", "store url (default from config)"),
+		config: fs.String("config", os.Getenv("RUNNEL_CONFIG"), "YAML config file"),
+	}
+}
+
+func (c *cmd) settings() (config.Config, error) {
+	cfg, err := config.Load(*c.config, os.Getenv)
+	if err != nil {
+		return config.Config{}, err
+	}
+	if *c.store != "" {
+		cfg.Store = *c.store
+	}
+	return cfg, nil
 }
 
 func (c *cmd) parse(args []string, positional int) ([]string, error) {
@@ -93,14 +105,23 @@ func (c *cmd) parse(args []string, positional int) ([]string, error) {
 	return pos, nil
 }
 
-func (c *cmd) open(ctx context.Context) (runnel.Store, error) { return stores.Open(ctx, *c.store) }
+func open(ctx context.Context, cfg config.Config) (runnel.Store, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return stores.Open(ctx, cfg.Store)
+}
 
 func (c *cmd) start(ctx context.Context, args []string, positional int) ([]string, runnel.Store, error) {
 	pos, err := c.parse(args, positional)
 	if err != nil {
 		return nil, nil, err
 	}
-	s, err := c.open(ctx)
+	cfg, err := c.settings()
+	if err != nil {
+		return nil, nil, err
+	}
+	s, err := open(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
