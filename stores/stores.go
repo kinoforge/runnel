@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/store/hybrid"
+	"github.com/kinoforge/runnel/store/hybrid/wal"
 	"github.com/kinoforge/runnel/store/mysql"
 	"github.com/kinoforge/runnel/store/postgres"
 	"github.com/kinoforge/runnel/store/redisstore"
@@ -15,7 +17,8 @@ import (
 )
 
 // Open opens and migrates the store a URL names: postgres://, mysql://,
-// sqlite:path, or redis://, rediss://, valkey:// and dragonfly://.
+// sqlite:path, redis://, rediss://, valkey:// and dragonfly://, hybrid:dir with an
+// optional ?sync=each|periodic|off, or memory: for a store that keeps nothing.
 func Open(ctx context.Context, dsn string) (runnel.Store, error) {
 	scheme, rest, ok := strings.Cut(dsn, ":")
 	if !ok {
@@ -39,6 +42,10 @@ func Open(ctx context.Context, dsn string) (runnel.Store, error) {
 			u = "rediss:" + rest
 		}
 		s, err = redisstore.Open(u)
+	case "hybrid":
+		s, err = openHybrid(strings.TrimPrefix(rest, "//"))
+	case "memory", "mem":
+		s = hybrid.Memory()
 	default:
 		return nil, fmt.Errorf("runnel: unknown store scheme %q", scheme)
 	}
@@ -65,6 +72,24 @@ func openMySQL(dsn string) (runnel.Store, error) {
 	q := u.Query()
 	q.Set("parseTime", "false")
 	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)%s?%s", u.User.Username(), pass, host, u.Path, q.Encode()))
+}
+
+var syncModes = map[string]wal.SyncMode{"": wal.SyncEach, "each": wal.SyncEach, "periodic": wal.SyncPeriodic, "off": wal.SyncOff}
+
+func openHybrid(rest string) (runnel.Store, error) {
+	dir, query, _ := strings.Cut(rest, "?")
+	if dir == "" {
+		return nil, errors.New("runnel: hybrid store needs a directory, like hybrid:/var/lib/runnel")
+	}
+	q, err := url.ParseQuery(query)
+	if err != nil {
+		return nil, fmt.Errorf("runnel: bad hybrid options: %w", err)
+	}
+	mode, ok := syncModes[q.Get("sync")]
+	if !ok {
+		return nil, fmt.Errorf("runnel: hybrid sync %q must be each, periodic or off", q.Get("sync"))
+	}
+	return hybrid.Open(hybrid.Options{Dir: dir, Sync: mode})
 }
 
 func redact(dsn string) string {

@@ -6,6 +6,7 @@ toolchain go1.26.10
 
 require (
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/google/btree v1.1.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/prometheus/client_golang v1.25.0

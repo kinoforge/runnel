@@ -35,6 +35,7 @@ every command reads settings from defaults, then --config FILE or RUNNEL_CONFIG
 (YAML, see deploy/runnel.example.yaml), then RUNNEL_* variables, then flags.
 the store comes from --store, RUNNEL_STORE or the store key, for example
   postgres://user:pass@host/db  mysql://user:pass@host/db  sqlite:runnel.db  redis://host:6379/0
+  hybrid:data/runnel[?sync=each|periodic|off]  memory:
 `
 
 func main() {
