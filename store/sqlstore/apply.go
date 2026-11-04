@@ -56,10 +56,10 @@ func (s *Store) applyOne(ctx context.Context, tx *txn, ns string, c runnel.Chang
 	if err != nil {
 		return false, err
 	}
-	query := `UPDATE rn_jobs SET queue=?, kind=?, state=?, priority=?, tenant=?, pool=?, attempt=?, max_attempts=?,
+	query := `UPDATE rn_jobs SET queue=?, kind=?, state=?, priority=?, tenant=?, resource=?, attempt=?, max_attempts=?,
 		run_at=?, waiting_since=?, start_by=?, start_within=?, worker=?, lease_until=?, version=version+1, updated_at=?, started_at=?,
 		finished_at=?, data=? WHERE ns=? AND id=? AND version=?`
-	args := []any{j.Queue, j.Kind, string(j.State), j.Priority, j.Tenant, j.Pool, j.Attempt, j.MaxAttempts,
+	args := []any{j.Queue, j.Kind, string(j.State), j.Priority, j.Tenant, j.Resource, j.Attempt, j.MaxAttempts,
 		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartWindow().Milliseconds(),
 		j.Worker, runnel.Millis(j.LeaseUntil), runnel.Millis(j.UpdatedAt), runnel.Millis(j.StartedAt), runnel.Millis(j.FinishedAt),
 		data, ns, j.ID, j.Version}

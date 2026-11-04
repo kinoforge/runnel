@@ -6,9 +6,9 @@
 // report an outcome. A Maintainer returns the jobs of workers that died, fires
 // schedules, delivers webhooks and prunes old jobs.
 //
-// A queue's settings limit how many of its jobs run at once (Concurrency), how
-// many per tenant (TenantSlots) and how fast they start (Rate). A Pool is a
-// limit several queues share, such as one partner account. When a handler
+// A queue's settings limit how many of its jobs run at once (MaxRunning), how
+// many per tenant (TenantMaxRunning) and how fast they start (Rate). A Resource is
+// a limit several queues share, such as one partner account. When a handler
 // cannot finish a job, its error says what happens next: retry later, Fail,
 // Fallback to the next target, Busy (the resource is full: try later without
 // using an attempt) or Pending (an outside task is running: poll it later).

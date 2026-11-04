@@ -198,7 +198,7 @@ func (d Dialect) migrations() [][]string {
 			state VARCHAR(16) NOT NULL,
 			priority INT NOT NULL,
 			tenant VARCHAR(128) NOT NULL,
-			pool VARCHAR(128) NOT NULL,
+			resource VARCHAR(128) NOT NULL,
 			attempt INT NOT NULL,
 			max_attempts INT NOT NULL,
 			run_at BIGINT NOT NULL,

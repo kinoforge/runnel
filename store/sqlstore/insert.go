@@ -57,7 +57,7 @@ func (s *Store) InsertTx(ctx context.Context, raw *sql.Tx, ns string, jobs []*ru
 func capped(cfg *nsConfig, jobs []*runnel.Job) bool {
 	for _, j := range jobs {
 		q := cfg.queues[j.Queue]
-		if q.MaxWaiting > 0 || (q.TenantWaiting > 0 && j.Tenant != "") {
+		if q.MaxQueued > 0 || (q.TenantMaxQueued > 0 && j.Tenant != "") {
 			return true
 		}
 	}
@@ -154,17 +154,17 @@ func tenantKey(j *runnel.Job) string { return "t|" + j.Queue + "|" + j.Tenant }
 
 func (b *batchInsert) overCap(ctx context.Context, j *runnel.Job) (rejected, err error) {
 	q := b.cfg.queues[j.Queue]
-	if q.MaxWaiting > 0 {
+	if q.MaxQueued > 0 {
 		n, err := b.count(ctx, queueKey(j), "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND state IN (?, ?) AND queue=?",
 			b.ns, string(runnel.StateWaiting), string(runnel.StateBlocked), j.Queue)
-		if err != nil || n >= q.MaxWaiting {
+		if err != nil || n >= q.MaxQueued {
 			return runnel.ErrQueueFull, err
 		}
 	}
-	if q.TenantWaiting > 0 && j.Tenant != "" {
+	if q.TenantMaxQueued > 0 && j.Tenant != "" {
 		n, err := b.count(ctx, tenantKey(j), "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND queue=? AND tenant=? AND state IN (?, ?)",
 			b.ns, j.Queue, j.Tenant, string(runnel.StateWaiting), string(runnel.StateBlocked))
-		if err != nil || n >= q.TenantWaiting {
+		if err != nil || n >= q.TenantMaxQueued {
 			return runnel.ErrTenantFull, err
 		}
 	}
@@ -314,7 +314,7 @@ func (s *Store) insertRow(ctx context.Context, tx *txn, j *runnel.Job) error {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, s.q("INSERT INTO rn_jobs ("+jobCols+") VALUES ("+placeholders(jobColCount)+")"),
-		j.ID, j.Namespace, j.Queue, j.Kind, string(j.State), j.Priority, j.Tenant, j.Pool, j.Attempt, j.MaxAttempts,
+		j.ID, j.Namespace, j.Queue, j.Kind, string(j.State), j.Priority, j.Tenant, j.Resource, j.Attempt, j.MaxAttempts,
 		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartWindow().Milliseconds(),
 		j.Worker, runnel.Millis(j.LeaseUntil), j.Version, j.Pending, j.UniqueKey,
 		runnel.Millis(j.CreatedAt), runnel.Millis(j.UpdatedAt), runnel.Millis(j.StartedAt), runnel.Millis(j.FinishedAt), data)

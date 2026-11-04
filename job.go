@@ -129,11 +129,11 @@ func (b Backoff) Delay(attempt int) time.Duration {
 }
 
 // Target is where a job goes when it falls back. Empty fields keep the job's
-// current queue, kind or pool.
+// current queue, kind or resource.
 type Target struct {
-	Queue string `json:"queue,omitempty"`
-	Kind  string `json:"kind,omitempty"`
-	Pool  string `json:"pool,omitempty"`
+	Queue    string `json:"queue,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Resource string `json:"resource,omitempty"`
 }
 
 // AttemptError records why an attempt did not complete.
@@ -157,7 +157,7 @@ type Job struct {
 	Payload      json.RawMessage   `json:"payload,omitempty"`
 	Priority     int               `json:"priority"`
 	Tenant       string            `json:"tenant,omitempty"`
-	Pool         string            `json:"pool,omitempty"`
+	Resource     string            `json:"resource,omitempty"`
 	State        State             `json:"state"`
 	Attempt      int               `json:"attempt"`
 	MaxAttempts  int               `json:"max_attempts"`

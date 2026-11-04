@@ -2,7 +2,7 @@
 local unpack = unpack or table.unpack
 local P = KEYS[1]
 local function k(s) return P .. s end
-local F = {"id","queue","kind","state","priority","tenant","pool","attempt","max_attempts","run_at","waiting_since","start_by","start_within","worker","lease_until","version","pending","unique_key","created_at","updated_at","started_at","finished_at","data","deps"}
+local F = {"id","queue","kind","state","priority","tenant","resource","attempt","max_attempts","run_at","waiting_since","start_by","start_within","worker","lease_until","version","pending","unique_key","created_at","updated_at","started_at","finished_at","data","deps"}
 local function s(n) return string.format("%d", n) end
 local function num(j, f) return tonumber(j[f]) or 0 end
 local function load(id)
@@ -27,9 +27,9 @@ local function ready_score(j) return (1000 - num(j, "priority")) * 1099511627776
 local function active(j, d)
   redis.call("HINCRBY", k("act"), "q|" .. j.queue, d)
   if j.tenant ~= "" then redis.call("HINCRBY", k("act"), "qt|" .. j.queue .. "|" .. j.tenant, d) end
-  if j.pool ~= "" then
-    redis.call("HINCRBY", k("act"), "p|" .. j.pool, d)
-    if j.tenant ~= "" then redis.call("HINCRBY", k("act"), "pt|" .. j.pool .. "|" .. j.tenant, d) end
+  if j.resource ~= "" then
+    redis.call("HINCRBY", k("act"), "r|" .. j.resource, d)
+    if j.tenant ~= "" then redis.call("HINCRBY", k("act"), "rt|" .. j.resource .. "|" .. j.tenant, d) end
   end
 end
 local function waitc(j, d)

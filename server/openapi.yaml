@@ -29,7 +29,7 @@ tags:
   - name: workers
     description: The lease protocol remote workers speak.
   - name: config
-    description: Queues, pools and schedules of a namespace.
+    description: Queues, resources and schedules of a namespace.
   - name: ops
     description: Health, metrics and this document.
 paths:
@@ -567,32 +567,32 @@ paths:
       responses:
         "204": {description: Removed.}
         default: {$ref: "#/components/responses/Problem"}
-  /v1/ns/{ns}/pools:
+  /v1/ns/{ns}/resources:
     parameters: [{$ref: "#/components/parameters/Namespace"}]
     get:
       tags: [config]
-      summary: List pools
+      summary: List resources
       responses:
-        "200": {$ref: "#/components/responses/PoolList"}
+        "200": {$ref: "#/components/responses/ResourceList"}
         default: {$ref: "#/components/responses/Problem"}
-  /v1/ns/{ns}/pools/{name}:
+  /v1/ns/{ns}/resources/{name}:
     parameters: [{$ref: "#/components/parameters/Namespace"}, {$ref: "#/components/parameters/ConfigName"}]
     get:
       tags: [config]
-      summary: Read a pool
+      summary: Read a resource
       responses:
-        "200": {description: The pool., content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        "200": {description: The resource., content: {application/json: {schema: {$ref: "#/components/schemas/ResourceConfig"}}}}
         default: {$ref: "#/components/responses/Problem"}
     put:
       tags: [config]
-      summary: Set a pool
-      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+      summary: Set a resource
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/ResourceConfig"}}}}
       responses:
-        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/ResourceConfig"}}}}
         default: {$ref: "#/components/responses/Problem"}
     delete:
       tags: [config]
-      summary: Remove a pool
+      summary: Remove a resource
       responses:
         "204": {description: Removed.}
         default: {$ref: "#/components/responses/Problem"}
@@ -675,7 +675,7 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
     Full:
-      description: The queue or the tenant has too many waiting jobs. Retry after the given seconds.
+      description: The queue or the tenant has too many queued jobs. Retry after the given seconds.
       headers:
         Retry-After: {$ref: "#/components/headers/RetryAfter"}
       content:
@@ -689,14 +689,14 @@ components:
             type: object
             properties:
               items: {type: object, additionalProperties: {$ref: "#/components/schemas/QueueConfig"}}
-    PoolList:
-      description: Pools by name.
+    ResourceList:
+      description: Resources by name.
       content:
         application/json:
           schema:
             type: object
             properties:
-              items: {type: object, additionalProperties: {$ref: "#/components/schemas/PoolConfig"}}
+              items: {type: object, additionalProperties: {$ref: "#/components/schemas/ResourceConfig"}}
     ScheduleList:
       description: Schedules by name.
       content:
@@ -733,7 +733,7 @@ components:
       properties:
         queue: {$ref: "#/components/schemas/Name"}
         kind: {$ref: "#/components/schemas/Name"}
-        pool: {$ref: "#/components/schemas/Name"}
+        resource: {$ref: "#/components/schemas/Name"}
     Backoff:
       type: object
       properties:
@@ -751,7 +751,7 @@ components:
         payload: {description: Any JSON value, up to 1 MiB.}
         priority: {type: integer, minimum: -1000, maximum: 1000}
         tenant: {type: string, description: "Who the job is for; tenant limits apply per value."}
-        pool: {$ref: "#/components/schemas/Name"}
+        resource: {$ref: "#/components/schemas/Name"}
         run_at: {type: string, format: date-time}
         delay: {$ref: "#/components/schemas/Duration"}
         max_attempts: {type: integer, minimum: 1, maximum: 1000}
@@ -797,7 +797,7 @@ components:
         payload: {}
         priority: {type: integer}
         tenant: {type: string}
-        pool: {type: string}
+        resource: {type: string}
         state: {$ref: "#/components/schemas/State"}
         attempt: {type: integer}
         max_attempts: {type: integer}
@@ -857,10 +857,10 @@ components:
       properties:
         name: {$ref: "#/components/schemas/Name"}
         paused: {type: boolean}
-        concurrency: {type: integer, minimum: 0, description: "Running jobs at most, across all workers."}
-        tenant_slots: {type: integer, minimum: 0, description: "Running jobs per tenant at most."}
-        tenant_waiting: {type: integer, minimum: 0, description: "Waiting jobs per tenant at most; more are refused."}
-        max_waiting: {type: integer, minimum: 0, description: "Waiting jobs at most; more are refused."}
+        max_running: {type: integer, minimum: 0, description: "Running jobs at most, across all workers."}
+        tenant_max_running: {type: integer, minimum: 0, description: "Running jobs per tenant at most."}
+        tenant_max_queued: {type: integer, minimum: 0, description: "Queued jobs per tenant at most; more are refused."}
+        max_queued: {type: integer, minimum: 0, description: "Queued jobs at most; more are refused."}
         rate: {type: number, minimum: 0, description: "Starts per second."}
         burst: {type: integer, minimum: 0}
         tenant_rate: {type: number, minimum: 0}
@@ -871,14 +871,14 @@ components:
         start_within: {$ref: "#/components/schemas/Duration"}
         retention: {$ref: "#/components/schemas/Duration"}
         dead_retention: {$ref: "#/components/schemas/Duration"}
-    PoolConfig:
+    ResourceConfig:
       type: object
       additionalProperties: false
       required: [name]
       properties:
         name: {$ref: "#/components/schemas/Name"}
-        slots: {type: integer, minimum: 0, description: "Running jobs at most across every queue that uses the pool."}
-        tenant_slots: {type: integer, minimum: 0}
+        max_running: {type: integer, minimum: 0, description: "Running jobs at most across every queue that uses the resource."}
+        tenant_max_running: {type: integer, minimum: 0}
     Schedule:
       type: object
       additionalProperties: false
@@ -893,7 +893,7 @@ components:
         payload: {}
         priority: {type: integer}
         tenant: {type: string}
-        pool: {type: string}
+        resource: {type: string}
         max_attempts: {type: integer}
         timeout: {$ref: "#/components/schemas/Duration"}
         fallbacks:

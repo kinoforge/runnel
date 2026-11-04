@@ -15,8 +15,8 @@ func Priority(p int) Option { return func(j *Job) { j.Priority = p } }
 // Tenant names who the job is for, so tenant limits apply to it.
 func Tenant(t string) Option { return func(j *Job) { j.Tenant = t } }
 
-// Pool makes the job count against a shared pool.
-func Pool(p string) Option { return func(j *Job) { j.Pool = p } }
+// Resource makes the job count against a shared resource.
+func Resource(r string) Option { return func(j *Job) { j.Resource = r } }
 
 // At delays the job until t.
 func At(t time.Time) Option { return func(j *Job) { j.RunAt = t } }

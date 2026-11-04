@@ -21,7 +21,7 @@ var (
 	tenantPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$`)
 )
 
-// ValidName reports whether s can name a queue, kind, pool or schedule: 1 to 128
+// ValidName reports whether s can name a queue, kind, resource or schedule: 1 to 128
 // letters, digits, dots, dashes or underscores, starting with a letter or digit.
 func ValidName(s string) bool { return namePattern.MatchString(s) }
 
@@ -61,7 +61,7 @@ func (j *Job) validateNames(Limits) error {
 	if err := checkName("kind", j.Kind, false); err != nil {
 		return err
 	}
-	if err := checkName("pool", j.Pool, true); err != nil {
+	if err := checkName("resource", j.Resource, true); err != nil {
 		return err
 	}
 	if j.Tenant != "" && !ValidTenant(j.Tenant) {
@@ -103,7 +103,7 @@ func (j *Job) validateFallbacks(l Limits) error {
 		if err := checkName("fallback kind", t.Kind, true); err != nil {
 			return err
 		}
-		if err := checkName("fallback pool", t.Pool, true); err != nil {
+		if err := checkName("fallback resource", t.Resource, true); err != nil {
 			return err
 		}
 	}

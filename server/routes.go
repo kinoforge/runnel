@@ -51,7 +51,7 @@ func (s *Server) routes() {
 	s.handle("POST /v1/ns/{ns}/dependencies", runnel.RoleWorker, s.dependencies)
 
 	configRoutes(s, "queues", runnel.ConfigQueue, func(c runnel.QueueConfig) (string, error) { return c.Name, c.Validate() })
-	configRoutes(s, "pools", runnel.ConfigPool, func(c runnel.PoolConfig) (string, error) { return c.Name, c.Validate() })
+	configRoutes(s, "resources", runnel.ConfigResource, func(c runnel.ResourceConfig) (string, error) { return c.Name, c.Validate() })
 	configRoutes(s, "schedules", runnel.ConfigSchedule, func(c runnel.Schedule) (string, error) {
 		if c.Webhook != "" {
 			if err := s.checkWebhook(c.Webhook); err != nil {

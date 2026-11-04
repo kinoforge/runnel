@@ -13,11 +13,11 @@ var (
 	// ErrConflict means the job changed between reading and writing it, or the
 	// worker no longer holds it.
 	ErrConflict = errors.New("runnel: job changed concurrently")
-	// ErrTenantFull means the tenant already has the queue's tenant_waiting jobs
-	// waiting.
-	ErrTenantFull = errors.New("runnel: tenant has too many waiting jobs")
-	// ErrQueueFull means the queue already has max_waiting jobs waiting.
-	ErrQueueFull = errors.New("runnel: queue has too many waiting jobs")
+	// ErrTenantFull means the tenant already has the queue's tenant_max_queued jobs
+	// queued.
+	ErrTenantFull = errors.New("runnel: tenant has too many queued jobs")
+	// ErrQueueFull means the queue already has max_queued jobs queued.
+	ErrQueueFull = errors.New("runnel: queue has too many queued jobs")
 	// ErrDependency means a job the new job depends on is missing, dead or
 	// cancelled.
 	ErrDependency = errors.New("runnel: dependency missing or failed")
@@ -117,8 +117,8 @@ type ConfigKind string
 const (
 	// ConfigQueue holds QueueConfig values, one per queue.
 	ConfigQueue ConfigKind = "queue"
-	// ConfigPool holds PoolConfig values.
-	ConfigPool ConfigKind = "pool"
+	// ConfigResource holds ResourceConfig values.
+	ConfigResource ConfigKind = "resource"
 	// ConfigSchedule holds Schedule values.
 	ConfigSchedule ConfigKind = "schedule"
 	// ConfigNamespace holds Namespace values, stored outside any namespace.
@@ -144,7 +144,7 @@ type Store interface {
 	// waiting caps, and returns one result per job.
 	Insert(ctx context.Context, ns string, jobs []*Job, now time.Time) ([]Inserted, error)
 	// Claim leases ready jobs to a worker, honouring pauses, priorities,
-	// concurrency, tenant and pool slots and rate limits. Polling jobs due for a
+	// max running, tenant and resource limits and rate limits. Polling jobs due for a
 	// poll come first.
 	Claim(ctx context.Context, ns string, req ClaimRequest) ([]*Job, error)
 	// Extend moves the lease of the worker's running jobs to until and returns the

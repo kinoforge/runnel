@@ -44,7 +44,7 @@ func bench(ctx context.Context, args []string) error {
 	concurrency := c.fs.Int("concurrency", 25, "slots per worker")
 	batch := c.fs.Int("batch", 100, "jobs per enqueue call")
 	tenants := c.fs.Int("tenants", 0, "spread jobs over this many tenants")
-	tenantSlots := c.fs.Int("tenant-slots", 0, "queue tenant_slots")
+	tenantMaxRunning := c.fs.Int("tenant-max-running", 0, "queue tenant_max_running")
 	samples := c.fs.Int("latency", 200, "single jobs timed from enqueue to result")
 	if _, err := c.parse(args, 0); err != nil {
 		return err
@@ -64,7 +64,7 @@ func bench(ctx context.Context, args []string) error {
 	ns := "bench-" + strconv.FormatInt(time.Now().UnixNano()%1e12, 36)
 	cl := runnel.NewClient(s, ns)
 	defer cleanup(context.WithoutCancel(ctx), s, ns)
-	if err := cl.SetQueue(ctx, runnel.QueueConfig{Name: "bench", TenantSlots: *tenantSlots}); err != nil {
+	if err := cl.SetQueue(ctx, runnel.QueueConfig{Name: "bench", TenantMaxRunning: *tenantMaxRunning}); err != nil {
 		return err
 	}
 
@@ -134,7 +134,7 @@ func bench(ctx context.Context, args []string) error {
 
 	tw := table()
 	fmt.Fprintf(tw, "store\t%s\n", redact(cfg.Store))
-	fmt.Fprintf(tw, "jobs\t%d (batch %d, %d tenants, tenant slots %d)\n", *total, *batch, *tenants, *tenantSlots)
+	fmt.Fprintf(tw, "jobs\t%d (batch %d, %d tenants, tenant max running %d)\n", *total, *batch, *tenants, *tenantMaxRunning)
 	fmt.Fprintf(tw, "workers\t%d x %d slots\n", *workers, *concurrency)
 	fmt.Fprintf(tw, "enqueue\t%.0f jobs/s\n", float64(*total)/enqueued.Seconds())
 	fmt.Fprintf(tw, "run\t%.0f jobs/s (claim, handle, finish)\n", float64(*total)/ran.Seconds())

@@ -162,7 +162,7 @@ func TestWaitModes(t *testing.T) {
 		t.Fatalf("remote enqueue and wait: %+v %v", j, err)
 	}
 
-	call(t, srv, prodKey, "PUT", "/v1/ns/door/queues/capped", map[string]any{"name": "capped", "max_waiting": 1})
+	call(t, srv, prodKey, "PUT", "/v1/ns/door/queues/capped", map[string]any{"name": "capped", "max_queued": 1})
 	send(t, srv, prodKey, "POST", "/v1/ns/door/jobs", "", map[string]any{"queue": "capped", "kind": "k"})
 	resp, out = send(t, srv, prodKey, "POST", "/v1/ns/door/jobs", "", map[string]any{"queue": "capped", "kind": "k"})
 	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") != "1" || out["title"] != "queue full" {

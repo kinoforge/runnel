@@ -25,7 +25,7 @@ type JobRequest struct {
 	Payload     json.RawMessage   `json:"payload,omitempty"`
 	Priority    int               `json:"priority,omitempty"`
 	Tenant      string            `json:"tenant,omitempty"`
-	Pool        string            `json:"pool,omitempty"`
+	Resource    string            `json:"resource,omitempty"`
 	RunAt       time.Time         `json:"run_at,omitzero"`
 	Delay       runnel.Duration   `json:"delay,omitempty"`
 	MaxAttempts int               `json:"max_attempts,omitempty"`
@@ -53,7 +53,7 @@ func (s *Server) toJob(req JobRequest) (*runnel.Job, error) {
 		return nil, fmt.Errorf("%w: %s is reserved", runnel.ErrInvalid, runnel.WebhookQueue)
 	}
 	j := &runnel.Job{Queue: req.Queue, Kind: req.Kind, Payload: req.Payload, Priority: req.Priority, Tenant: req.Tenant,
-		Pool: req.Pool, RunAt: req.RunAt, MaxAttempts: req.MaxAttempts, UniqueKey: req.UniqueKey, UniqueFor: req.UniqueFor,
+		Resource: req.Resource, RunAt: req.RunAt, MaxAttempts: req.MaxAttempts, UniqueKey: req.UniqueKey, UniqueFor: req.UniqueFor,
 		StartWithin: req.StartWithin, Timeout: req.Timeout, Backoff: req.Backoff, Fallbacks: req.Fallbacks,
 		DependsOn: req.DependsOn, Webhook: req.Webhook, Meta: req.Meta}
 	if req.Delay > 0 {

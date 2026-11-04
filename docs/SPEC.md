@@ -16,7 +16,7 @@ Store rules run against every backend through `store/storetest`. The reasons beh
 - **Job**: one piece of work. Its kind picks the handler that runs it, its payload is the JSON input, its result the JSON output.
 - **Queue**: where jobs wait. Its settings limit how many of its jobs run at once, per tenant, and how fast they start.
 - **Tenant**: whoever a job is for, such as a customer. Per-tenant limits keep one tenant from crowding out the rest.
-- **Pool**: a limit shared by the jobs of every queue that name it, such as the calls a partner API allows at once.
+- **Resource**: a limit shared by the jobs of every queue that name it, such as the calls a partner API allows at once.
 - **Worker**: a process, or goroutines in one, that claims jobs and runs their handlers.
 - **Lease**: a claim on a job that lasts while its worker heartbeats. When it ends, the job goes back.
 - **Namespace**: one isolated set of queues, jobs, settings and keys, usually one per service.
@@ -27,14 +27,14 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 
 ## Jobs (J)
 
-- **J01** A job reads back as it was enqueued: queue, kind, payload, priority, tenant, pool, max attempts, timeout, start window, fallbacks, webhook and meta. A new job is `waiting`, or `blocked` (F01). Its id is a UUID v7; reading an unknown id is `ErrNotFound`.
-- **J02** Input is checked before anything is written; bad input is `ErrInvalid`. Queue, kind and pool names are 1 to 128 letters, digits, dots, dashes or underscores, starting with a letter or digit. Priority is -1000 to 1000. The payload is JSON of at most 1 MiB. Max attempts is 1 to 1000. Durations are not negative. A fallback target is not empty. Dependencies are job ids. A unique key has no `|`. A webhook is an absolute http or https URL without credentials.
+- **J01** A job reads back as it was enqueued: queue, kind, payload, priority, tenant, resource, max attempts, timeout, start window, fallbacks, webhook and meta. A new job is `waiting`, or `blocked` (F01). Its id is a UUID v7; reading an unknown id is `ErrNotFound`.
+- **J02** Input is checked before anything is written; bad input is `ErrInvalid`. Queue, kind and resource names are 1 to 128 letters, digits, dots, dashes or underscores, starting with a letter or digit. Priority is -1000 to 1000. The payload is JSON of at most 1 MiB. Max attempts is 1 to 1000. Durations are not negative. A fallback target is not empty. Dependencies are job ids. A unique key has no `|`. A webhook is an absolute http or https URL without credentials.
 - **J03** Options a job leaves unset come from its queue's settings: max attempts, backoff, timeout and start window. With neither set, a job has 5 attempts.
 - **J04** One call enqueues 1 to 1000 jobs. Each job gets its own answer: its id; or, as a duplicate, the id of the job holding its unique key; or its own error (`ErrDependency`, `ErrQueueFull`, `ErrTenantFull`) while the others go in.
 - **J05** A job given a start time (`At`, `In`, `run_at`, `delay`) is not claimed before it. `In` is measured on the store's clock.
 - **J06** While a job with a unique key is not final, enqueueing the same key adds nothing and returns that job's id, marked duplicate. Once the job is final, the key is free.
 - **J07** A unique key with a window stays taken for the window after enqueue, even when the job finishes sooner, and is free after it.
-- **J08** A queue with `max_waiting` refuses a job with `ErrQueueFull` once that many of its jobs are waiting or blocked; with `tenant_waiting`, it refuses with `ErrTenantFull` once the job's tenant has that many. Running jobs do not count, and one queue's cap does not touch another queue.
+- **J08** A queue with `max_queued` refuses a job with `ErrQueueFull` once that many of its jobs are waiting or blocked; with `tenant_max_queued`, it refuses with `ErrTenantFull` once the job's tenant has that many. Running jobs do not count, and one queue's cap does not touch another queue.
 - **J09** `EnqueueTx` writes jobs inside the caller's SQL transaction: they exist only if it commits, and the queue settings are read through it.
 - **J10** Durations in JSON are strings such as `"30s"` or numbers of seconds, and are written back as strings.
 
@@ -53,10 +53,10 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 - **C02** Jobs are claimed highest priority first, then earliest start time, then oldest, across all the queues of the claim.
 - **C03** A job is held by one claim at a time: concurrent claims never return the same job.
 - **C04** A paused queue starts no jobs; unpausing it lets them start.
-- **C05** `concurrency` caps the active jobs of a queue across all workers. A slot frees when a job stops being active.
-- **C06** `tenant_slots` caps the active jobs of one tenant in a queue. A pool's `slots` caps the active jobs naming it over every queue, and its `tenant_slots` caps them per tenant.
+- **C05** `max_running` caps the active jobs of a queue across all workers. A slot frees when a job stops being active.
+- **C06** `tenant_max_running` caps the active jobs of one tenant in a queue. A resource's `max_running` caps the active jobs naming it over every queue, and its `tenant_max_running` caps them per tenant.
 - **C07** `rate` and `burst` cap how many jobs of a queue start per second, as a token bucket. `tenant_rate` and `tenant_burst` do the same per tenant.
-- **C08** A limit that holds back the first jobs in line does not hold back the jobs after them: a tenant at its cap or a pool at its slots is skipped and the claim goes on to others. On Redis this holds within the first 2000 jobs a claim examines.
+- **C08** A limit that holds back the first jobs in line does not hold back the jobs after them: a tenant at its cap or a resource at its `max_running` is skipped and the claim goes on to others. On Redis this holds within the first 2000 jobs a claim examines.
 - **C09** Polling jobs due for a poll are claimed before new jobs. They keep their attempt count and are not held back by limits, because they already hold their slot.
 - **C10** A claim can be limited to given job ids. It still obeys every limit and touches no other job.
 
@@ -76,7 +76,7 @@ What a handler returns decides what happens to the job next.
 - **O02** Any other error retries after the backoff while attempts remain. Then the job moves to its next fallback, and with none left it is `dead`.
 - **O03** The wait before retrying attempt n is `base * factor^(n-1)`, capped at `max`, then spread by up to `jitter` either way. Unset fields mean 1s, 10m, 2 and 0.2.
 - **O04** `Fail(err)` stops retrying: the next fallback, or dead.
-- **O05** `Fallback(err)` moves to the next fallback now. Fallbacks are used in order. Each can change the queue, kind and pool, and restarts the attempt count and the start window.
+- **O05** `Fallback(err)` moves to the next fallback now. Fallbacks are used in order. Each can change the queue, kind and resource, and restarts the attempt count and the start window.
 - **O06** `Busy(d)` puts the job back to `waiting` for `d` (15s when unset). It uses no attempt, records no error and keeps how long the job has been waiting.
 - **O07** `Pending(handle, d)` parks the job as `polling` and calls the kind's poller with the handle after `d` (5s when unset). The attempt stays the same through every poll. `Pending` without a handle is a failure.
 - **O08** `RetryIn(d, err)` retries after exactly `d`.
@@ -134,7 +134,7 @@ What a handler returns decides what happens to the job next.
 
 - **X01** Namespaces never see each other's jobs, settings, events or cursors.
 - **X02** `Migrate` can run again on a migrated store.
-- **X03** Queue, pool and schedule settings are stored per namespace, replaced and deleted by name. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
+- **X03** Queue, resource and schedule settings are stored per namespace, replaced and deleted by name. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
 
 ## Access (A)
 
@@ -155,6 +155,6 @@ What a handler returns decides what happens to the job next.
 - **S06** A `GET` of a job with `Prefer: wait=N` answers when the job is final or N seconds pass, with its latest state.
 - **S07** A full queue or tenant answers 429 with `Retry-After` and the title `queue full` or `tenant full`.
 - **S08** A remote worker's name is scoped to its key, so two keys never share leases. A finish from another worker, or for an older version of the job, is 409.
-- **S09** Setting a queue, pool or schedule needs the name in the body to match the path.
+- **S09** Setting a queue, resource or schedule needs the name in the body to match the path.
 - **S10** `/openapi.yaml` documents exactly the routes the server serves.
 - **S11** `/healthz` answers 200 while the store answers and 503 when it does not. `/metrics` serves Prometheus metrics.

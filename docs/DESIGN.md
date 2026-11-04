@@ -36,7 +36,7 @@ running    --no attempts or targets-->    dead
 not final  --Cancel-->                    cancelled
 ```
 
-The words are plain on purpose: job, queue, tenant, pool, worker, lease, namespace. SPEC.md defines each one.
+The words are plain on purpose: job, queue, tenant, resource, worker, lease, namespace. SPEC.md defines each one.
 
 ## One store, no broker
 
@@ -63,29 +63,29 @@ A namespace is the unit of isolation: its own queues, jobs, settings, events and
 
 There are two kinds, applied at different moments:
 
-- **At enqueue: waiting caps** (`max_waiting`, `tenant_waiting`). These are back-pressure: the caller gets `ErrQueueFull` or `ErrTenantFull` (HTTP 429 with `Retry-After`) and can slow down, shed load or tell its own user.
-- **At claim: how much runs** (`concurrency`, `tenant_slots`, pool `slots` and `tenant_slots`, `rate` and `tenant_rate`). These are checked when a job starts, because a slot frees when a job ends.
+- **At enqueue: queued caps** (`max_queued`, `tenant_max_queued`). These are back-pressure: the caller gets `ErrQueueFull` or `ErrTenantFull` (HTTP 429 with `Retry-After`) and can slow down, shed load or tell its own user.
+- **At claim: how much runs** (`max_running`, `tenant_max_running`, resource `max_running` and `tenant_max_running`, `rate` and `tenant_rate`). These are checked when a job starts, because a slot frees when a job ends.
 
 Details:
 
 - **Active means running or polling.** A polling job still holds its slot, because the outside task it started still uses the resource, such as a render running at a provider. For the same reason, polls skip the limits: they already hold their slot.
-- **Pools** are limits shared across queues, such as one partner account several queues call.
+- **Resources** are limits shared across queues, such as one partner account several queues call.
 - **Rate limits are token buckets kept in the store,** so every worker on every host shares them.
 - **`Busy` is not a failure.** "The provider is at capacity" should not use up the attempts a job has for real errors. `Busy` puts the job back without using an attempt and without resetting how long it has waited.
-- **Fallbacks and start windows.** A job lists targets (queue, kind, pool) to move to when it fails, runs out of attempts, or waits longer than `start_within` to start. Each target gets a fresh set of attempts.
+- **Fallbacks and start windows.** A job lists targets (queue, kind, resource) to move to when it fails, runs out of attempts, or waits longer than `start_within` to start. Each target gets a fresh set of attempts.
 
 ## Fair claiming
 
 Jobs are claimed by priority, then time. Suppose the first 400 jobs in line belong to a tenant already at its cap. A simple claim reads the first rows, finds them all blocked, and returns nothing, so the other tenants wait behind a backlog that cannot run.
 
-- **SQL stores** scan light rows (id, queue, tenant, pool, priority, start time) and admit them in order. Each tenant, pool or queue found full is excluded from the next scan, for up to 4 rounds of `max(need*4, 32)` rows each. A capped tenant costs one round, not a read of its whole backlog.
+- **SQL stores** scan light rows (id, queue, tenant, resource, priority, start time) and admit them in order. Each tenant, resource or queue found full is excluded from the next scan, for up to 4 rounds of `max(need*4, 32)` rows each. A capped tenant costs one round, not a read of its whole backlog.
 - **Redis** does the same in a Lua script that pages through the ready set, doubling the page up to 500 and stopping after 2000 jobs examined. **Known limit:** a capped tenant with more than 2000 jobs ahead of the others delays them until its own slots free. Per-tenant ready sets would remove the bound, and they are on the roadmap.
 
 ## SQL stores
 
 - **Claims with no limits** lock rows with `FOR UPDATE SKIP LOCKED`, so workers never wait on each other.
-- **Claims under any limit** take a per-namespace lock, so counting active jobs and admitting new ones is exact. Locking per tenant or per pool would be finer, but harder to get right and prone to deadlocks. **Known limit:** limited claims in one namespace run one at a time (about 675 jobs/s on Postgres on the reference box). Split hot workloads into namespaces.
-- **Inserts** take the namespace lock only when a waiting cap applies, because the count and the insert must agree.
+- **Claims under any limit** take a per-namespace lock, so counting active jobs and admitting new ones is exact. Locking per tenant or per resource would be finer, but harder to get right and prone to deadlocks. **Known limit:** limited claims in one namespace run one at a time (about 675 jobs/s on Postgres on the reference box). Split hot workloads into namespaces.
+- **Inserts** take the namespace lock only when a queued cap applies, because the count and the insert must agree.
 - **Finishing, cancelling and retrying** take no namespace lock. Each is a row update under the version, applied in id order to avoid deadlocks, and retried on serialization failures and deadlocks.
 - **Unique keys and dependencies** have their own tables, so checking them needs no scan of jobs.
 - **Settings are cached briefly:** 1s in the store, 5s in each client, and API keys 5s on the server (1s for a key it has not seen). A change reaches every process within about 5 seconds.

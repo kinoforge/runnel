@@ -133,7 +133,7 @@ type jobRequest struct {
 	Payload     json.RawMessage   `json:"payload,omitempty"`
 	Priority    int               `json:"priority,omitempty"`
 	Tenant      string            `json:"tenant,omitempty"`
-	Pool        string            `json:"pool,omitempty"`
+	Resource    string            `json:"resource,omitempty"`
 	RunAt       time.Time         `json:"run_at,omitzero"`
 	MaxAttempts int               `json:"max_attempts,omitempty"`
 	UniqueKey   string            `json:"unique_key,omitempty"`
@@ -148,7 +148,7 @@ type jobRequest struct {
 }
 
 func request(j *runnel.Job) jobRequest {
-	return jobRequest{Queue: j.Queue, Kind: j.Kind, Payload: j.Payload, Priority: j.Priority, Tenant: j.Tenant, Pool: j.Pool,
+	return jobRequest{Queue: j.Queue, Kind: j.Kind, Payload: j.Payload, Priority: j.Priority, Tenant: j.Tenant, Resource: j.Resource,
 		RunAt: j.RunAt, MaxAttempts: j.MaxAttempts, UniqueKey: j.UniqueKey, UniqueFor: j.UniqueFor, StartWithin: j.StartWithin,
 		Timeout: j.Timeout, Backoff: j.Backoff, Fallbacks: j.Fallbacks, DependsOn: j.DependsOn, Webhook: j.Webhook, Meta: j.Meta}
 }

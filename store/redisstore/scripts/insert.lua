@@ -52,7 +52,7 @@ for i, j in ipairs(jobs) do
     end
   end
   if status == "ok" then
-    local cap = tonumber(queue_cfg(j.queue).max_waiting) or 0
+    local cap = tonumber(queue_cfg(j.queue).max_queued) or 0
     if cap > 0 then
       local n = tonumber(redis.call("HGET", k("cnt"), j.queue .. "|waiting") or "0") + tonumber(redis.call("HGET", k("cnt"), j.queue .. "|blocked") or "0")
       if n >= cap then
@@ -62,7 +62,7 @@ for i, j in ipairs(jobs) do
     end
   end
   if status == "ok" and j.tenant ~= "" then
-    local cap = tonumber(queue_cfg(j.queue).tenant_waiting) or 0
+    local cap = tonumber(queue_cfg(j.queue).tenant_max_queued) or 0
     if cap > 0 then
       local n = tonumber(redis.call("HGET", k("wait"), j.queue .. "|" .. j.tenant) or "0")
       if n >= cap then

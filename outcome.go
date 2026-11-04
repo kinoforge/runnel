@@ -191,8 +191,8 @@ func moveOn(n *Job, now time.Time) {
 		if t.Kind != "" {
 			n.Kind = t.Kind
 		}
-		if t.Pool != "" {
-			n.Pool = t.Pool
+		if t.Resource != "" {
+			n.Resource = t.Resource
 		}
 		n.Attempt, n.State, n.RunAt, n.WaitingSince = 0, StateWaiting, now, now
 		n.computeStartBy()

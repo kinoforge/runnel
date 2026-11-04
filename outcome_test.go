@@ -40,10 +40,10 @@ func TestDecide(t *testing.T) {
 	t.Run("fallback walks targets in order", func(t *testing.T) {
 		spec.Rule(t, "O04", "O05")
 		j := running(1, 1)
-		j.Fallbacks = []Target{{Queue: "b", Pool: "p2"}, {Kind: "k3"}}
+		j.Fallbacks = []Target{{Queue: "b", Resource: "p2"}, {Kind: "k3"}}
 		j.StartWithin = Duration(time.Minute)
 		a := Decide(j, Outcome{Kind: OutcomeFail, Error: "x"}, now)
-		if a.Queue != "b" || a.Pool != "p2" || a.Fallback != 1 || a.Attempt != 0 || a.State != StateWaiting || a.StartBy != now.Add(time.Minute) {
+		if a.Queue != "b" || a.Resource != "p2" || a.Fallback != 1 || a.Attempt != 0 || a.State != StateWaiting || a.StartBy != now.Add(time.Minute) {
 			t.Fatalf("first fallback %+v", a)
 		}
 		a.State, a.Attempt = StateRunning, 1

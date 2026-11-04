@@ -4,6 +4,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed
+
+- Pools are now resources: `ResourceConfig`, `SetResource`, `runnel.Resource`, the `resource` job field and `/v1/ns/{ns}/resources`.
+- Limits use one pattern: `max_running` and `tenant_max_running` (were `concurrency`, `tenant_slots` and pool `slots`), `max_queued` and `tenant_max_queued` (were `max_waiting` and `tenant_waiting`).
+
 ## [0.0.1]
 
 First public release.

@@ -161,21 +161,21 @@ func testDueStart(t *testing.T, open Opener) {
 func testConfigs(t *testing.T, open Opener) {
 	spec.Rule(t, "X03")
 	e := setup(t, open)
-	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "p", Slots: 3}); err != nil {
+	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "p", MaxRunning: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "p", Slots: 4}); err != nil {
+	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "p", MaxRunning: 4}); err != nil {
 		t.Fatal(err)
 	}
-	pools, err := e.c.Pools(e.ctx)
-	if err != nil || pools["p"].Slots != 4 || len(pools) != 1 {
-		t.Fatalf("pools %+v %v", pools, err)
+	resources, err := e.c.Resources(e.ctx)
+	if err != nil || resources["p"].MaxRunning != 4 || len(resources) != 1 {
+		t.Fatalf("resources %+v %v", resources, err)
 	}
-	if err := e.c.DeletePool(e.ctx, "p"); err != nil {
+	if err := e.c.DeleteResource(e.ctx, "p"); err != nil {
 		t.Fatal(err)
 	}
-	if pools, _ := e.c.Pools(e.ctx); len(pools) != 0 {
-		t.Fatalf("pool not deleted")
+	if resources, _ := e.c.Resources(e.ctx); len(resources) != 0 {
+		t.Fatalf("resource not deleted")
 	}
 	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "bad name"}); !errors.Is(err, runnel.ErrInvalid) {
 		t.Fatalf("bad queue name accepted")

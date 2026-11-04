@@ -34,10 +34,10 @@ func testClaimOrder(t *testing.T, open Opener) {
 	}
 }
 
-func testTenantWaiting(t *testing.T, open Opener) {
+func testTenantMaxQueued(t *testing.T, open Opener) {
 	spec.Rule(t, "J08")
 	e := setup(t, open)
-	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantWaiting: 2}); err != nil {
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantMaxQueued: 2}); err != nil {
 		t.Fatal(err)
 	}
 	e.add("q", runnel.Tenant("a"))
@@ -52,10 +52,10 @@ func testTenantWaiting(t *testing.T, open Opener) {
 	}
 }
 
-func testConcurrency(t *testing.T, open Opener) {
+func testMaxRunning(t *testing.T, open Opener) {
 	spec.Rule(t, "C05")
 	e := setup(t, open)
-	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", Concurrency: 2}); err != nil {
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", MaxRunning: 2}); err != nil {
 		t.Fatal(err)
 	}
 	for range 5 {
@@ -63,7 +63,7 @@ func testConcurrency(t *testing.T, open Opener) {
 	}
 	got := e.claim([]string{"q"}, 10)
 	if len(got) != 2 {
-		t.Fatalf("concurrency 2, claimed %d", len(got))
+		t.Fatalf("max running 2, claimed %d", len(got))
 	}
 	if more := e.claim([]string{"q"}, 10); len(more) != 0 {
 		t.Fatalf("over the limit: %d", len(more))
@@ -74,13 +74,13 @@ func testConcurrency(t *testing.T, open Opener) {
 	}
 }
 
-func testSlots(t *testing.T, open Opener) {
+func testTenantAndResourceMaxRunning(t *testing.T, open Opener) {
 	spec.Rule(t, "C06")
 	e := setup(t, open)
-	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantSlots: 1}); err != nil {
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantMaxRunning: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "gpu", Slots: 2}); err != nil {
+	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "gpu", MaxRunning: 2}); err != nil {
 		t.Fatal(err)
 	}
 	a1 := e.add("q", runnel.Tenant("a"))
@@ -88,22 +88,22 @@ func testSlots(t *testing.T, open Opener) {
 	b1 := e.add("q", runnel.Tenant("b"))
 	got := e.claim([]string{"q"}, 10)
 	if want := []string{a1.ID, b1.ID}; !slices.Equal(ids(got), want) {
-		t.Fatalf("tenant slots: %v want %v", ids(got), want)
+		t.Fatalf("tenant max running: %v want %v", ids(got), want)
 	}
 	for range 3 {
-		e.add("g", runnel.Pool("gpu"))
+		e.add("g", runnel.Resource("gpu"))
 	}
 	if g := e.claim([]string{"g"}, 10); len(g) != 2 {
-		t.Fatalf("pool slots 2, claimed %d", len(g))
+		t.Fatalf("resource max running 2, claimed %d", len(g))
 	}
-	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "api", TenantSlots: 1}); err != nil {
+	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "api", TenantMaxRunning: 1}); err != nil {
 		t.Fatal(err)
 	}
-	p1 := e.add("h", runnel.Pool("api"), runnel.Tenant("a"))
-	e.add("h", runnel.Pool("api"), runnel.Tenant("a"))
-	p3 := e.add("h", runnel.Pool("api"), runnel.Tenant("b"))
+	p1 := e.add("h", runnel.Resource("api"), runnel.Tenant("a"))
+	e.add("h", runnel.Resource("api"), runnel.Tenant("a"))
+	p3 := e.add("h", runnel.Resource("api"), runnel.Tenant("b"))
 	if got, want := e.claim([]string{"h"}, 10), []string{p1.ID, p3.ID}; !slices.Equal(ids(got), want) {
-		t.Fatalf("pool tenant slots: %v want %v", ids(got), want)
+		t.Fatalf("resource tenant max running: %v want %v", ids(got), want)
 	}
 }
 
@@ -149,7 +149,7 @@ func testPaused(t *testing.T, open Opener) {
 func testPolling(t *testing.T, open Opener) {
 	spec.Rule(t, "C09", "O07")
 	e := setup(t, open)
-	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", Concurrency: 1}); err != nil {
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", MaxRunning: 1}); err != nil {
 		t.Fatal(err)
 	}
 	e.add("q")
@@ -216,10 +216,10 @@ func testConcurrentClaims(t *testing.T, open Opener) {
 	}
 }
 
-func testQueueWaiting(t *testing.T, open Opener) {
+func testMaxQueued(t *testing.T, open Opener) {
 	spec.Rule(t, "J04", "J08")
 	e := setup(t, open)
-	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", MaxWaiting: 2}); err != nil {
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", MaxQueued: 2}); err != nil {
 		t.Fatal(err)
 	}
 	batch := make([]*runnel.Job, 3)
@@ -241,7 +241,7 @@ func testQueueWaiting(t *testing.T, open Opener) {
 	}
 	e.claim([]string{"q"}, 1)
 	if _, err := e.c.Enqueue(e.ctx, "q", "k", nil); err != nil {
-		t.Fatalf("running jobs count against the waiting cap: %v", err)
+		t.Fatalf("running jobs count against the max queued cap: %v", err)
 	}
 }
 
@@ -253,7 +253,7 @@ func testClaimByID(t *testing.T, open Opener) {
 	if err != nil || len(got) != 1 || got[0].ID != b.ID {
 		t.Fatalf("claim by id: %v %v", ids(got), err)
 	}
-	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", Concurrency: 1}); err != nil {
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", MaxRunning: 1}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = e.s.Claim(e.ctx, e.ns, runnel.ClaimRequest{Queues: []string{"q"}, IDs: []string{c.ID}, Worker: "w1", Limit: 1, Lease: time.Minute, Now: e.now()})
@@ -268,7 +268,7 @@ func testClaimByID(t *testing.T, open Opener) {
 func testFair(t *testing.T, open Opener) {
 	spec.Rule(t, "C08")
 	e := setup(t, open)
-	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantSlots: 1}); err != nil {
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", TenantMaxRunning: 1}); err != nil {
 		t.Fatal(err)
 	}
 	big := make([]*runnel.Job, 400)
@@ -291,28 +291,28 @@ func testFair(t *testing.T, open Opener) {
 	}
 }
 
-func testFairPool(t *testing.T, open Opener) {
+func testFairResource(t *testing.T, open Opener) {
 	spec.Rule(t, "C08")
 	e := setup(t, open)
-	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "gpu", Slots: 2}); err != nil {
+	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "gpu", MaxRunning: 2}); err != nil {
 		t.Fatal(err)
 	}
 	full := make([]*runnel.Job, 300)
 	for i := range full {
-		full[i], _ = runnel.NewJob("q", "k", nil, runnel.Pool("gpu"), runnel.Priority(10))
+		full[i], _ = runnel.NewJob("q", "k", nil, runnel.Resource("gpu"), runnel.Priority(10))
 	}
 	if _, err := e.c.EnqueueJobs(e.ctx, full); err != nil {
 		t.Fatal(err)
 	}
 	e.add("q")
-	e.add("q", runnel.Pool("cpu"))
+	e.add("q", runnel.Resource("cpu"))
 	got := e.claim([]string{"q"}, 10)
-	pools := map[string]int{}
+	resources := map[string]int{}
 	for _, j := range got {
-		pools[j.Pool]++
+		resources[j.Resource]++
 	}
-	if len(got) != 4 || pools["gpu"] != 2 || pools[""] != 1 || pools["cpu"] != 1 {
-		t.Fatalf("a full pool at the head starved the rest: %v", pools)
+	if len(got) != 4 || resources["gpu"] != 2 || resources[""] != 1 || resources["cpu"] != 1 {
+		t.Fatalf("a full resource at the head starved the rest: %v", resources)
 	}
 }
 
