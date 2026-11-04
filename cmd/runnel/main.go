@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 
@@ -38,7 +39,7 @@ the store comes from --store, RUNNEL_STORE or the store key, for example
 
 func main() {
 	if err := runMain(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "runnel:", err)
+		fmt.Fprintln(os.Stderr, errorLine(err))
 		os.Exit(1)
 	}
 }
@@ -52,6 +53,17 @@ func runMain(args []string) error {
 	defer stop()
 	return run(ctx, args[0], args[1:])
 }
+
+// errorLine prefixes err with the program name unless the library already did.
+func errorLine(err error) string {
+	msg := err.Error()
+	if strings.HasPrefix(msg, errPrefix) {
+		return msg
+	}
+	return errPrefix + msg
+}
+
+const errPrefix = "runnel: "
 
 var version = ""
 
