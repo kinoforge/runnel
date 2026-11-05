@@ -4,6 +4,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- Hybrid store: jobs in memory, every change in a write-ahead log, snapshots for fast restarts. Open it with `hybrid:DIR` (`?sync=each|periodic|off`), or `memory:` for no disk.
+- `store/hybrid/wal`, a group-commit write-ahead log usable on its own.
+
 ### Changed
 
 - Pools are now resources: `ResourceConfig`, `SetResource`, `runnel.Resource`, the `resource` job field and `/v1/ns/{ns}/resources`.

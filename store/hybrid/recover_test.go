@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/internal/spec"
 	"github.com/kinoforge/runnel/store/hybrid"
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 )
@@ -80,6 +81,7 @@ func dump(t *testing.T, s runnel.Store) string {
 }
 
 func TestRestartReplaysLog(t *testing.T) {
+	spec.Rule(t, "X04")
 	dir := t.TempDir()
 	s := open(t, dir)
 	fill(t, s)
@@ -95,6 +97,7 @@ func TestRestartReplaysLog(t *testing.T) {
 }
 
 func TestRestartFromSnapshot(t *testing.T) {
+	spec.Rule(t, "X04")
 	dir := t.TempDir()
 	s := open(t, dir)
 	fill(t, s)
@@ -127,6 +130,7 @@ func TestRestartFromSnapshot(t *testing.T) {
 }
 
 func TestTornTailIsCut(t *testing.T) {
+	spec.Rule(t, "X04")
 	dir := t.TempDir()
 	s := open(t, dir)
 	fill(t, s)
@@ -152,6 +156,7 @@ func TestTornTailIsCut(t *testing.T) {
 }
 
 func TestDirectoryLocked(t *testing.T) {
+	spec.Rule(t, "X05")
 	dir := t.TempDir()
 	s := open(t, dir)
 	defer s.Close()

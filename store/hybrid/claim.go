@@ -20,7 +20,7 @@ func (s *Store) Claim(_ context.Context, ns string, req runnel.ClaimRequest) ([]
 		return nil, nil
 	}
 	var out []*runnel.Job
-	err := s.write(ns, func(t *tx) error {
+	err := s.lease(ns, func(t *tx) error {
 		c := claimer{t: t, req: req, now: runnel.Millis(req.Now), buckets: map[string]*token{}, full: map[string]bool{}}
 		c.lease = c.now + req.Lease.Milliseconds()
 		out = c.run()

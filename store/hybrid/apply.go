@@ -100,7 +100,7 @@ func (s *Store) Extend(_ context.Context, ns, worker string, ids []string, until
 		return nil, nil
 	}
 	var lost []string
-	err := s.write(ns, func(t *tx) error {
+	err := s.lease(ns, func(t *tx) error {
 		for _, id := range ids {
 			j := t.sp.jobs[id]
 			if j == nil || j.State != runnel.StateRunning || j.Worker != worker {

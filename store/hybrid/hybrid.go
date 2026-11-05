@@ -109,7 +109,15 @@ func (s *Store) fail(err error) {
 // write runs fn on namespace ns under its lock and logs the ops fn made. It
 // returns once the log holds them, after releasing the lock so other calls can
 // share the same fsync.
-func (s *Store) write(ns string, fn func(*tx) error) error {
+func (s *Store) write(ns string, fn func(*tx) error) error { return s.commit(ns, true, fn) }
+
+// lease is write for claims and lease extensions, which return without waiting
+// for the disk. The log is ordered, so the finish that follows a claim makes the
+// claim durable too; a crash before then only lets the job run again, as
+// at-least-once delivery allows.
+func (s *Store) lease(ns string, fn func(*tx) error) error { return s.commit(ns, false, fn) }
+
+func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
 	if err := s.broken(); err != nil {
 		return err
 	}
@@ -125,7 +133,7 @@ func (s *Store) write(ns string, fn func(*tx) error) error {
 	}
 	sp.mu.Unlock()
 	s.gate.RUnlock()
-	if logErr == nil && lsn > 0 {
+	if logErr == nil && lsn > 0 && wait {
 		logErr = s.log.Wait(lsn)
 	}
 	if logErr != nil {

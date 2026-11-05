@@ -102,6 +102,16 @@ Early benchmarks ran 57 jobs/s on Postgres. Three changes brought that to 1,200 
 
 Both use the same SQL store through a dialect. Neither has a wake-up signal, so idle workers poll (every second by default) and `Wait` reads with a backoff of up to 1s. MySQL is bound by how fast the disk flushes commits; with the binary log on, each commit flushes twice. SQLite runs in WAL mode and suits development and single-host services.
 
+## Hybrid store
+
+Every database round trip costs more than the work a claim does, so the hybrid store keeps the jobs in the process and only writes a log.
+
+- **Memory.** Each namespace has its own lock, a map of jobs and B-trees: ready jobs per queue in claim order, scheduled and polling jobs by time, leases, start deadlines, finished jobs and all ids. Stored jobs are never changed in place; a change stores a new copy.
+- **Log.** A call applies its changes to memory and appends them as one checksummed record. `store/hybrid/wal` writes records from many calls in one write and one fsync (group commit) and knows nothing about jobs. Recovery replays the same records, so it runs no job logic.
+- **Snapshots.** When the log passes 64 MiB, the store rotates to a new log file, copies the pointers of every namespace (the only pause), writes the copy to a snapshot file, renames it into place and deletes the older log files.
+- **Failure.** If writing the log fails, memory holds changes the disk does not, so the store refuses every later call until it is reopened from disk.
+- **Why not an embedded key-value store.** A KV store would add a second copy of every job and a second log. The job model already says what to index, and the log of changes is all that must reach the disk.
+
 ## Time
 
 Leases, start times, retries and schedules compare times written by different hosts. With skewed clocks, a fast host could take back jobs from live workers, and a slow one could start jobs late.
@@ -160,6 +170,8 @@ The maintainer is a loop with no state of its own; run as many as you like. Each
 ## Known limits
 
 - On Redis, a claim examines at most 2000 jobs (see Fair claiming).
+- The hybrid store needs every job in memory and one process per directory; other processes go through the server. A claim examines at most 4096 jobs refused by a limit.
+- After a crash, the last claims on the hybrid store may run again; with `sync=periodic`, a machine crash loses up to 100ms of changes.
 - Limited claims in one namespace run one at a time on SQL stores.
 - After a Postgres crash, the last claims may run again.
 - MySQL and SQLite have no wake-up signal, so workers and waiters poll.

@@ -133,13 +133,15 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 
 ## Stores
 
-| | Postgres | MySQL 8 | SQLite | Redis, Valkey, Dragonfly |
-|---|---|---|---|---|
-| Every feature above | yes | yes | yes | yes, except transactional enqueue |
-| Workers wake at once | LISTEN/NOTIFY | polling (default 1s) | polling | pub/sub |
-| Waiters wake at once | LISTEN/NOTIFY | polling | polling | pub/sub |
-| Claims without limits | `SKIP LOCKED`, no lock | `SKIP LOCKED`, no lock | one writer | one Lua script |
-| Good for | production | production | tests, tools, one machine | high throughput |
+| | Postgres | MySQL 8 | SQLite | Redis, Valkey, Dragonfly | Hybrid |
+|---|---|---|---|---|---|
+| Every feature above | yes | yes | yes | yes, except transactional enqueue | yes, except transactional enqueue |
+| Workers wake at once | LISTEN/NOTIFY | polling (default 1s) | polling | pub/sub | in process |
+| Waiters wake at once | LISTEN/NOTIFY | polling | polling | pub/sub | in process |
+| Claims without limits | `SKIP LOCKED`, no lock | `SKIP LOCKED`, no lock | one writer | one Lua script | in memory, per namespace lock |
+| Good for | production | production | tests, tools, one machine | high throughput | highest throughput on one machine, no database |
+
+The hybrid store (`hybrid:/var/lib/runnel`) keeps every job in memory and logs each change to disk before it answers. `?sync=each` (the default) waits for the disk on every enqueue and result, and calls that arrive together share one flush. `?sync=periodic` flushes every 100ms, so a machine crash can lose the last 100ms, but a crash of the process loses nothing. `memory:` keeps nothing on disk. One process owns the directory, so run it behind `runnel serve` and point workers at the server. All jobs must fit in memory.
 
 All stores pass the same conformance suite in `store/storetest`, under the race detector.
 
@@ -211,6 +213,7 @@ If the transaction rolls back, the job never existed. If it commits, the job is 
 - **SQL stores.** Claims of queues without limits lock rows with `SKIP LOCKED`, so workers never wait on each other. Claims under limits serialize per namespace, so counts stay exact, and read light rows in rounds that skip tenants and resources at their limit. Finishing a job needs no namespace lock: it updates the row under its version, records an event, releases its unique key and settles its dependants in one transaction. Postgres notifications are sent after commit and batched, so they never serialize commits. Each worker sends the results that pile up while a commit is in flight as one transaction, which adds no delay when it is idle.
 - **Durability.** Enqueues and results are committed to disk before they are acknowledged. On Postgres, claims commit without waiting for the disk: after a crash the last claims may be forgotten, and those jobs run again, which at-least-once delivery allows anyway.
 - **Redis family.** The same rules run as Lua scripts over hashes and sorted sets. A namespace's keys share a hash tag, so it works on Redis Cluster.
+- **Hybrid store.** The same rules run on in-memory B-trees. Each call logs what it changed as one checksummed record in a write-ahead log (`store/hybrid/wal`), and snapshots keep the log short. Restart loads the newest snapshot and replays the log after it, dropping a record cut short by a crash. Claims return without waiting for the disk, like on Postgres: the finish that follows makes the claim durable too.
 - **Guarantees.** Delivery is at least once, so make handlers idempotent: use `j.ID` or a unique key. A job runs on one worker at a time while its lease lives. Every write is guarded by a version, so a stale worker, a reaper or a canceller never overwrites a newer state.
 
 ## Benchmarks
@@ -227,6 +230,18 @@ If the transaction rolls back, the job never existed. If it commits, the job is 
 | Dragonfly 1.32 | 8,500/s | 2,290/s | 1,520/s | 2.0 ms | 1.6 ms |
 
 Measured on a 2014 desktop (Intel i5-4460, 4 cores, 16 GB, consumer SSD), with the benchmark and every database in Docker on the same machine, all with default durability. The SQL numbers are bound by how fast the disk flushes a commit, about 8 ms here. Server hardware flushes far faster, so expect much more there, and run `make bench` on your own. Numbers move by 20% between runs. MySQL ran with `--skip-log-bin`; with the binary log on, every commit pays a second flush. SQLite and MySQL have no wake-up signal, so waiting for a result there polls.
+
+The hybrid store was measured on a different machine, a laptop with a SATA SSD that takes about 70 ms to flush, so compare it with SQLite on the same machine rather than with the table above:
+
+| Store (laptop) | Enqueue | Run | Direct start p50 |
+|---|---|---|---|
+| SQLite (WAL) | 5,350/s | 635/s | 3.2 ms |
+| Hybrid, `sync=each` | 2,440/s | 540/s | 67 ms |
+| Hybrid, `sync=each`, 4 x 200 slots | | 5,100/s | |
+| Hybrid, `sync=periodic` | 205,000/s | 12,000 to 35,000/s | 0.04 ms |
+| Memory only | 224,000/s | 87,000/s | 0.04 ms |
+
+With `sync=each` every enqueue and result waits for a flush, so throughput grows with the number of jobs in flight, not with CPU.
 
 ## Development
 

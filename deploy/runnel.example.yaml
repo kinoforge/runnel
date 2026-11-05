@@ -4,7 +4,7 @@
 # Exceptions: server.addr -> RUNNEL_ADDR, server.admin_token -> RUNNEL_ADMIN_TOKEN.
 # A duration or number left at 0 uses the library default shown.
 
-store: sqlite:runnel.db # postgres://..., mysql://..., redis://...
+store: sqlite:runnel.db # postgres://..., mysql://..., redis://..., hybrid:/var/lib/runnel, memory:
 
 log:
   format: text # text or json
