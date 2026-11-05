@@ -69,12 +69,14 @@ func (s *Store) loadSnapshot(seg uint64, r *replayer) error {
 	}
 	defer f.Close()
 	r.file = snapBit | uint32(seg)
-	if _, err := wal.ReadFrames(f, func(off int64, rec []byte) error {
+	n, err := wal.ReadFrames(f, func(off int64, rec []byte) error {
 		r.base = off
 		return r.record(rec)
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("hybrid: snapshot %d: %w", seg, err)
 	}
+	s.snapBytes.Store(n)
 	return nil
 }
 
@@ -87,7 +89,7 @@ func (s *Store) checkpointer() {
 		case <-s.done:
 			return
 		case <-t.C:
-			if s.broken() == nil && s.log.Size() >= s.opt.SnapshotBytes {
+			if s.broken() == nil && s.log.Size() >= max(s.opt.SnapshotBytes, s.snapBytes.Load()) {
 				if err := s.Checkpoint(); err != nil {
 					s.fail(err)
 				}
@@ -98,26 +100,22 @@ func (s *Store) checkpointer() {
 
 // Checkpoint writes a snapshot of every namespace, bodies included, points the
 // jobs at their bodies in it, and deletes the log segments and snapshots it
-// replaces. Calls pause only while the snapshot copies the job records.
+// replaces. Calls go on while it runs.
 func (s *Store) Checkpoint() error {
 	if s.log == nil {
 		return nil
 	}
 	s.snapMu.Lock()
 	defer s.snapMu.Unlock()
-	s.gate.Lock()
 	seg, err := s.log.Rotate()
 	if err != nil {
-		s.gate.Unlock()
 		return err
 	}
-	views := s.copyAll()
-	s.gate.Unlock()
-	moved, err := s.writeSnapshot(seg, views)
+	moved, err := s.writeSnapshot(seg)
 	if err != nil {
 		return err
 	}
-	s.repoint(moved)
+	s.repoint(snapBit|uint32(seg), moved)
 	s.files.drop(func(id uint32) bool { return uint64(id&^snapBit) < seg })
 	old, err := s.snapshots()
 	if err != nil {
@@ -133,30 +131,33 @@ func (s *Store) Checkpoint() error {
 	return s.log.Remove(seg)
 }
 
-// moved is a body copied into a snapshot.
+// moved is a body copied into a snapshot, to offset to.
 type moved struct {
-	id       uid
-	from, to ref
+	id   uid
+	from ref
+	to   int64
 }
 
-// repoint moves jobs whose body is still the one copied over to the copy in
-// the snapshot, so the older files can go.
-func (s *Store) repoint(byNS map[string][]moved) {
-	for ns, list := range byNS {
-		sp := s.space(ns)
-		sp.mu.Lock()
-		to := make(map[uid]moved, len(list))
-		for _, m := range list {
-			to[m.id] = m
-			if i, ok := sp.idx[m.id]; ok && sp.slots[i].body == m.from {
-				sp.slots[i].body = m.to
+// repoint moves jobs whose body is still the one copied to the copy in
+// snapshot file, so the older files can go. It takes the lock a slab at a
+// time. Bodies cached from before the rotation are all written by now and
+// leave first, so no cached body refers to an old file.
+func (s *Store) repoint(file uint32, bySpace map[*space][]moved) {
+	written := s.log.Written()
+	for sp, list := range bySpace {
+		for len(list) > 0 {
+			n := min(len(list), slabSize)
+			sp.mu.Lock()
+			sp.cache.evict(written, sp.bodyRef)
+			for _, m := range list[:n] {
+				if i, ok := sp.idx[m.id]; ok {
+					if h := sp.jobs.at(i); h.body == m.from {
+						h.body = ref{file: file, n: m.from.n, off: m.to}
+					}
+				}
 			}
+			sp.mu.Unlock()
+			list = list[n:]
 		}
-		for i, l := range sp.cache.queue {
-			if m, ok := to[l.id]; ok && l.at == m.from {
-				sp.cache.queue[i].at = m.to
-			}
-		}
-		sp.mu.Unlock()
 	}
 }

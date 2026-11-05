@@ -110,3 +110,58 @@ func TestFramesDetectDamage(t *testing.T) {
 		t.Fatalf("got %v good %d err %v", got, good, err)
 	}
 }
+
+// TestRotateWhileAppending checks that every record lands where Append said,
+// even when a rotation happens between its Append and its write.
+func TestRotateWhileAppending(t *testing.T) {
+	dir := t.TempDir()
+	l := start(t, dir, wal.SyncPeriodic)
+	if err := l.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	at := map[string]wal.Pos{}
+	var wg sync.WaitGroup
+	for g := range 4 {
+		wg.Go(func() {
+			for i := range 500 {
+				rec := fmt.Sprintf("%d-%d", g, i)
+				p, err := l.Append([]byte(rec))
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				mu.Lock()
+				at[rec] = p
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 20 {
+			if _, err := l.Rotate(); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	})
+	wg.Wait()
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	l = start(t, dir, wal.SyncEach)
+	defer l.Close()
+	n := 0
+	if err := l.Replay(0, func(seg uint64, off int64, rec []byte) error {
+		n++
+		if p := at[string(rec)]; p.Seg != seg || p.Off != off {
+			return fmt.Errorf("record %s at %d/%d, Append said %d/%d", rec, seg, off, p.Seg, p.Off)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n != len(at) {
+		t.Fatalf("replayed %d records, want %d", n, len(at))
+	}
+}

@@ -2,6 +2,7 @@ package hybrid
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/kinoforge/runnel"
 )
@@ -34,9 +35,8 @@ type tx struct {
 	rec    *enc
 	head   int
 	wake   bool
-	ends   []string
+	ends   []uid
 	bodies []placed
-	done   []uid
 }
 
 type placed struct {
@@ -74,13 +74,9 @@ func (t *tx) put(h job, body []byte) {
 	}
 }
 
-// putHot stores h, keeping the body it has. A job that ends this way lets its
-// body leave the cache.
+// putHot stores h, keeping the body it has.
 func (t *tx) putHot(h job) {
 	t.sp.setJob(h)
-	if h.final() {
-		t.done = append(t.done, h.id)
-	}
 	t.rec.byte(opPutHot)
 	t.rec.hot(&h, &t.sp.syms)
 	if h.is(stWaiting) {
@@ -116,10 +112,10 @@ func (t *tx) delKids(parent uid) {
 	t.rec.bytes(parent[:])
 }
 
-func (t *tx) putEvent(e runnel.Event) {
+func (t *tx) putEvent(e event) {
 	t.sp.addEvent(e)
-	t.rec.opEvent(e)
-	t.ends = append(t.ends, e.JobID)
+	t.rec.opEvent(&e, t.sp.syms.names)
+	t.ends = append(t.ends, e.id)
 }
 
 func (t *tx) dropEvents(seq int64) {
@@ -172,14 +168,17 @@ func (e *enc) opKid(parent, kid uid) {
 	e.bytes(kid[:])
 }
 
-func (e *enc) opEvent(ev runnel.Event) {
+func (e *enc) opEvent(ev *event, names []string) {
+	if e == nil {
+		return
+	}
 	e.byte(opPutEvent)
-	e.int(ev.Seq)
-	e.str(ev.JobID)
-	e.str(ev.Queue)
-	e.str(ev.Kind)
-	e.str(string(ev.State))
-	e.time(ev.At)
+	e.int(ev.seq)
+	e.bytes(ev.id[:])
+	e.str(names[ev.queue])
+	e.str(names[ev.kind])
+	e.byte(ev.state)
+	e.int(ev.at)
 }
 
 func (e *enc) opCursor(name string, v int64) {
@@ -253,14 +252,20 @@ func (r *replayer) op(d *dec, sp *space) error {
 	case opDelUnique:
 		sp.dropUnique(d.str())
 	case opAddKid:
-		p := readID(d)
-		sp.kids[p] = append(sp.kids[p], readID(d))
+		p, kid := readID(d), readID(d)
+		if !slices.Contains(sp.kids[p], kid) {
+			sp.kids[p] = append(sp.kids[p], kid)
+		}
 	case opDelKids:
 		delete(sp.kids, readID(d))
 	case opPutEvent:
-		e := runnel.Event{Seq: d.int(), Namespace: sp.ns, JobID: d.str(), Queue: d.str(), Kind: d.str()}
-		e.State, e.At = runnel.State(d.str()), d.time()
-		sp.addEvent(e)
+		e := event{seq: d.int(), id: readID(d)}
+		e.queue = sp.syms.id(d.str())
+		e.kind = sp.syms.id(d.str())
+		e.state, e.at = d.byte(), d.int()
+		if n := len(sp.events); n == 0 || e.seq > sp.events[n-1].seq {
+			sp.addEvent(e)
+		}
 	case opDropEvents:
 		sp.dropEvents(d.int())
 	case opPutCursor:

@@ -128,6 +128,7 @@ func Run(t *testing.T, open Opener) {
 		"MigrateAgain":                testMigrateAgain,
 		"TenantRateLimit":             testTenantRate,
 		"WorkerConcurrency":           testWorkerConcurrency,
+		"WorkerGather":                testWorkerGather,
 		"WebhookDeliveryJobs":         testWebhookJobs,
 	}
 	for _, n := range slices.Sorted(maps.Keys(tests)) {

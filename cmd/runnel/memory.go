@@ -7,9 +7,11 @@ import (
 	"github.com/kinoforge/runnel/internal/cgroup"
 )
 
-const memoryShare = 0.9
+// memoryShare leaves room in the container for the page cache, which holds
+// the store's unwritten file data and counts against the same limit.
+const memoryShare = 0.7
 
-// fitContainer tells the garbage collector to keep the heap under 90% of the
+// fitContainer tells the garbage collector to keep the heap under 70% of the
 // container's memory limit, unless GOMEMLIMIT already says otherwise. Go does
 // not read the container limit on its own.
 func fitContainer() {

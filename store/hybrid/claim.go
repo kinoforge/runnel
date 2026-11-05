@@ -18,19 +18,19 @@ func (s *Store) Claim(_ context.Context, ns string, req runnel.ClaimRequest) ([]
 	if req.Limit <= 0 || len(req.Queues) == 0 {
 		return nil, nil
 	}
-	var out []*runnel.Job
+	var out []draft
 	err := s.lease(ns, func(t *tx) error {
 		c := claimer{s: s, t: t, sp: t.sp, req: req, now: ms(req.Now), buckets: map[string]*token{}, full: map[countKey]bool{}}
 		c.lease = c.now + req.Lease.Milliseconds()
 		c.worker = t.sp.syms.id(req.Worker)
 		c.run()
 		out = c.out
-		return c.err
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	return s.rebuild(ns, out)
 }
 
 type claimer struct {
@@ -41,8 +41,7 @@ type claimer struct {
 	now     int64
 	lease   int64
 	worker  sym
-	out     []*runnel.Job
-	err     error
+	out     []draft
 	buckets map[string]*token
 	full    map[countKey]bool
 }
@@ -107,12 +106,7 @@ func (c *claimer) save(h job) {
 	h.version++
 	h.updated = c.now
 	c.t.putHot(h)
-	j, err := c.s.full(c.sp, &h)
-	if err != nil {
-		c.err = err
-		return
-	}
-	c.out = append(c.out, j)
+	c.out = append(c.out, c.sp.draft(&h))
 }
 
 func (c *claimer) take(h job) {
@@ -164,7 +158,7 @@ func (c *claimer) ready(open []sym) {
 	}
 	heap.Init(h)
 	examined := 0
-	for h.Len() > 0 && len(c.out) < c.req.Limit && examined < maxExamine && c.err == nil {
+	for h.Len() > 0 && len(c.out) < c.req.Limit && examined < maxExamine {
 		cur := h.items[0]
 		if j, ok := c.sp.get(cur.head().id); ok && j.is(stWaiting) {
 			if c.admit(&j) {

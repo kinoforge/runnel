@@ -56,7 +56,9 @@ func add[T any](m map[string]map[chan T]struct{}, ns string, ch chan T) {
 	m[ns][ch] = struct{}{}
 }
 
-func (h *hub) notify(ns string, wake bool, ends []string) {
+// notify wakes the namespace's subscribers and sends the ids of the jobs that
+// ended; the ids are spelled out only when someone listens.
+func (h *hub) notify(ns string, wake bool, ends []uid) {
 	if !wake && len(ends) == 0 {
 		return
 	}
@@ -70,7 +72,11 @@ func (h *hub) notify(ns string, wake bool, ends []string) {
 			}
 		}
 	}
-	for _, id := range ends {
+	if len(h.ends[ns]) == 0 {
+		return
+	}
+	for _, u := range ends {
+		id := u.String()
 		for ch := range h.ends[ns] {
 			select {
 			case ch <- id:

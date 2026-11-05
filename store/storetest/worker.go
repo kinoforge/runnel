@@ -331,3 +331,33 @@ func testWorkerConcurrency(t *testing.T, open Opener) {
 		t.Fatalf("ran %d at once with concurrency 2", most)
 	}
 }
+
+// testWorkerGather fills a worker's slots one job at a time: the last free
+// slot is still claimed although it is fewer than a quarter of them.
+func testWorkerGather(t *testing.T, open Opener) {
+	spec.Rule(t, "R08")
+	e := setup(t, open)
+	cfg := fast("q")
+	cfg.Concurrency = 8
+	release := make(chan struct{})
+	var started atomic.Int32
+	w := runnel.NewWorker(e.s, e.ns, cfg)
+	w.HandleFunc("k", func(ctx context.Context, _ *runnel.Job) error {
+		started.Add(1)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+	stop := runWorker(t, e, w)
+	defer stop()
+	defer close(release)
+	for i := range int32(cfg.Concurrency) {
+		j, _ := runnel.NewJob("q", "k", nil)
+		if _, err := e.c.EnqueueJobs(e.ctx, []*runnel.Job{j}); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, fmt.Sprintf("job %d to start", i+1), 5*time.Second, func() bool { return started.Load() == i+1 })
+	}
+}

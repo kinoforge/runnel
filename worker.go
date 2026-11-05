@@ -22,6 +22,10 @@ const (
 	claimRetryMax          = 30 * time.Second
 	finishTries            = 6
 	finishRetryMin         = 200 * time.Millisecond
+	// A busy worker claims once a quarter of its slots are free, or after
+	// gatherWait, so claims take jobs in batches rather than one by one.
+	gatherShare = 4
+	gatherWait  = 2 * time.Millisecond
 )
 
 // WorkerConfig configures a worker. Concurrency is how many jobs it runs at once
@@ -125,6 +129,11 @@ func (w *Worker) Run(ctx context.Context) error {
 	pause := claimRetryMin
 	for ctx.Err() == nil {
 		free := w.reserve(w.cfg.Concurrency)
+		if want := w.cfg.Concurrency / gatherShare; free > 0 && free < want && w.busy() {
+			w.unreserve(free)
+			w.gather(ctx, freed, want)
+			free = w.reserve(w.cfg.Concurrency)
+		}
 		if free > 0 {
 			jobs, err := w.src.Claim(ctx, w.cfg.ID, w.cfg.Queues, free, w.cfg.Lease)
 			if err != nil {
@@ -193,6 +202,33 @@ func (w *Worker) reserve(most int) int {
 	n := max(min(most, w.cfg.Concurrency-len(w.runs)-w.held), 0)
 	w.held += n
 	return n
+}
+
+func (w *Worker) busy() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.runs) > 0
+}
+
+// gather waits up to gatherWait for want slots to be free.
+func (w *Worker) gather(ctx context.Context, freed <-chan struct{}, want int) {
+	t := time.NewTimer(gatherWait)
+	defer t.Stop()
+	for w.free() < want {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			return
+		case <-freed:
+		}
+	}
+}
+
+func (w *Worker) free() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.cfg.Concurrency - len(w.runs) - w.held
 }
 
 func (w *Worker) unreserve(n int) {

@@ -19,12 +19,6 @@ func TestConformanceDisk(t *testing.T) {
 	conformOnDisk(t, hybrid.Options{SnapshotBytes: 1 << 16})
 }
 
-// TestConformanceDiskNoCache keeps no body in memory once written, so every
-// read goes to the log or a snapshot.
-func TestConformanceDiskNoCache(t *testing.T) {
-	conformOnDisk(t, hybrid.Options{SnapshotBytes: 1 << 14, CacheBytes: 1})
-}
-
 func conformOnDisk(t *testing.T, opt hybrid.Options) {
 	opt.Dir = t.TempDir()
 	var once sync.Once

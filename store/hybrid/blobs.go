@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"sync"
-	"sync/atomic"
 )
 
 // snapBit marks a file id as a snapshot rather than a log segment.
@@ -23,25 +22,60 @@ type files struct {
 }
 
 func (fs *files) read(r ref) ([]byte, error) {
-	fs.mu.RLock()
-	f := fs.open[r.file]
-	if f == nil {
-		fs.mu.RUnlock()
-		if err := fs.load(r.file); err != nil {
-			return nil, err
-		}
-		fs.mu.RLock()
-		f = fs.open[r.file]
-	}
-	defer fs.mu.RUnlock()
-	if f == nil {
-		return nil, fmt.Errorf("hybrid: body file %d closed", r.file)
-	}
 	b := make([]byte, r.n)
-	if _, err := f.ReadAt(b, r.off); err != nil && !errors.Is(err, io.EOF) {
+	if _, err := fs.readAt(r.file, r.off, b); err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// readAt fills b from file id at off and returns how much it read; past the
+// end of the file it reads less.
+func (fs *files) readAt(id uint32, off int64, b []byte) (int, error) {
+	fs.mu.RLock()
+	f := fs.open[id]
+	if f == nil {
+		fs.mu.RUnlock()
+		if err := fs.load(id); err != nil {
+			return 0, err
+		}
+		fs.mu.RLock()
+		f = fs.open[id]
+	}
+	defer fs.mu.RUnlock()
+	if f == nil {
+		return 0, fmt.Errorf("hybrid: body file %d closed", id)
+	}
+	n, err := f.ReadAt(b, off)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, err
+	}
+	return n, nil
+}
+
+// window reads bodies in file order through one buffer, so a snapshot reads
+// each file once instead of once per body.
+type window struct {
+	fs   *files
+	file uint32
+	off  int64
+	buf  []byte
+}
+
+func (w *window) read(at ref) ([]byte, error) {
+	end := at.off + int64(at.n)
+	if at.file != w.file || at.off < w.off || end > w.off+int64(len(w.buf)) {
+		buf := make([]byte, max(int(at.n), chunkBytes))
+		n, err := w.fs.readAt(at.file, at.off, buf)
+		if err != nil {
+			return nil, err
+		}
+		if n < int(at.n) {
+			return nil, errNoBody
+		}
+		w.file, w.off, w.buf = at.file, at.off, buf[:n]
+	}
+	return w.buf[at.off-w.off : end-w.off], nil
 }
 
 func (fs *files) load(id uint32) error {
@@ -74,14 +108,17 @@ func (fs *files) close() {
 	fs.drop(func(uint32) bool { return true })
 }
 
-// cache holds job bodies in memory. Every body starts here; once its record is
-// written, it leaves when its job is final or the cache is over budget, and is
-// read from disk after that. Without a log nothing leaves.
+// cache holds the job bodies whose records are not written yet; without a log
+// it holds them all.
 type cache struct {
 	bodies map[uid][]byte
 	queue  []leaving
-	size   *atomic.Int64
+	peak   int
 }
+
+// shrinkAt is the size past which an emptied cache map is replaced, since Go
+// maps keep their memory.
+const shrinkAt = 1 << 12
 
 // leaving is a body that may leave the cache once record lsn is written, if
 // the job still has the body at ref.
@@ -92,19 +129,11 @@ type leaving struct {
 }
 
 func (c *cache) put(id uid, b []byte) {
-	if old, ok := c.bodies[id]; ok {
-		c.size.Add(-int64(len(old)))
-	}
 	c.bodies[id] = b
-	c.size.Add(int64(len(b)))
+	c.peak = max(c.peak, len(c.bodies))
 }
 
-func (c *cache) del(id uid) {
-	if old, ok := c.bodies[id]; ok {
-		c.size.Add(-int64(len(old)))
-		delete(c.bodies, id)
-	}
-}
+func (c *cache) del(id uid) { delete(c.bodies, id) }
 
 // evict drops the queued bodies whose records are written by now.
 func (c *cache) evict(written uint64, bodyOf func(uid) (ref, bool)) {
@@ -117,5 +146,8 @@ func (c *cache) evict(written uint64, bodyOf func(uid) (ref, bool)) {
 	}
 	if i > 0 {
 		c.queue = append(c.queue[:0], c.queue[i:]...)
+	}
+	if len(c.bodies) == 0 && c.peak > shrinkAt {
+		c.bodies, c.peak = map[uid][]byte{}, 0
 	}
 }

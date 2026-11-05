@@ -2,9 +2,9 @@ package hybrid
 
 import (
 	"cmp"
+	"encoding/binary"
 	"encoding/json"
 	"sync"
-	"sync/atomic"
 
 	"github.com/google/btree"
 	"github.com/kinoforge/runnel"
@@ -21,7 +21,7 @@ func lessTime(a, b timeKey) bool {
 	if a.at != b.at {
 		return a.at < b.at
 	}
-	return string(a.id[:]) < string(b.id[:])
+	return lessID(a.id, b.id)
 }
 
 // readyKey orders waiting jobs the way they are claimed: higher priority, then
@@ -39,10 +39,17 @@ func lessReady(a, b readyKey) bool {
 	if a.at != b.at {
 		return a.at < b.at
 	}
-	return string(a.id[:]) < string(b.id[:])
+	return lessID(a.id, b.id)
 }
 
-func lessID(a, b uid) bool { return string(a[:]) < string(b[:]) }
+func lessID(a, b uid) bool { return cmpID(a, b) < 0 }
+
+func cmpID(a, b uid) int {
+	if c := cmp.Compare(binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(b[:8])); c != 0 {
+		return c
+	}
+	return cmp.Compare(binary.BigEndian.Uint64(a[8:]), binary.BigEndian.Uint64(b[8:]))
+}
 
 type (
 	timeTree  = btree.BTreeG[timeKey]
@@ -89,25 +96,25 @@ const (
 // space holds one namespace. Jobs live in a slice of fixed-size records found
 // through idx; freed slots are reused.
 type space struct {
-	ns   string
-	mu   sync.Mutex
-	syms syms
+	ns    string
+	mu    sync.Mutex
+	queue queue
+	syms  syms
 
 	idx   map[uid]int32
-	slots []job
+	jobs  slabs
 	free  []int32
 	cache cache
 
 	uniques map[string]unique
 	expiry  *btree.BTreeG[uniqueKey]
 	kids    map[uid][]uid
-	events  []runnel.Event
+	events  []event
 	seq     int64
 	cursors map[string]int64
 	configs map[runnel.ConfigKind]map[string][]byte
 	buckets map[string]bucket
 
-	all     *idTree
 	byState [stCount]*idTree
 	ready   map[sym]*readyTree
 	sched   map[sym]*timeTree
@@ -123,12 +130,12 @@ type space struct {
 	resourceCfg map[string]runnel.ResourceConfig
 }
 
-func newSpace(ns string, cached *atomic.Int64) *space {
+func newSpace(ns string) *space {
 	sp := &space{
-		ns: ns, syms: newSyms(), idx: map[uid]int32{}, cache: cache{bodies: map[uid][]byte{}, size: cached},
+		ns: ns, syms: newSyms(), idx: map[uid]int32{}, cache: cache{bodies: map[uid][]byte{}},
 		uniques: map[string]unique{}, expiry: btree.NewG(degree, lessUnique), kids: map[uid][]uid{},
 		cursors: map[string]int64{}, configs: map[runnel.ConfigKind]map[string][]byte{}, buckets: map[string]bucket{},
-		all: btree.NewG(degree, lessID), ready: map[sym]*readyTree{}, sched: map[sym]*timeTree{}, poll: map[sym]*timeTree{},
+		ready: map[sym]*readyTree{}, sched: map[sym]*timeTree{}, poll: map[sym]*timeTree{},
 		leases: btree.NewG(degree, lessTime), startBy: btree.NewG(degree, lessTime), fin: btree.NewG(degree, lessTime),
 		counts: map[sym]*[stCount]int64{}, active: map[countKey]int{}, queued: map[[2]sym]int{},
 	}
@@ -140,14 +147,14 @@ func newSpace(ns string, cached *atomic.Int64) *space {
 
 func (sp *space) get(id uid) (job, bool) {
 	if i, ok := sp.idx[id]; ok {
-		return sp.slots[i], true
+		return *sp.jobs.at(i), true
 	}
 	return job{}, false
 }
 
 func (sp *space) bodyRef(id uid) (ref, bool) {
 	if i, ok := sp.idx[id]; ok {
-		return sp.slots[i].body, true
+		return sp.jobs.at(i).body, true
 	}
 	return ref{}, false
 }
@@ -156,41 +163,46 @@ func (sp *space) bodyRef(id uid) (ref, bool) {
 // alone when they already hold the job.
 func (sp *space) setJob(h job) {
 	if i, ok := sp.idx[h.id]; ok {
-		old := &sp.slots[i]
+		old := sp.jobs.at(i)
 		if old.state != h.state {
 			sp.byState[old.state].Delete(h.id)
 			sp.byState[h.state].ReplaceOrInsert(h.id)
 		}
 		sp.unindex(old)
-		sp.slots[i] = h
+		*old = h
 		sp.index(&h)
 		return
 	}
 	if n := len(sp.free); n > 0 {
 		i := sp.free[n-1]
 		sp.free = sp.free[:n-1]
-		sp.slots[i] = h
+		*sp.jobs.at(i) = h
 		sp.idx[h.id] = i
 	} else {
-		sp.idx[h.id] = int32(len(sp.slots))
-		sp.slots = append(sp.slots, h)
+		sp.idx[h.id] = sp.jobs.add(h)
 	}
-	sp.all.ReplaceOrInsert(h.id)
 	sp.byState[h.state].ReplaceOrInsert(h.id)
 	sp.index(&h)
 }
 
 func (sp *space) delJob(id uid) {
 	if i, ok := sp.idx[id]; ok {
-		sp.all.Delete(id)
-		sp.byState[sp.slots[i].state].Delete(id)
-		sp.unindex(&sp.slots[i])
-		sp.slots[i] = job{}
+		h := sp.jobs.at(i)
+		sp.byState[h.state].Delete(id)
+		sp.unindex(h)
+		*h = job{}
 		sp.free = append(sp.free, i)
 		delete(sp.idx, id)
 	}
 	delete(sp.kids, id)
 	sp.cache.del(id)
+}
+
+// draft copies h with its names and, when cached, its body.
+func (sp *space) draft(h *job) draft {
+	d := sp.syms.draft(h)
+	d.body = sp.cache.bodies[h.id]
+	return d
 }
 
 // body returns a job's body from the cache or from disk.
@@ -266,13 +278,14 @@ func (sp *space) unindex(h *job) {
 	sp.count(h, -1)
 	switch h.state {
 	case stWaiting:
-		if t := sp.sched[h.queue]; t != nil {
-			t.Delete(timeKey{h.runAt, h.id})
+		if !sp.unready(h) {
+			if t := sp.sched[h.queue]; t != nil {
+				t.Delete(timeKey{h.runAt, h.id})
+			}
 		}
-		if t := sp.ready[h.queue]; t != nil {
-			t.Delete(readyOf(h))
+		if h.startBy != 0 {
+			sp.startBy.Delete(timeKey{h.startBy, h.id})
 		}
-		sp.startBy.Delete(timeKey{h.startBy, h.id})
 	case stRunning:
 		sp.leases.Delete(timeKey{h.lease, h.id})
 	case stPolling:
@@ -282,6 +295,16 @@ func (sp *space) unindex(h *job) {
 	case stCompleted, stDead, stCancelled:
 		sp.fin.Delete(timeKey{h.finished, h.id})
 	}
+}
+
+// unready removes h from the ready tree and reports whether it was there.
+func (sp *space) unready(h *job) bool {
+	t := sp.ready[h.queue]
+	if t == nil {
+		return false
+	}
+	_, ok := t.Delete(readyOf(h))
+	return ok
 }
 
 // promote moves the waiting jobs of queue q due at now from the schedule to the
@@ -359,19 +382,3 @@ func decodeAll[T any](raw map[string][]byte) map[string]T {
 	}
 	return out
 }
-
-func (sp *space) addEvent(e runnel.Event) {
-	sp.events = append(sp.events, e)
-	sp.seq = max(sp.seq, e.Seq)
-}
-
-// dropEvents removes the events up to and including seq, which are the oldest.
-func (sp *space) dropEvents(seq int64) {
-	i := 0
-	for i < len(sp.events) && sp.events[i].Seq <= seq {
-		i++
-	}
-	sp.events = sp.events[i:]
-}
-
-func cmpEvent(e runnel.Event, seq int64) int { return cmp.Compare(e.Seq, seq) }

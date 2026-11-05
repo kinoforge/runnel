@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"time"
-
-	"github.com/kinoforge/runnel"
 )
 
 var errShort = errors.New("hybrid: record cut short")
@@ -27,8 +24,6 @@ func (e *enc) int(v int64) {
 		e.b = binary.AppendVarint(e.b, v)
 	}
 }
-
-func (e *enc) time(t time.Time) { e.int(runnel.Millis(t)) }
 
 func (e *enc) float(v float64) {
 	if e != nil {
@@ -87,8 +82,6 @@ func (d *dec) int() int64 {
 	d.b = d.b[n:]
 	return v
 }
-
-func (d *dec) time() time.Time { return runnel.FromMillis(d.int()) }
 
 func (d *dec) float() float64 {
 	if d.err != nil || len(d.b) < 8 {

@@ -10,10 +10,16 @@ import (
 
 func (s *Store) Insert(_ context.Context, ns string, jobs []*runnel.Job, now time.Time) ([]runnel.Inserted, error) {
 	out := make([]runnel.Inserted, len(jobs))
+	bodies := make([][]byte, len(jobs))
+	for i, j := range jobs {
+		if len(j.DependsOn) == 0 {
+			bodies[i] = encodeBody(j)
+		}
+	}
 	err := s.write(ns, func(t *tx) error {
 		in := inserter{t: t, now: ms(now), remap: map[string]string{}}
 		for i, j := range jobs {
-			out[i] = in.one(j)
+			out[i] = in.one(j, bodies[i])
 		}
 		return nil
 	})
@@ -36,7 +42,9 @@ func (in *inserter) refuse(j *runnel.Job, err error) runnel.Inserted {
 	return runnel.Inserted{ID: j.ID, Err: err}
 }
 
-func (in *inserter) one(j *runnel.Job) runnel.Inserted {
+// one adds j. body is j encoded before the lock was taken, or nil when its
+// dependencies may still be remapped.
+func (in *inserter) one(j *runnel.Job, body []byte) runnel.Inserted {
 	id, ok := parseID(j.ID)
 	if !ok {
 		return in.refuse(j, fmt.Errorf("%w: job id %q is not a canonical UUID", runnel.ErrInvalid, j.ID))
@@ -63,7 +71,10 @@ func (in *inserter) one(j *runnel.Job) runnel.Inserted {
 	if len(wait) > 0 {
 		j.State, j.StartBy = runnel.StateBlocked, time.Time{}
 	}
-	in.t.put(in.t.sp.syms.hot(j), encodeBody(j))
+	if body == nil {
+		body = encodeBody(j)
+	}
+	in.t.put(in.t.sp.syms.hot(j, nil), body)
 	for _, d := range wait {
 		in.t.addKid(d, id)
 	}

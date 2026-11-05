@@ -2,6 +2,7 @@ package hybrid
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/kinoforge/runnel"
@@ -9,9 +10,13 @@ import (
 
 func (s *Store) Apply(_ context.Context, ns string, changes []runnel.Change, now time.Time) ([]bool, error) {
 	out := make([]bool, len(changes))
+	bodies := make([][]byte, len(changes))
+	for i, c := range changes {
+		bodies[i] = encodeBody(c.Job)
+	}
 	err := s.write(ns, func(t *tx) error {
 		for i, c := range changes {
-			ok, err := s.applyOne(t, c, ms(now))
+			ok, err := s.applyOne(t, c, bodies[i], ms(now))
 			if err != nil {
 				return err
 			}
@@ -31,8 +36,10 @@ func (s *Store) Apply(_ context.Context, ns string, changes []runnel.Change, now
 }
 
 // applyOne writes c if its guards hold. The store keeps the fields it owns:
-// pending, unique key, dependencies and creation time.
-func (s *Store) applyOne(t *tx, c runnel.Change, now int64) (bool, error) {
+// pending, unique key, dependencies and creation time. body is c.Job encoded
+// before the lock was taken; it is encoded again only when c.Job changed a
+// field the store keeps.
+func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, error) {
 	sp := t.sp
 	id, ok := parseID(c.Job.ID)
 	if !ok {
@@ -49,11 +56,14 @@ func (s *Store) applyOne(t *tx, c runnel.Change, now int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	j := *c.Job
-	j.UniqueKey, j.DependsOn = key, deps
-	h := sp.syms.hot(&j)
+	if key != c.Job.UniqueKey || !slices.Equal(deps, c.Job.DependsOn) {
+		j := *c.Job
+		j.UniqueKey, j.DependsOn = key, deps
+		body = encodeBody(&j)
+	}
+	h := sp.syms.hot(c.Job, &old)
 	h.id, h.version, h.pending, h.created, h.flags = id, old.version+1, old.pending, old.created, old.flags
-	t.put(h, encodeBody(&j))
+	t.put(h, body)
 	if h.final() && !old.final() {
 		return true, s.finalize(t, h, key, now)
 	}
@@ -79,8 +89,7 @@ func (s *Store) keys(sp *space, h *job) (string, []string, error) {
 func (s *Store) finalize(t *tx, h job, key string, now int64) error {
 	sp := t.sp
 	sp.seq++
-	t.putEvent(runnel.Event{Seq: sp.seq, Namespace: sp.ns, JobID: h.id.String(), Queue: sp.syms.name(h.queue),
-		Kind: sp.syms.name(h.kind), State: h.stateName(), At: fromMs(now)})
+	t.putEvent(event{seq: sp.seq, id: h.id, queue: h.queue, kind: h.kind, state: h.state, at: now})
 	if key != "" {
 		if u, ok := sp.uniques[key]; ok && u.id == h.id && u.until == 0 {
 			t.delUnique(key)

@@ -9,20 +9,39 @@ import (
 
 const idLen = 36
 
+// idDigits says where each byte of a canonical id starts.
+var idDigits = [16]int{0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34}
+
 // uid is a job id in its 16 raw bytes, so ids hold no pointers.
 type uid [16]byte
 
 // parseID reads a job id in canonical form. Other spellings of the same UUID
 // are refused, so an id always reads back as it was written.
 func parseID(s string) (uid, bool) {
-	if len(s) != idLen {
-		return uid{}, false
+	var u uid
+	if len(s) != idLen || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+		return u, false
 	}
-	u, err := uuid.Parse(s)
-	if err != nil || u.String() != s {
-		return uid{}, false
+	for k, i := range idDigits {
+		hi, ok1 := unhex(s[i])
+		lo, ok2 := unhex(s[i+1])
+		if !ok1 || !ok2 {
+			return uid{}, false
+		}
+		u[k] = hi<<4 | lo
 	}
-	return uid(u), true
+	return u, true
+}
+
+// unhex reads one lowercase hex digit.
+func unhex(c byte) (byte, bool) {
+	switch {
+	case '0' <= c && c <= '9':
+		return c - '0', true
+	case 'a' <= c && c <= 'f':
+		return c - 'a' + 10, true
+	}
+	return 0, false
 }
 
 func (u uid) String() string { return uuid.UUID(u).String() }
@@ -49,6 +68,14 @@ func (t *syms) id(s string) sym {
 	t.names = append(t.names, s)
 	t.ids[s] = v
 	return v
+}
+
+// reuse returns v when it stands for s, and interns s otherwise.
+func (t *syms) reuse(v sym, s string) sym {
+	if t.names[v] == s {
+		return v
+	}
+	return t.id(s)
 }
 
 // find looks s up without adding it.
@@ -106,11 +133,11 @@ type job struct {
 	id                                    uid
 	queue, kind, tenant, resource, worker sym
 	prio, attempt, maxAttempts, pending   int32
+	state, flags                          uint8
 	runAt, waitingSince, startBy, lease   int64
 	created, updated, started, finished   int64
 	version, window                       int64
 	body                                  ref
-	state, flags                          uint8
 }
 
 func ms(t time.Time) int64             { return runnel.Millis(t) }
@@ -119,9 +146,15 @@ func (h *job) final() bool             { return final(h.state) }
 func (h *job) is(st uint8) bool        { return h.state == st }
 func (h *job) stateName() runnel.State { return stateNames[h.state] }
 
-// hot takes the in-memory fields of j, interning its names.
-func (t *syms) hot(j *runnel.Job) job {
-	h := job{queue: t.id(j.Queue), kind: t.id(j.Kind), tenant: t.id(j.Tenant), resource: t.id(j.Resource), worker: t.id(j.Worker),
+// hot takes the in-memory fields of j, interning its names. like, which may be
+// nil, is a stored job whose names j likely shares, sparing the lookups.
+func (t *syms) hot(j *runnel.Job, like *job) job {
+	var l job
+	if like != nil {
+		l = *like
+	}
+	h := job{queue: t.reuse(l.queue, j.Queue), kind: t.reuse(l.kind, j.Kind), tenant: t.reuse(l.tenant, j.Tenant),
+		resource: t.reuse(l.resource, j.Resource), worker: t.reuse(l.worker, j.Worker),
 		prio: int32(j.Priority), attempt: int32(j.Attempt), maxAttempts: int32(j.MaxAttempts), pending: int32(j.Pending),
 		runAt: ms(j.RunAt), waitingSince: ms(j.WaitingSince), startBy: ms(j.StartBy), lease: ms(j.LeaseUntil),
 		created: ms(j.CreatedAt), updated: ms(j.UpdatedAt), started: ms(j.StartedAt), finished: ms(j.FinishedAt),
@@ -138,11 +171,30 @@ func (t *syms) hot(j *runnel.Job) job {
 
 // full rebuilds the whole job from its in-memory fields and its body.
 func (t *syms) full(ns string, h *job, body []byte) (*runnel.Job, error) {
-	j := &runnel.Job{ID: h.id.String(), Namespace: ns, Queue: t.name(h.queue), Kind: t.name(h.kind),
-		Tenant: t.name(h.tenant), Resource: t.name(h.resource), Worker: t.name(h.worker), State: h.stateName(),
+	d := t.draft(h)
+	d.body = body
+	return d.job(ns)
+}
+
+// draft is a job copied under the namespace lock with its names and, when
+// cached, its body, so it can be rebuilt once the lock is released.
+type draft struct {
+	h     job
+	names [5]string
+	body  []byte
+}
+
+func (t *syms) draft(h *job) draft {
+	return draft{h: *h, names: [5]string{t.name(h.queue), t.name(h.kind), t.name(h.tenant), t.name(h.resource), t.name(h.worker)}}
+}
+
+func (d *draft) job(ns string) (*runnel.Job, error) {
+	h := &d.h
+	j := &runnel.Job{ID: h.id.String(), Namespace: ns, Queue: d.names[0], Kind: d.names[1], Tenant: d.names[2],
+		Resource: d.names[3], Worker: d.names[4], State: h.stateName(),
 		Priority: int(h.prio), Attempt: int(h.attempt), MaxAttempts: int(h.maxAttempts), Pending: int(h.pending),
 		RunAt: fromMs(h.runAt), WaitingSince: fromMs(h.waitingSince), StartBy: fromMs(h.startBy), LeaseUntil: fromMs(h.lease),
 		CreatedAt: fromMs(h.created), UpdatedAt: fromMs(h.updated), StartedAt: fromMs(h.started), FinishedAt: fromMs(h.finished),
 		Version: h.version}
-	return j, decodeBody(body, j)
+	return j, decodeBody(d.body, j)
 }

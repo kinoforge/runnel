@@ -11,6 +11,9 @@ import (
 )
 
 // full returns the whole job h stands for, reading its body.
+// readGap is how far apart two bodies may lie and still be read at once.
+const readGap = 4 << 10
+
 func (s *Store) full(sp *space, h *job) (*runnel.Job, error) {
 	b, err := sp.body(h, s.files)
 	if err != nil {
@@ -19,11 +22,88 @@ func (s *Store) full(sp *space, h *job) (*runnel.Job, error) {
 	return sp.syms.full(sp.ns, h, b)
 }
 
+// rebuild makes whole jobs of drafts once the namespace lock is released,
+// reading the bodies that were not cached. A body a snapshot moved meanwhile
+// is looked up again under the lock.
+func (s *Store) rebuild(ns string, ds []draft) ([]*runnel.Job, error) {
+	if len(ds) == 0 {
+		return nil, nil
+	}
+	s.fill(ds)
+	out := make([]*runnel.Job, len(ds))
+	for i := range ds {
+		d := &ds[i]
+		if d.body == nil {
+			if err := s.fetch(ns, d); err != nil {
+				return nil, fmt.Errorf("hybrid: job %s: %w", d.h.id, err)
+			}
+		}
+		j, err := d.job(ns)
+		if err != nil {
+			return nil, fmt.Errorf("hybrid: job %s: %w", d.h.id, err)
+		}
+		out[i] = j
+	}
+	return out, nil
+}
+
+// fill reads the bodies drafts lack in disk order, one read for each run of
+// bodies lying close together, as jobs enqueued together do. A failed read
+// leaves the bodies for fetch.
+func (s *Store) fill(ds []draft) {
+	if s.files == nil {
+		return
+	}
+	var todo []int
+	for i := range ds {
+		if ds[i].body == nil && ds[i].h.body.n > 0 {
+			todo = append(todo, i)
+		}
+	}
+	slices.SortFunc(todo, func(a, b int) int { return cmpRef(ds[a].h.body, ds[b].h.body) })
+	for k := 0; k < len(todo); {
+		first := ds[todo[k]].h.body
+		end := first.off + int64(first.n)
+		m := k + 1
+		for ; m < len(todo); m++ {
+			r := ds[todo[m]].h.body
+			if r.file != first.file || r.off > end+readGap || r.off+int64(r.n)-first.off > chunkBytes {
+				break
+			}
+			end = max(end, r.off+int64(r.n))
+		}
+		buf := make([]byte, end-first.off)
+		if n, err := s.files.readAt(first.file, first.off, buf); err == nil && n == len(buf) {
+			for _, i := range todo[k:m] {
+				r := ds[i].h.body
+				ds[i].body = buf[r.off-first.off : r.off-first.off+int64(r.n)]
+			}
+		}
+		k = m
+	}
+}
+
+func (s *Store) fetch(ns string, d *draft) error {
+	if s.files != nil && d.h.body.n > 0 {
+		if b, err := s.files.read(d.h.body); err == nil {
+			d.body = b
+			return nil
+		}
+	}
+	return s.read(ns, func(sp *space) error {
+		h := d.h
+		h.body, _ = sp.bodyRef(h.id)
+		b, err := sp.body(&h, s.files)
+		d.body = b
+		return err
+	})
+}
+
 func (s *Store) Get(_ context.Context, ns string, ids []string) ([]*runnel.Job, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	var out []*runnel.Job
+	var out []draft
 	err := s.read(ns, func(sp *space) error {
 		seen := make(map[uid]bool, len(ids))
 		for _, raw := range ids {
@@ -33,15 +113,14 @@ func (s *Store) Get(_ context.Context, ns string, ids []string) ([]*runnel.Job, 
 				continue
 			}
 			seen[id] = true
-			j, err := s.full(sp, &h)
-			if err != nil {
-				return err
-			}
-			out = append(out, j)
+			out = append(out, sp.draft(&h))
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return s.rebuild(ns, out)
 }
 
 // filter holds the symbols a query matches; ok is false when a name it asks for
@@ -63,51 +142,77 @@ func (f filter) match(h *job) bool {
 }
 
 func (s *Store) List(_ context.Context, ns string, q runnel.Query) ([]*runnel.Job, string, error) {
-	var out []*runnel.Job
+	var out []draft
 	next := ""
 	err := s.read(ns, func(sp *space) error {
 		f := sp.filter(q)
-		t := sp.all
+		trees := sp.byState[1:]
 		if q.State != "" {
-			t = sp.byState[stateCode(q.State)]
+			st := stateCode(q.State)
+			trees = sp.byState[st : st+1]
+			if st == 0 {
+				return nil
+			}
 		}
-		if !f.ok || t == sp.byState[0] {
+		if !f.ok {
 			return nil
 		}
 		cur, hasCur := parseID(q.Cursor)
 		if q.Cursor != "" && !hasCur {
 			return fmt.Errorf("%w: bad cursor", runnel.ErrInvalid)
 		}
-		var err error
-		visit := func(id uid) bool {
+		ids := sp.newest(trees, f, cur, hasCur, q.Limit)
+		for _, id := range ids {
 			h, _ := sp.get(id)
-			if (hasCur && id == cur) || !f.match(&h) {
+			out = append(out, sp.draft(&h))
+		}
+		if q.Limit > 0 && len(ids) == q.Limit {
+			next = ids[len(ids)-1].String()
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	jobs, err := s.rebuild(ns, out)
+	return jobs, next, err
+}
+
+// newest returns the ids of up to limit jobs in trees that match f, newest
+// first, starting after cursor cur when given. No limit means all.
+func (sp *space) newest(trees []*idTree, f filter, cur uid, hasCur bool, limit int) []uid {
+	var ids []uid
+	for _, t := range trees {
+		n := 0
+		visit := func(id uid) bool {
+			if hasCur && id == cur {
 				return true
 			}
-			var j *runnel.Job
-			if j, err = s.full(sp, &h); err != nil {
-				return false
+			if h, _ := sp.get(id); !f.match(&h) {
+				return true
 			}
-			out = append(out, j)
-			if len(out) == q.Limit {
-				next = j.ID
-				return false
-			}
-			return true
+			ids = append(ids, id)
+			n++
+			return limit <= 0 || n < limit
 		}
 		if hasCur {
 			t.DescendLessOrEqual(cur, visit)
 		} else {
 			t.Descend(visit)
 		}
-		return err
-	})
-	return out, next, err
+	}
+	if len(trees) > 1 {
+		slices.SortFunc(ids, func(a, b uid) int { return cmpID(b, a) })
+	}
+	if limit > 0 && len(ids) > limit {
+		ids = ids[:limit]
+	}
+	return ids
 }
 
 func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.Time, limit int) ([]*runnel.Job, error) {
 	at := ms(now)
-	var out []*runnel.Job
+	var out []draft
 	err := s.read(ns, func(sp *space) error {
 		var t *timeTree
 		var due func(int64) bool
@@ -119,22 +224,20 @@ func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.
 		default:
 			return fmt.Errorf("runnel: unknown due kind %d", kind)
 		}
-		var err error
 		t.Ascend(func(k timeKey) bool {
 			if !due(k.at) || len(out) >= limit {
 				return false
 			}
 			h, _ := sp.get(k.id)
-			var j *runnel.Job
-			if j, err = s.full(sp, &h); err != nil {
-				return false
-			}
-			out = append(out, j)
+			out = append(out, sp.draft(&h))
 			return true
 		})
-		return err
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return s.rebuild(ns, out)
 }
 
 func (s *Store) Events(_ context.Context, ns string, after int64, limit int) ([]runnel.Event, error) {
@@ -142,7 +245,10 @@ func (s *Store) Events(_ context.Context, ns string, after int64, limit int) ([]
 	err := s.read(ns, func(sp *space) error {
 		i, _ := slices.BinarySearchFunc(sp.events, after+1, cmpEvent)
 		end := min(len(sp.events), i+max(limit, 0))
-		out = slices.Clone(sp.events[i:end])
+		out = make([]runnel.Event, 0, end-i)
+		for k := i; k < end; k++ {
+			out = append(out, sp.event(&sp.events[k]))
+		}
 		return nil
 	})
 	return out, err

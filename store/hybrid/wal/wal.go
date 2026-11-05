@@ -197,25 +197,54 @@ func (l *Log) openSegment(seg uint64) error {
 	return SyncDir(l.dir)
 }
 
-// Rotate syncs and closes the current segment and opens the next one, whose
-// number it returns. Records appended before the call are in older segments.
+// Rotate starts the next segment and returns its number. Records appended
+// before the switch go to the older segments, which are written and synced
+// before it returns; appends go on meanwhile, into the new segment.
 func (l *Log) Rotate() (uint64, error) {
 	l.io.Lock()
 	defer l.io.Unlock()
 	l.syncMu.Lock()
 	defer l.syncMu.Unlock()
-	if err := l.flushLocked(true); err != nil {
+	next, err := os.OpenFile(l.Path(l.seg+1), os.O_CREATE|os.O_WRONLY|os.O_APPEND, filePerm)
+	if err != nil {
+		return 0, err
+	}
+	l.mu.Lock()
+	old, data, upto := l.f, l.buf, l.appended
+	l.buf, l.spare = l.spare[:0], nil
+	l.f, l.seg, l.end = next, l.seg+1, 0
+	seg := l.seg
+	l.mu.Unlock()
+	l.size.Store(0)
+	if err := finish(old, data); err != nil {
 		l.fail(err)
 		return 0, err
 	}
-	if err := l.f.Close(); err != nil {
-		return 0, err
+	l.mu.Lock()
+	l.written, l.synced = max(l.written, upto), max(l.synced, upto)
+	l.spare = data
+	l.cond.Broadcast()
+	l.mu.Unlock()
+	return seg, SyncDir(l.dir)
+}
+
+// finish writes the last records of a segment, syncs and closes it.
+func finish(f *os.File, data []byte) error {
+	if len(data) > 0 {
+		if _, err := f.Write(data); err != nil {
+			return err
+		}
 	}
-	if err := l.openSegment(l.seg + 1); err != nil {
-		l.fail(err)
-		return 0, err
-	}
-	return l.seg, nil
+	return errors.Join(f.Sync(), f.Close())
+}
+
+// Sync writes and syncs every record appended so far.
+func (l *Log) Sync() error {
+	l.io.Lock()
+	defer l.io.Unlock()
+	l.syncMu.Lock()
+	defer l.syncMu.Unlock()
+	return l.flushLocked(true)
 }
 
 // Remove deletes the segments numbered below before.

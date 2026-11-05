@@ -1,67 +1,41 @@
 package hybrid
 
 import (
+	"cmp"
 	"errors"
 	"maps"
 	"os"
+	"slices"
 
-	"github.com/kinoforge/runnel"
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 )
 
 const chunkBytes = 1 << 20
 
-// view is a point-in-time copy of a space. Job records are copied; bodies are
-// read from disk while the snapshot is written.
-type view struct {
-	ns      string
-	names   []string
-	jobs    []job
-	uniques map[string]unique
-	kids    map[uid][]uid
-	events  []runnel.Event
-	seq     int64
-	cursors map[string]int64
-	configs map[runnel.ConfigKind]map[string][]byte
-	buckets map[string]bucket
-}
+// A snapshot is written while calls go on, a block of jobs at a time under
+// the namespace lock, so it needs little memory and pauses nobody. The log was
+// rotated first, so whatever the snapshot misses is in the segments after it.
+// Replaying those over the snapshot gives the same state: every op sets its
+// value outright, and replay skips kids and events it already holds.
 
-// copyAll copies every space. The caller holds the gate exclusively, and the
-// log was just rotated, so every body is written and has its place on disk.
-func (s *Store) copyAll() []view {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]view, 0, len(s.spaces))
-	for _, sp := range s.spaces {
-		v := view{ns: sp.ns, names: sp.syms.names[:len(sp.syms.names):len(sp.syms.names)], jobs: make([]job, 0, len(sp.idx)),
-			uniques: maps.Clone(sp.uniques), kids: maps.Clone(sp.kids), events: sp.events[:len(sp.events):len(sp.events)],
-			seq: sp.seq, cursors: maps.Clone(sp.cursors), configs: map[runnel.ConfigKind]map[string][]byte{}, buckets: maps.Clone(sp.buckets)}
-		for _, h := range sp.slots {
-			if h.state != 0 {
-				v.jobs = append(v.jobs, h)
-			}
-		}
-		for k, m := range sp.configs {
-			v.configs[k] = maps.Clone(m)
-		}
-		out = append(out, v)
-	}
-	return out
-}
-
-// writeSnapshot writes views to the snapshot for seg and returns where each
-// body went, by namespace.
-func (s *Store) writeSnapshot(seg uint64, views []view) (map[string][]moved, error) {
+// writeSnapshot writes every namespace to the snapshot for seg and returns
+// where each copied body went.
+func (s *Store) writeSnapshot(seg uint64) (map[*space][]moved, error) {
 	path := s.snapPath(seg)
 	f, err := os.OpenFile(path+tmpSuffix, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, filePerm)
 	if err != nil {
 		return nil, err
 	}
-	w := &snapWriter{f: f, file: snapBit | uint32(seg), read: s.files.read, moved: map[string][]moved{}}
-	for _, v := range views {
-		if err = w.view(v); err != nil {
+	w := &snapWriter{f: f, seg: seg, bodies: window{fs: s.files}, moved: map[*space][]moved{}}
+	for _, sp := range s.allSpaces() {
+		if err = w.space(sp); err != nil {
 			break
 		}
+	}
+	if err == nil {
+		// The snapshot may hold changes made after the rotation; their records
+		// must be on disk before it replaces the segments before them.
+		err = s.log.Sync()
 	}
 	if err == nil {
 		err = f.Sync()
@@ -74,21 +48,29 @@ func (s *Store) writeSnapshot(seg uint64, views []view) (map[string][]moved, err
 		_ = os.Remove(path + tmpSuffix)
 		return nil, err
 	}
+	s.snapBytes.Store(w.off)
 	return w.moved, wal.SyncDir(s.opt.Dir)
 }
 
-// snapWriter writes records of about chunkBytes in the format replay reads, and
-// notes where in the file each body lands.
+func (s *Store) allSpaces() []*space {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Collect(maps.Values(s.spaces))
+}
+
+// snapWriter writes records of about chunkBytes in the format replay reads,
+// and notes where in the file each copied body lands.
 type snapWriter struct {
-	f     *os.File
-	file  uint32
-	off   int64
-	read  func(ref) ([]byte, error)
-	ns    string
-	e     enc
-	buf   []byte
-	spots []spot
-	moved map[string][]moved
+	f      *os.File
+	seg    uint64
+	off    int64
+	bodies window
+	sp     *space
+	e      enc
+	buf    []byte
+	page   []job
+	spots  []spot
+	moved  map[*space][]moved
 }
 
 type spot struct {
@@ -97,37 +79,46 @@ type spot struct {
 	pos, len int
 }
 
-func (w *snapWriter) view(v view) error {
-	w.ns = v.ns
+func (w *snapWriter) space(sp *space) error {
+	w.sp = sp
 	w.start()
-	w.e.opSeq(v.seq)
-	for name, val := range v.cursors {
+	sp.mu.Lock()
+	w.e.opSeq(sp.seq)
+	for name, val := range sp.cursors {
 		w.e.opCursor(name, val)
 	}
-	for kind, m := range v.configs {
+	for kind, m := range sp.configs {
 		for name, val := range m {
 			w.e.opConfig(kind, name, val)
 		}
 	}
-	for key, b := range v.buckets {
+	for key, b := range sp.buckets {
 		w.e.opBucket(key, b)
 	}
-	sy := syms{names: v.names}
-	for i := range v.jobs {
-		if err := w.job(&v.jobs[i], &sy); err != nil {
+	sp.mu.Unlock()
+	for b := 0; ; b++ {
+		names, ok := w.block(b)
+		if !ok {
+			break
+		}
+		if err := w.jobs(names); err != nil {
 			return err
 		}
 	}
-	for key, u := range v.uniques {
+	sp.mu.Lock()
+	names := sp.syms.names[:len(sp.syms.names):len(sp.syms.names)]
+	uniques, kids, events := maps.Clone(sp.uniques), maps.Clone(sp.kids), sp.events[:len(sp.events):len(sp.events)]
+	sp.mu.Unlock()
+	for key, u := range uniques {
 		w.e.opUnique(key, u)
 	}
-	for parent, kids := range v.kids {
-		for _, k := range kids {
+	for parent, list := range kids {
+		for _, k := range list {
 			w.e.opKid(parent, k)
 		}
 	}
-	for _, e := range v.events {
-		w.e.opEvent(e)
+	for i := range events {
+		w.e.opEvent(&events[i], names)
 		if err := w.maybeFlush(); err != nil {
 			return err
 		}
@@ -135,8 +126,41 @@ func (w *snapWriter) view(v view) error {
 	return w.flush()
 }
 
+// block copies the jobs of block b and the names they use.
+func (w *snapWriter) block(b int) ([]string, bool) {
+	sp := w.sp
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if b >= len(sp.jobs.blocks) {
+		return nil, false
+	}
+	w.page = append(w.page[:0], sp.jobs.blocks[b]...)
+	return sp.syms.names[:len(sp.syms.names):len(sp.syms.names)], true
+}
+
+// jobs writes the copied block in disk order of the bodies, so each file is
+// read once.
+func (w *snapWriter) jobs(names []string) error {
+	sy := syms{names: names}
+	live := slices.DeleteFunc(w.page, func(h job) bool { return h.state == 0 })
+	slices.SortFunc(live, func(a, b job) int { return cmpRef(a.body, b.body) })
+	for i := range live {
+		if err := w.job(&live[i], &sy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// job writes h with a copy of its body. A body written after the rotation is
+// left where it is: the log after the snapshot sets it again.
 func (w *snapWriter) job(h *job, sy *syms) error {
-	body, err := w.read(h.body)
+	if h.body.n == 0 || (h.body.file&snapBit == 0 && uint64(h.body.file) >= w.seg) {
+		w.e.byte(opPutHot)
+		w.e.hot(h, sy)
+		return w.maybeFlush()
+	}
+	body, err := w.bodies.read(h.body)
 	if err != nil {
 		return err
 	}
@@ -149,7 +173,7 @@ func (w *snapWriter) job(h *job, sy *syms) error {
 
 func (w *snapWriter) start() {
 	w.e.b = w.e.b[:0]
-	w.e.str(w.ns)
+	w.e.str(w.sp.ns)
 }
 
 func (w *snapWriter) maybeFlush() error {
@@ -162,8 +186,7 @@ func (w *snapWriter) maybeFlush() error {
 func (w *snapWriter) flush() error {
 	base := w.off + wal.HeaderLen
 	for _, sp := range w.spots {
-		w.moved[w.ns] = append(w.moved[w.ns], moved{id: sp.id, from: sp.from,
-			to: ref{file: w.file, n: uint32(sp.len), off: base + int64(sp.pos)}})
+		w.moved[w.sp] = append(w.moved[w.sp], moved{id: sp.id, from: sp.from, to: base + int64(sp.pos)})
 	}
 	w.spots = w.spots[:0]
 	w.buf = wal.AppendFrame(w.buf[:0], w.e.b)
@@ -171,4 +194,12 @@ func (w *snapWriter) flush() error {
 	w.off += int64(len(w.buf))
 	w.start()
 	return err
+}
+
+// cmpRef orders bodies by where they lie on disk.
+func cmpRef(a, b ref) int {
+	if a.file != b.file {
+		return cmp.Compare(a.file, b.file)
+	}
+	return cmp.Compare(a.off, b.off)
 }

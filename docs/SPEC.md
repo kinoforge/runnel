@@ -93,6 +93,7 @@ What a handler returns decides what happens to the job next.
 - **R05** An attempt that runs past the job's timeout has its context cancelled with `ErrTimeout`, and is retried.
 - **R06** When its context ends, a worker stops claiming and waits up to its shutdown timeout for running jobs. Then it cancels them with `ErrShutdown` and gives them back untouched: no attempt used, no error recorded.
 - **R07** A worker needs at least one queue and one handler; otherwise `Run` returns `ErrInvalid`.
+- **R08** A busy worker claims again once a quarter of its slots are free, or after 2ms, so claims take jobs in batches. A free slot never waits longer than that for a claim.
 
 ## Managing jobs (M)
 

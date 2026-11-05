@@ -105,10 +105,10 @@ func (s *Store) PruneEvents(_ context.Context, ns string, req runnel.EventPruneR
 	err := s.write(ns, func(t *tx) error {
 		var last int64
 		for _, e := range t.sp.events {
-			if n >= req.Limit || ms(e.At) >= before || (req.UpTo > 0 && e.Seq > req.UpTo) {
+			if n >= req.Limit || e.at >= before || (req.UpTo > 0 && e.seq > req.UpTo) {
 				break
 			}
-			last = e.Seq
+			last = e.seq
 			n++
 		}
 		if n > 0 {

@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,11 +47,16 @@ func bench(ctx context.Context, args []string) error {
 	tenants := c.fs.Int("tenants", 0, "spread jobs over this many tenants")
 	tenantMaxRunning := c.fs.Int("tenant-max-running", 0, "queue tenant_max_running")
 	samples := c.fs.Int("latency", 200, "single jobs timed from enqueue to result")
+	size := c.fs.Int("payload", 0, "payload bytes per job")
 	if _, err := c.parse(args, 0); err != nil {
 		return err
 	}
-	if *total <= 0 || *workers <= 0 || *concurrency <= 0 || *batch <= 0 || *batch > maxBenchBatch {
-		return fmt.Errorf("jobs, workers and concurrency must be positive and batch 1 to %d", maxBenchBatch)
+	if *total <= 0 || *workers <= 0 || *concurrency <= 0 || *batch <= 0 || *batch > maxBenchBatch || *size < 0 {
+		return fmt.Errorf("jobs, workers and concurrency must be positive, batch 1 to %d and payload not negative", maxBenchBatch)
+	}
+	var payload any
+	if *size > 0 {
+		payload = strings.Repeat("x", *size)
 	}
 	cfg, err := c.settings()
 	if err != nil {
@@ -76,7 +82,7 @@ func bench(ctx context.Context, args []string) error {
 			if *tenants > 0 {
 				opts = append(opts, runnel.Tenant("t"+strconv.Itoa(rand.IntN(*tenants))))
 			}
-			j, _ := runnel.NewJob("bench", "noop", nil, opts...)
+			j, _ := runnel.NewJob("bench", "noop", payload, opts...)
 			jobs = append(jobs, j)
 		}
 		if _, err := cl.EnqueueJobs(ctx, jobs); err != nil {
@@ -134,7 +140,7 @@ func bench(ctx context.Context, args []string) error {
 
 	tw := table()
 	fmt.Fprintf(tw, "store\t%s\n", redact(cfg.Store))
-	fmt.Fprintf(tw, "jobs\t%d (batch %d, %d tenants, tenant max running %d)\n", *total, *batch, *tenants, *tenantMaxRunning)
+	fmt.Fprintf(tw, "jobs\t%d (batch %d, payload %d bytes, %d tenants, tenant max running %d)\n", *total, *batch, *size, *tenants, *tenantMaxRunning)
 	fmt.Fprintf(tw, "workers\t%d x %d slots\n", *workers, *concurrency)
 	fmt.Fprintf(tw, "enqueue\t%.0f jobs/s\n", float64(*total)/enqueued.Seconds())
 	fmt.Fprintf(tw, "run\t%.0f jobs/s (claim, handle, finish)\n", float64(*total)/ran.Seconds())

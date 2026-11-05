@@ -29,26 +29,25 @@ type Options struct {
 	SyncInterval time.Duration
 	// SnapshotBytes is the log size that triggers a snapshot; default 64 MiB.
 	SnapshotBytes int64
-	// CacheBytes caps the job bodies kept in memory. The default is a quarter of
-	// the container's memory limit, or 512 MiB when there is none.
-	CacheBytes int64
 }
 
 // Store keeps a small record of every job in memory, indexed for claiming, and
 // logs each change before the call returns. Job bodies (payload, result, meta,
-// errors) are read back from the log and snapshots when they are not cached.
+// errors) are read back from the log and snapshots once written.
 // One process owns the directory; serve it over HTTP to share it.
 type Store struct {
-	opt    Options
-	log    *wal.Log
-	files  *files
-	cached atomic.Int64
+	opt   Options
+	log   *wal.Log
+	files *files
+	// snapBytes is the size of the newest snapshot; the log grows at least
+	// that much before the next one, so rewriting stays in proportion.
+	snapBytes atomic.Int64
 
-	gate   sync.RWMutex
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	spaces map[string]*space
 
 	hub    hub
+	failed atomic.Bool
 	errMu  sync.Mutex
 	err    error
 	snapMu sync.Mutex
@@ -69,9 +68,6 @@ func Open(opt Options) (*Store, error) {
 	}
 	if opt.SnapshotBytes <= 0 {
 		opt.SnapshotBytes = defaultSnapshotBytes
-	}
-	if opt.CacheBytes <= 0 {
-		opt.CacheBytes = defaultCache()
 	}
 	s.opt = opt
 	s.files = &files{path: s.filePath, open: map[uint32]*os.File{}}
@@ -96,17 +92,26 @@ func Open(opt Options) (*Store, error) {
 }
 
 func (s *Store) space(ns string) *space {
+	s.mu.RLock()
+	sp := s.spaces[ns]
+	s.mu.RUnlock()
+	if sp != nil {
+		return sp
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sp := s.spaces[ns]
+	sp = s.spaces[ns]
 	if sp == nil {
-		sp = newSpace(ns, &s.cached)
+		sp = newSpace(ns)
 		s.spaces[ns] = sp
 	}
 	return sp
 }
 
 func (s *Store) broken() error {
+	if !s.failed.Load() {
+		return nil
+	}
 	s.errMu.Lock()
 	defer s.errMu.Unlock()
 	return s.err
@@ -116,6 +121,7 @@ func (s *Store) fail(err error) {
 	s.errMu.Lock()
 	if s.err == nil {
 		s.err = errors.Join(ErrBroken, err)
+		s.failed.Store(true)
 	}
 	s.errMu.Unlock()
 }
@@ -135,50 +141,30 @@ func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
 	if err := s.broken(); err != nil {
 		return err
 	}
-	s.gate.RLock()
 	sp := s.space(ns)
-	sp.mu.Lock()
-	t := newTx(sp, s.log != nil)
-	err := fn(t)
-	var pos wal.Pos
-	var logErr error
-	if t.changed() {
-		if pos, logErr = s.log.Append(t.rec.b); logErr == nil {
-			s.place(sp, t, pos)
-		}
+	c := &call{fn: fn, turn: make(chan bool, 1)}
+	s.run(sp, c)
+	if c.logErr == nil && c.pos.LSN > 0 && wait {
+		c.logErr = s.log.Wait(c.pos.LSN)
 	}
-	sp.mu.Unlock()
-	s.gate.RUnlock()
-	if logErr == nil && pos.LSN > 0 && wait {
-		logErr = s.log.Wait(pos.LSN)
-	}
-	if logErr != nil {
-		s.fail(logErr)
+	if c.logErr != nil {
+		s.fail(c.logErr)
 		return s.broken()
 	}
-	s.hub.notify(ns, t.wake, t.ends)
-	return err
+	s.hub.notify(ns, c.t.wake, c.t.ends)
+	return c.err
 }
 
-// place points the jobs given new bodies by t at where the record puts them,
-// and queues the bodies that may leave the cache once it is written: those of
-// final jobs, and all of them while the cache is over budget.
+// place points the jobs given new bodies by t at where the record puts them.
+// Each body leaves the cache once the record is written; after that it is
+// read from disk, which the OS page cache keeps in memory while it can.
 func (s *Store) place(sp *space, t *tx, pos wal.Pos) {
 	sp.cache.evict(s.log.Written(), sp.bodyRef)
 	for _, b := range t.bodies {
 		if i, ok := sp.idx[b.id]; ok {
-			sp.slots[i].body = ref{file: uint32(pos.Seg), n: uint32(b.n), off: pos.Off + int64(b.pos)}
-		}
-	}
-	full := s.cached.Load() > s.opt.CacheBytes
-	for _, b := range t.bodies {
-		if i, ok := sp.idx[b.id]; ok && (full || sp.slots[i].final()) {
-			sp.cache.queue = append(sp.cache.queue, leaving{id: b.id, at: sp.slots[i].body, lsn: pos.LSN})
-		}
-	}
-	for _, id := range t.done {
-		if at, ok := sp.bodyRef(id); ok && at.n > 0 {
-			sp.cache.queue = append(sp.cache.queue, leaving{id: id, at: at, lsn: pos.LSN})
+			h := sp.jobs.at(i)
+			h.body = ref{file: uint32(pos.Seg), n: uint32(b.n), off: pos.Off + int64(b.pos)}
+			sp.cache.queue = append(sp.cache.queue, leaving{id: b.id, at: h.body, lsn: pos.LSN})
 		}
 	}
 }
