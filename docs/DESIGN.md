@@ -106,9 +106,10 @@ Both use the same SQL store through a dialect. Neither has a wake-up signal, so 
 
 Every database round trip costs more than the work a claim does, so the hybrid store keeps the jobs in the process and only writes a log.
 
-- **Memory.** Each namespace has its own lock, a map of jobs and B-trees: ready jobs per queue in claim order, scheduled and polling jobs by time, leases, start deadlines, finished jobs and all ids. Stored jobs are never changed in place; a change stores a new copy.
-- **Log.** A call applies its changes to memory and appends them as one checksummed record. `store/hybrid/wal` writes records from many calls in one write and one fsync (group commit) and knows nothing about jobs. Recovery replays the same records, so it runs no job logic.
-- **Snapshots.** When the log passes 64 MiB, the store rotates to a new log file, copies the pointers of every namespace (the only pause), writes the copy to a snapshot file, renames it into place and deletes the older log files.
+- **Memory.** Each namespace has its own lock, a slice of fixed-size job records and B-trees keyed by 16-byte ids: ready jobs per queue in claim order, scheduled and polling jobs by time, leases, start deadlines, finished jobs and all ids. Queue, kind, tenant, resource and worker names are stored once per namespace and referred to by number. Records and index keys hold no pointers, so the garbage collector never scans them; this took the collector from 30% of CPU to 6%.
+- **Bodies.** Payload, result, meta, errors and the other fields claims never look at form a job's body, in a compact binary form. A body lives in the record that wrote it, in the log or a snapshot, and the job keeps where. A cache keeps bodies in memory: every new body starts there and leaves once its record is written, when its job is final or the cache is over its budget (a quarter of the container's memory limit). Claims and lease extensions log only the small record, not the body again.
+- **Log.** A call applies its changes to memory and appends them as one checksummed record. `store/hybrid/wal` knows nothing about jobs. The first caller to wait writes everything queued so far, its record and those of the callers behind it, so one write and one fsync serve them all (group commit), with no hand-off to another goroutine. The periodic fsync runs beside writers instead of holding them up. Recovery replays the same records, so it runs no job logic.
+- **Snapshots.** When the log passes 64 MiB, the store rotates to a new log file and copies the job records (the only pause), then writes a snapshot with every live body in it, renames it into place, points the jobs whose body did not change since at their copy, and deletes the older log files and snapshot.
 - **Failure.** If writing the log fails, memory holds changes the disk does not, so the store refuses every later call until it is reopened from disk.
 - **Why not an embedded key-value store.** A KV store would add a second copy of every job and a second log. The job model already says what to index, and the log of changes is all that must reach the disk.
 
@@ -170,8 +171,8 @@ The maintainer is a loop with no state of its own; run as many as you like. Each
 ## Known limits
 
 - On Redis, a claim examines at most 2000 jobs (see Fair claiming).
-- The hybrid store needs every job in memory and one process per directory; other processes go through the server. A claim examines at most 4096 jobs refused by a limit.
-- After a crash, the last claims on the hybrid store may run again; with `sync=periodic`, a machine crash loses up to 100ms of changes.
+- The hybrid store keeps about 400 bytes per job in memory, finished jobs included until they are pruned, and one process owns a directory; other processes go through the server. A claim examines at most 4096 jobs refused by a limit.
+- After a crash, the last claims on the hybrid store may run again; with `sync=periodic` a machine crash loses up to 100ms of changes, and with `sync=off` any crash does.
 - Limited claims in one namespace run one at a time on SQL stores.
 - After a Postgres crash, the last claims may run again.
 - MySQL and SQLite have no wake-up signal, so workers and waiters poll.

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/btree"
 	"github.com/kinoforge/runnel"
@@ -11,25 +12,24 @@ import (
 
 const degree = 32
 
-// timeKey orders jobs by a timestamp, then id.
 type timeKey struct {
 	at int64
-	id string
+	id uid
 }
 
 func lessTime(a, b timeKey) bool {
 	if a.at != b.at {
 		return a.at < b.at
 	}
-	return a.id < b.id
+	return string(a.id[:]) < string(b.id[:])
 }
 
 // readyKey orders waiting jobs the way they are claimed: higher priority, then
 // earlier run_at, then id.
 type readyKey struct {
-	prio int
+	prio int32
 	at   int64
-	id   string
+	id   uid
 }
 
 func lessReady(a, b readyKey) bool {
@@ -39,23 +39,22 @@ func lessReady(a, b readyKey) bool {
 	if a.at != b.at {
 		return a.at < b.at
 	}
-	return a.id < b.id
+	return string(a.id[:]) < string(b.id[:])
 }
 
-func lessID(a, b string) bool { return a < b }
+func lessID(a, b uid) bool { return string(a[:]) < string(b[:]) }
 
 type (
 	timeTree  = btree.BTreeG[timeKey]
 	readyTree = btree.BTreeG[readyKey]
-	idTree    = btree.BTreeG[string]
+	idTree    = btree.BTreeG[uid]
 )
 
 type unique struct {
-	id    string
+	id    uid
 	until int64
 }
 
-// uniqueKey orders the unique keys that expire at a time.
 type uniqueKey struct {
 	until int64
 	key   string
@@ -73,16 +72,35 @@ type bucket struct {
 	at     int64
 }
 
-// space holds one namespace. Stored jobs are never changed in place: a change
-// stores a new copy, so readers and snapshots can hold on to old pointers.
-type space struct {
-	ns string
-	mu sync.Mutex
+// countKey names a running count: a queue, a queue's tenant, a resource or a
+// resource's tenant.
+type countKey struct {
+	kind uint8
+	a, b sym
+}
 
-	jobs    map[string]*runnel.Job
+const (
+	cQueue uint8 = iota + 1
+	cQueueTenant
+	cResource
+	cResourceTenant
+)
+
+// space holds one namespace. Jobs live in a slice of fixed-size records found
+// through idx; freed slots are reused.
+type space struct {
+	ns   string
+	mu   sync.Mutex
+	syms syms
+
+	idx   map[uid]int32
+	slots []job
+	free  []int32
+	cache cache
+
 	uniques map[string]unique
 	expiry  *btree.BTreeG[uniqueKey]
-	kids    map[string][]string
+	kids    map[uid][]uid
 	events  []runnel.Event
 	seq     int64
 	cursors map[string]int64
@@ -90,37 +108,130 @@ type space struct {
 	buckets map[string]bucket
 
 	all     *idTree
-	byState map[runnel.State]*idTree
-	ready   map[string]*readyTree
-	sched   map[string]*timeTree
-	poll    map[string]*timeTree
+	byState [stCount]*idTree
+	ready   map[sym]*readyTree
+	sched   map[sym]*timeTree
+	poll    map[sym]*timeTree
 	leases  *timeTree
 	startBy *timeTree
 	fin     *timeTree
-	counts  map[string]map[runnel.State]int64
-	active  map[string]int
-	queued  map[string]int
+	counts  map[sym]*[stCount]int64
+	active  map[countKey]int
+	queued  map[[2]sym]int
 
 	queueCfg    map[string]runnel.QueueConfig
 	resourceCfg map[string]runnel.ResourceConfig
 }
 
-func newSpace(ns string) *space {
+func newSpace(ns string, cached *atomic.Int64) *space {
 	sp := &space{
-		ns: ns, jobs: map[string]*runnel.Job{}, uniques: map[string]unique{}, expiry: btree.NewG(degree, lessUnique), kids: map[string][]string{},
+		ns: ns, syms: newSyms(), idx: map[uid]int32{}, cache: cache{bodies: map[uid][]byte{}, size: cached},
+		uniques: map[string]unique{}, expiry: btree.NewG(degree, lessUnique), kids: map[uid][]uid{},
 		cursors: map[string]int64{}, configs: map[runnel.ConfigKind]map[string][]byte{}, buckets: map[string]bucket{},
-		all: btree.NewG(degree, lessID), byState: map[runnel.State]*idTree{},
-		ready: map[string]*readyTree{}, sched: map[string]*timeTree{}, poll: map[string]*timeTree{},
+		all: btree.NewG(degree, lessID), ready: map[sym]*readyTree{}, sched: map[sym]*timeTree{}, poll: map[sym]*timeTree{},
 		leases: btree.NewG(degree, lessTime), startBy: btree.NewG(degree, lessTime), fin: btree.NewG(degree, lessTime),
-		counts: map[string]map[runnel.State]int64{}, active: map[string]int{}, queued: map[string]int{},
+		counts: map[sym]*[stCount]int64{}, active: map[countKey]int{}, queued: map[[2]sym]int{},
 	}
-	for _, st := range runnel.States {
-		sp.byState[st] = btree.NewG(degree, lessID)
+	for i := range sp.byState {
+		sp.byState[i] = btree.NewG(degree, lessID)
 	}
 	return sp
 }
 
-func treeOf[K any](m map[string]*btree.BTreeG[K], q string, less btree.LessFunc[K]) *btree.BTreeG[K] {
+func (sp *space) get(id uid) (job, bool) {
+	if i, ok := sp.idx[id]; ok {
+		return sp.slots[i], true
+	}
+	return job{}, false
+}
+
+func (sp *space) bodyRef(id uid) (ref, bool) {
+	if i, ok := sp.idx[id]; ok {
+		return sp.slots[i].body, true
+	}
+	return ref{}, false
+}
+
+// setJob stores h. On a replace, the id index and the state index are left
+// alone when they already hold the job.
+func (sp *space) setJob(h job) {
+	if i, ok := sp.idx[h.id]; ok {
+		old := &sp.slots[i]
+		if old.state != h.state {
+			sp.byState[old.state].Delete(h.id)
+			sp.byState[h.state].ReplaceOrInsert(h.id)
+		}
+		sp.unindex(old)
+		sp.slots[i] = h
+		sp.index(&h)
+		return
+	}
+	if n := len(sp.free); n > 0 {
+		i := sp.free[n-1]
+		sp.free = sp.free[:n-1]
+		sp.slots[i] = h
+		sp.idx[h.id] = i
+	} else {
+		sp.idx[h.id] = int32(len(sp.slots))
+		sp.slots = append(sp.slots, h)
+	}
+	sp.all.ReplaceOrInsert(h.id)
+	sp.byState[h.state].ReplaceOrInsert(h.id)
+	sp.index(&h)
+}
+
+func (sp *space) delJob(id uid) {
+	if i, ok := sp.idx[id]; ok {
+		sp.all.Delete(id)
+		sp.byState[sp.slots[i].state].Delete(id)
+		sp.unindex(&sp.slots[i])
+		sp.slots[i] = job{}
+		sp.free = append(sp.free, i)
+		delete(sp.idx, id)
+	}
+	delete(sp.kids, id)
+	sp.cache.del(id)
+}
+
+// body returns a job's body from the cache or from disk.
+func (sp *space) body(h *job, fs *files) ([]byte, error) {
+	if b, ok := sp.cache.bodies[h.id]; ok {
+		return b, nil
+	}
+	if h.body.n == 0 || fs == nil {
+		return nil, errNoBody
+	}
+	return fs.read(h.body)
+}
+
+func (sp *space) count(h *job, d int) {
+	key := [2]sym{h.queue, h.tenant}
+	switch h.state {
+	case stWaiting, stBlocked:
+		if h.tenant != 0 {
+			sp.queued[key] += d
+		}
+	case stRunning, stPolling:
+		sp.active[countKey{cQueue, h.queue, 0}] += d
+		if h.tenant != 0 {
+			sp.active[countKey{cQueueTenant, h.queue, h.tenant}] += d
+		}
+		if h.resource != 0 {
+			sp.active[countKey{cResource, h.resource, 0}] += d
+			if h.tenant != 0 {
+				sp.active[countKey{cResourceTenant, h.resource, h.tenant}] += d
+			}
+		}
+	}
+	c := sp.counts[h.queue]
+	if c == nil {
+		c = &[stCount]int64{}
+		sp.counts[h.queue] = c
+	}
+	c[h.state] += int64(d)
+}
+
+func treeOf[K any](m map[sym]*btree.BTreeG[K], q sym, less btree.LessFunc[K]) *btree.BTreeG[K] {
 	t := m[q]
 	if t == nil {
 		t = btree.NewG(degree, less)
@@ -129,96 +240,53 @@ func treeOf[K any](m map[string]*btree.BTreeG[K], q string, less btree.LessFunc[
 	return t
 }
 
-func readyOf(j *runnel.Job) readyKey {
-	return readyKey{prio: j.Priority, at: runnel.Millis(j.RunAt), id: j.ID}
-}
+func readyOf(h *job) readyKey { return readyKey{prio: h.prio, at: h.runAt, id: h.id} }
 
-func (sp *space) countActive(j *runnel.Job, d int) {
-	sp.active["q|"+j.Queue] += d
-	if j.Tenant != "" {
-		sp.active["qt|"+j.Queue+"|"+j.Tenant] += d
-	}
-	if j.Resource != "" {
-		sp.active["r|"+j.Resource] += d
-		if j.Tenant != "" {
-			sp.active["rt|"+j.Resource+"|"+j.Tenant] += d
+// index adds h to the indexes of its state, apart from the id and state
+// indexes setJob keeps. Waiting jobs go to the schedule; claims move the due
+// ones to the ready tree.
+func (sp *space) index(h *job) {
+	sp.count(h, 1)
+	switch h.state {
+	case stWaiting:
+		treeOf(sp.sched, h.queue, lessTime).ReplaceOrInsert(timeKey{h.runAt, h.id})
+		if h.startBy != 0 {
+			sp.startBy.ReplaceOrInsert(timeKey{h.startBy, h.id})
 		}
+	case stRunning:
+		sp.leases.ReplaceOrInsert(timeKey{h.lease, h.id})
+	case stPolling:
+		treeOf(sp.poll, h.queue, lessTime).ReplaceOrInsert(timeKey{h.runAt, h.id})
+	case stCompleted, stDead, stCancelled:
+		sp.fin.ReplaceOrInsert(timeKey{h.finished, h.id})
 	}
 }
 
-func (sp *space) countQueued(j *runnel.Job, d int) {
-	if j.Tenant != "" {
-		sp.queued[j.Queue+"|"+j.Tenant] += d
-	}
-}
-
-func (sp *space) count(j *runnel.Job, d int64) {
-	c := sp.counts[j.Queue]
-	if c == nil {
-		c = map[runnel.State]int64{}
-		sp.counts[j.Queue] = c
-	}
-	c[j.State] += d
-}
-
-// index adds j to every index its state calls for. Waiting jobs due by now go
-// to the ready tree, later ones to the schedule.
-func (sp *space) index(j *runnel.Job) {
-	sp.all.ReplaceOrInsert(j.ID)
-	sp.byState[j.State].ReplaceOrInsert(j.ID)
-	sp.count(j, 1)
-	switch j.State {
-	case runnel.StateWaiting:
-		treeOf(sp.sched, j.Queue, lessTime).ReplaceOrInsert(timeKey{runnel.Millis(j.RunAt), j.ID})
-		if !j.StartBy.IsZero() {
-			sp.startBy.ReplaceOrInsert(timeKey{runnel.Millis(j.StartBy), j.ID})
+func (sp *space) unindex(h *job) {
+	sp.count(h, -1)
+	switch h.state {
+	case stWaiting:
+		if t := sp.sched[h.queue]; t != nil {
+			t.Delete(timeKey{h.runAt, h.id})
 		}
-		sp.countQueued(j, 1)
-	case runnel.StateBlocked:
-		sp.countQueued(j, 1)
-	case runnel.StateRunning:
-		sp.leases.ReplaceOrInsert(timeKey{runnel.Millis(j.LeaseUntil), j.ID})
-		sp.countActive(j, 1)
-	case runnel.StatePolling:
-		treeOf(sp.poll, j.Queue, lessTime).ReplaceOrInsert(timeKey{runnel.Millis(j.RunAt), j.ID})
-		sp.countActive(j, 1)
-	default:
-		sp.fin.ReplaceOrInsert(timeKey{runnel.Millis(j.FinishedAt), j.ID})
+		if t := sp.ready[h.queue]; t != nil {
+			t.Delete(readyOf(h))
+		}
+		sp.startBy.Delete(timeKey{h.startBy, h.id})
+	case stRunning:
+		sp.leases.Delete(timeKey{h.lease, h.id})
+	case stPolling:
+		if t := sp.poll[h.queue]; t != nil {
+			t.Delete(timeKey{h.runAt, h.id})
+		}
+	case stCompleted, stDead, stCancelled:
+		sp.fin.Delete(timeKey{h.finished, h.id})
 	}
 }
 
-func (sp *space) unindex(j *runnel.Job) {
-	sp.all.Delete(j.ID)
-	sp.byState[j.State].Delete(j.ID)
-	sp.count(j, -1)
-	switch j.State {
-	case runnel.StateWaiting:
-		if t := sp.sched[j.Queue]; t != nil {
-			t.Delete(timeKey{runnel.Millis(j.RunAt), j.ID})
-		}
-		if t := sp.ready[j.Queue]; t != nil {
-			t.Delete(readyOf(j))
-		}
-		sp.startBy.Delete(timeKey{runnel.Millis(j.StartBy), j.ID})
-		sp.countQueued(j, -1)
-	case runnel.StateBlocked:
-		sp.countQueued(j, -1)
-	case runnel.StateRunning:
-		sp.leases.Delete(timeKey{runnel.Millis(j.LeaseUntil), j.ID})
-		sp.countActive(j, -1)
-	case runnel.StatePolling:
-		if t := sp.poll[j.Queue]; t != nil {
-			t.Delete(timeKey{runnel.Millis(j.RunAt), j.ID})
-		}
-		sp.countActive(j, -1)
-	default:
-		sp.fin.Delete(timeKey{runnel.Millis(j.FinishedAt), j.ID})
-	}
-}
-
-// promote moves the waiting jobs of queue q that are due at now from the
-// schedule to the ready tree.
-func (sp *space) promote(q string, now int64) {
+// promote moves the waiting jobs of queue q due at now from the schedule to the
+// ready tree.
+func (sp *space) promote(q sym, now int64) {
 	t := sp.sched[q]
 	if t == nil {
 		return
@@ -229,26 +297,10 @@ func (sp *space) promote(q string, now int64) {
 			return
 		}
 		t.DeleteMin()
-		if j := sp.jobs[k.id]; j != nil {
-			treeOf(sp.ready, q, lessReady).ReplaceOrInsert(readyOf(j))
+		if h, ok := sp.get(k.id); ok {
+			treeOf(sp.ready, q, lessReady).ReplaceOrInsert(readyOf(&h))
 		}
 	}
-}
-
-func (sp *space) setJob(j *runnel.Job) {
-	if old := sp.jobs[j.ID]; old != nil {
-		sp.unindex(old)
-	}
-	sp.jobs[j.ID] = j
-	sp.index(j)
-}
-
-func (sp *space) delJob(id string) {
-	if old := sp.jobs[id]; old != nil {
-		sp.unindex(old)
-		delete(sp.jobs, id)
-	}
-	delete(sp.kids, id)
 }
 
 func (sp *space) setUnique(key string, u unique) {
@@ -273,21 +325,12 @@ func (sp *space) setConfig(kind runnel.ConfigKind, name string, val []byte) {
 		sp.configs[kind] = m
 	}
 	m[name] = val
-	sp.forget(kind)
+	sp.queueCfg, sp.resourceCfg = nil, nil
 }
 
 func (sp *space) delConfig(kind runnel.ConfigKind, name string) {
 	delete(sp.configs[kind], name)
-	sp.forget(kind)
-}
-
-func (sp *space) forget(kind runnel.ConfigKind) {
-	switch kind {
-	case runnel.ConfigQueue:
-		sp.queueCfg = nil
-	case runnel.ConfigResource:
-		sp.resourceCfg = nil
-	}
+	sp.queueCfg, sp.resourceCfg = nil, nil
 }
 
 func (sp *space) queueConfig(q string) runnel.QueueConfig {
@@ -322,8 +365,7 @@ func (sp *space) addEvent(e runnel.Event) {
 	sp.seq = max(sp.seq, e.Seq)
 }
 
-// dropEvents removes the events up to and including seq, which are always the
-// oldest.
+// dropEvents removes the events up to and including seq, which are the oldest.
 func (sp *space) dropEvents(seq int64) {
 	i := 0
 	for i < len(sp.events) && sp.events[i].Seq <= seq {

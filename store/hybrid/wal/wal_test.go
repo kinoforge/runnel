@@ -24,7 +24,7 @@ func records(t *testing.T, dir string, from uint64) []string {
 	l := start(t, dir, wal.SyncEach)
 	defer l.Close()
 	var out []string
-	if err := l.Replay(from, func(rec []byte) error {
+	if err := l.Replay(from, func(_ uint64, _ int64, rec []byte) error {
 		out = append(out, string(rec))
 		return nil
 	}); err != nil {
@@ -45,9 +45,9 @@ func TestGroupCommitKeepsEveryRecord(t *testing.T) {
 			for g := range 8 {
 				wg.Go(func() {
 					for i := range 100 {
-						lsn, err := l.Append(fmt.Appendf(nil, "%d-%d", g, i))
+						p, err := l.Append(fmt.Appendf(nil, "%d-%d", g, i))
 						if err == nil {
-							err = l.Wait(lsn)
+							err = l.Wait(p.LSN)
 						}
 						if err != nil {
 							t.Error(err)
@@ -74,9 +74,9 @@ func TestRotateAndRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	commit := func(s string) {
-		lsn, err := l.Append([]byte(s))
+		p, err := l.Append([]byte(s))
 		if err == nil {
-			err = l.Wait(lsn)
+			err = l.Wait(p.LSN)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -102,7 +102,7 @@ func TestFramesDetectDamage(t *testing.T) {
 	b = wal.AppendFrame(b, []byte("world"))
 	b[len(b)-1] ^= 0xff
 	var got []string
-	good, err := wal.ReadFrames(bytes.NewReader(b), func(rec []byte) error {
+	good, err := wal.ReadFrames(bytes.NewReader(b), func(_ int64, rec []byte) error {
 		got = append(got, string(rec))
 		return nil
 	})

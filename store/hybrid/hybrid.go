@@ -3,7 +3,9 @@ package hybrid
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kinoforge/runnel"
@@ -27,14 +29,20 @@ type Options struct {
 	SyncInterval time.Duration
 	// SnapshotBytes is the log size that triggers a snapshot; default 64 MiB.
 	SnapshotBytes int64
+	// CacheBytes caps the job bodies kept in memory. The default is a quarter of
+	// the container's memory limit, or 512 MiB when there is none.
+	CacheBytes int64
 }
 
-// Store keeps every job in memory, indexed for claiming, and logs each change
-// before the call returns. One process owns the directory; serve it over HTTP
-// to share it.
+// Store keeps a small record of every job in memory, indexed for claiming, and
+// logs each change before the call returns. Job bodies (payload, result, meta,
+// errors) are read back from the log and snapshots when they are not cached.
+// One process owns the directory; serve it over HTTP to share it.
 type Store struct {
-	opt Options
-	log *wal.Log
+	opt    Options
+	log    *wal.Log
+	files  *files
+	cached atomic.Int64
 
 	gate   sync.RWMutex
 	mu     sync.Mutex
@@ -62,17 +70,23 @@ func Open(opt Options) (*Store, error) {
 	if opt.SnapshotBytes <= 0 {
 		opt.SnapshotBytes = defaultSnapshotBytes
 	}
+	if opt.CacheBytes <= 0 {
+		opt.CacheBytes = defaultCache()
+	}
 	s.opt = opt
+	s.files = &files{path: s.filePath, open: map[uint32]*os.File{}}
 	l, err := wal.Open(opt.Dir, wal.Options{Sync: opt.Sync, Interval: opt.SyncInterval})
 	if err != nil {
 		return nil, err
 	}
 	s.log = l
 	if err := s.recover(); err != nil {
+		s.files.close()
 		_ = l.Close()
 		return nil, err
 	}
 	if err := l.Start(); err != nil {
+		s.files.close()
 		_ = l.Close()
 		return nil, err
 	}
@@ -86,7 +100,7 @@ func (s *Store) space(ns string) *space {
 	defer s.mu.Unlock()
 	sp := s.spaces[ns]
 	if sp == nil {
-		sp = newSpace(ns)
+		sp = newSpace(ns, &s.cached)
 		s.spaces[ns] = sp
 	}
 	return sp
@@ -124,17 +138,19 @@ func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
 	s.gate.RLock()
 	sp := s.space(ns)
 	sp.mu.Lock()
-	t := newTx(sp)
+	t := newTx(sp, s.log != nil)
 	err := fn(t)
-	var lsn uint64
-	logErr := t.err
-	if logErr == nil && s.log != nil && t.changed() {
-		lsn, logErr = s.log.Append(t.rec.b)
+	var pos wal.Pos
+	var logErr error
+	if t.changed() {
+		if pos, logErr = s.log.Append(t.rec.b); logErr == nil {
+			s.place(sp, t, pos)
+		}
 	}
 	sp.mu.Unlock()
 	s.gate.RUnlock()
-	if logErr == nil && lsn > 0 && wait {
-		logErr = s.log.Wait(lsn)
+	if logErr == nil && pos.LSN > 0 && wait {
+		logErr = s.log.Wait(pos.LSN)
 	}
 	if logErr != nil {
 		s.fail(logErr)
@@ -142,6 +158,36 @@ func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
 	}
 	s.hub.notify(ns, t.wake, t.ends)
 	return err
+}
+
+// place points the jobs given new bodies by t at where the record puts them,
+// and queues the bodies that may leave the cache once it is written: those of
+// final jobs, and all of them while the cache is over budget.
+func (s *Store) place(sp *space, t *tx, pos wal.Pos) {
+	sp.cache.evict(s.log.Written(), sp.bodyRef)
+	for _, b := range t.bodies {
+		if i, ok := sp.idx[b.id]; ok {
+			sp.slots[i].body = ref{file: uint32(pos.Seg), n: uint32(b.n), off: pos.Off + int64(b.pos)}
+		}
+	}
+	full := s.cached.Load() > s.opt.CacheBytes
+	for _, b := range t.bodies {
+		if i, ok := sp.idx[b.id]; ok && (full || sp.slots[i].final()) {
+			sp.cache.queue = append(sp.cache.queue, leaving{id: b.id, at: sp.slots[i].body, lsn: pos.LSN})
+		}
+	}
+	for _, id := range t.done {
+		if at, ok := sp.bodyRef(id); ok && at.n > 0 {
+			sp.cache.queue = append(sp.cache.queue, leaving{id: id, at: at, lsn: pos.LSN})
+		}
+	}
+}
+
+func (s *Store) filePath(id uint32) string {
+	if id&snapBit != 0 {
+		return s.snapPath(uint64(id &^ snapBit))
+	}
+	return s.log.Path(uint64(id))
 }
 
 // read runs fn on namespace ns under its lock.
@@ -169,7 +215,9 @@ func (s *Store) Close() error {
 	if s.log == nil {
 		return nil
 	}
-	return s.log.Close()
+	err := s.log.Close()
+	s.files.close()
+	return err
 }
 
 // Subscribe signals when jobs in ns may be ready to claim.

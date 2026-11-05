@@ -20,34 +20,38 @@ func (s *Store) Prune(_ context.Context, ns string, req runnel.PruneRequest) (in
 	if len(req.States) == 0 || req.Limit <= 0 {
 		return 0, nil
 	}
+	var states []uint8
 	for _, st := range req.States {
 		if !st.Final() {
 			return 0, fmt.Errorf("%w: only finished jobs can be pruned", runnel.ErrInvalid)
 		}
+		states = append(states, stateCode(st))
 	}
-	before := runnel.Millis(req.Before)
-	var gone []*runnel.Job
+	before := ms(req.Before)
+	n := 0
 	err := s.write(ns, func(t *tx) error {
 		sp := t.sp
-		t.sp.fin.Ascend(func(k timeKey) bool {
-			if k.at >= before || len(gone) >= req.Limit {
+		queue, known := sp.syms.find(req.Queue)
+		var gone []job
+		sp.fin.Ascend(func(k timeKey) bool {
+			if !known || k.at >= before || len(gone) >= req.Limit {
 				return false
 			}
-			j := sp.jobs[k.id]
-			if k.at > 0 && slices.Contains(req.States, j.State) && (req.Queue == "" || j.Queue == req.Queue) {
-				gone = append(gone, j)
+			h, _ := sp.get(k.id)
+			if k.at > 0 && slices.Contains(states, h.state) && (queue == 0 || h.queue == queue) {
+				gone = append(gone, h)
 			}
 			return true
 		})
 		if req.Archive {
-			if err := s.archive(gone); err != nil {
-				gone = nil
+			if err := s.archive(sp, gone); err != nil {
 				return err
 			}
 		}
-		for _, j := range gone {
-			t.delJob(j.ID)
+		for _, h := range gone {
+			t.delJob(h.id)
 		}
+		n = len(gone)
 		for {
 			k, ok := sp.expiry.Min()
 			if !ok || k.until >= before {
@@ -57,17 +61,21 @@ func (s *Store) Prune(_ context.Context, ns string, req runnel.PruneRequest) (in
 		}
 		return nil
 	})
-	return len(gone), err
+	return n, err
 }
 
 // archive appends pruned jobs to the archive file in the store's directory. A
 // store in memory only has nowhere to keep them.
-func (s *Store) archive(jobs []*runnel.Job) error {
+func (s *Store) archive(sp *space, jobs []job) error {
 	if s.opt.Dir == "" || len(jobs) == 0 {
 		return nil
 	}
 	var b []byte
-	for _, j := range jobs {
+	for i := range jobs {
+		j, err := s.full(sp, &jobs[i])
+		if err != nil {
+			return err
+		}
 		line, err := json.Marshal(j)
 		if err != nil {
 			return err
@@ -92,12 +100,12 @@ func (s *Store) PruneEvents(_ context.Context, ns string, req runnel.EventPruneR
 	if req.Limit <= 0 || req.Before.IsZero() {
 		return 0, nil
 	}
-	before := runnel.Millis(req.Before)
+	before := ms(req.Before)
 	n := 0
 	err := s.write(ns, func(t *tx) error {
 		var last int64
 		for _, e := range t.sp.events {
-			if n >= req.Limit || runnel.Millis(e.At) >= before || (req.UpTo > 0 && e.Seq > req.UpTo) {
+			if n >= req.Limit || ms(e.At) >= before || (req.UpTo > 0 && e.Seq > req.UpTo) {
 				break
 			}
 			last = e.Seq

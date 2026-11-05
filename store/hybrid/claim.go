@@ -3,7 +3,6 @@ package hybrid
 import (
 	"container/heap"
 	"context"
-	"math"
 	"slices"
 
 	"github.com/kinoforge/runnel"
@@ -21,10 +20,12 @@ func (s *Store) Claim(_ context.Context, ns string, req runnel.ClaimRequest) ([]
 	}
 	var out []*runnel.Job
 	err := s.lease(ns, func(t *tx) error {
-		c := claimer{t: t, req: req, now: runnel.Millis(req.Now), buckets: map[string]*token{}, full: map[string]bool{}}
+		c := claimer{s: s, t: t, sp: t.sp, req: req, now: ms(req.Now), buckets: map[string]*token{}, full: map[countKey]bool{}}
 		c.lease = c.now + req.Lease.Milliseconds()
-		out = c.run()
-		return nil
+		c.worker = t.sp.syms.id(req.Worker)
+		c.run()
+		out = c.out
+		return c.err
 	})
 	if err != nil {
 		return nil, err
@@ -33,24 +34,33 @@ func (s *Store) Claim(_ context.Context, ns string, req runnel.ClaimRequest) ([]
 }
 
 type claimer struct {
+	s       *Store
 	t       *tx
+	sp      *space
 	req     runnel.ClaimRequest
 	now     int64
 	lease   int64
+	worker  sym
 	out     []*runnel.Job
+	err     error
 	buckets map[string]*token
-	full    map[string]bool
+	full    map[countKey]bool
 }
 
-func (c *claimer) run() []*runnel.Job {
-	sp := c.t.sp
-	queues := slices.Compact(slices.Sorted(slices.Values(c.req.Queues)))
+func (c *claimer) run() {
+	sp := c.sp
+	var queues []sym
+	for _, q := range slices.Compact(slices.Sorted(slices.Values(c.req.Queues))) {
+		if v, ok := sp.syms.find(q); ok {
+			queues = append(queues, v)
+		}
+	}
 	if len(c.req.IDs) == 0 {
 		c.polls(queues)
 	}
-	var open []string
+	var open []sym
 	for _, q := range queues {
-		if !sp.queueConfig(q).Paused {
+		if !sp.queueConfig(sp.syms.name(q)).Paused {
 			open = append(open, q)
 			if len(c.req.IDs) == 0 {
 				sp.promote(q, c.now)
@@ -67,19 +77,17 @@ func (c *claimer) run() []*runnel.Job {
 			c.t.putBucket(key, bucket{tokens: b.tokens, at: c.now})
 		}
 	}
-	return c.out
 }
 
 // polls hands out polling jobs whose next poll is due; they hold their slot
 // already, so limits do not apply.
-func (c *claimer) polls(queues []string) {
-	sp := c.t.sp
+func (c *claimer) polls(queues []sym) {
 	for _, q := range queues {
-		t := sp.poll[q]
+		t := c.sp.poll[q]
 		if t == nil {
 			continue
 		}
-		var due []string
+		var due []uid
 		t.Ascend(func(k timeKey) bool {
 			if k.at > c.now || len(c.out)+len(due) >= c.req.Limit {
 				return false
@@ -88,62 +96,67 @@ func (c *claimer) polls(queues []string) {
 			return true
 		})
 		for _, id := range due {
-			j := sp.jobs[id].Clone()
-			j.State, j.Worker, j.LeaseUntil = runnel.StateRunning, c.req.Worker, runnel.FromMillis(c.lease)
-			c.save(j)
+			h, _ := c.sp.get(id)
+			h.state, h.worker, h.lease = stRunning, c.worker, c.lease
+			c.save(h)
 		}
 	}
 }
 
-func (c *claimer) save(j *runnel.Job) {
-	j.Version++
-	j.UpdatedAt = runnel.FromMillis(c.now)
-	c.t.putJob(j)
-	c.out = append(c.out, j.Clone())
-}
-
-func (c *claimer) take(j *runnel.Job) {
-	n := j.Clone()
-	n.State, n.Worker, n.LeaseUntil = runnel.StateRunning, c.req.Worker, runnel.FromMillis(c.lease)
-	n.Attempt++
-	if n.StartedAt.IsZero() {
-		n.StartedAt = runnel.FromMillis(c.now)
+func (c *claimer) save(h job) {
+	h.version++
+	h.updated = c.now
+	c.t.putHot(h)
+	j, err := c.s.full(c.sp, &h)
+	if err != nil {
+		c.err = err
+		return
 	}
-	c.save(n)
+	c.out = append(c.out, j)
 }
 
-func (c *claimer) byID(open []string) {
-	sp := c.t.sp
-	var cands []*runnel.Job
-	for _, id := range slices.Compact(slices.Sorted(slices.Values(c.req.IDs))) {
-		j := sp.jobs[id]
-		if j != nil && j.State == runnel.StateWaiting && runnel.Millis(j.RunAt) <= c.now && slices.Contains(open, j.Queue) {
-			cands = append(cands, j)
+func (c *claimer) take(h job) {
+	h.state, h.worker, h.lease = stRunning, c.worker, c.lease
+	h.attempt++
+	if h.started == 0 {
+		h.started = c.now
+	}
+	c.save(h)
+}
+
+func (c *claimer) byID(open []sym) {
+	var cands []job
+	for _, s := range slices.Compact(slices.Sorted(slices.Values(c.req.IDs))) {
+		id, ok := parseID(s)
+		if !ok {
+			continue
+		}
+		if h, ok := c.sp.get(id); ok && h.is(stWaiting) && h.runAt <= c.now && slices.Contains(open, h.queue) {
+			cands = append(cands, h)
 		}
 	}
-	slices.SortFunc(cands, func(a, b *runnel.Job) int {
-		if lessReady(readyOf(a), readyOf(b)) {
+	slices.SortFunc(cands, func(a, b job) int {
+		if lessReady(readyOf(&a), readyOf(&b)) {
 			return -1
 		}
 		return 1
 	})
-	for _, j := range cands {
+	for _, h := range cands {
 		if len(c.out) >= c.req.Limit {
 			return
 		}
-		if c.admit(j) {
-			c.take(j)
+		if c.admit(&h) {
+			c.take(h)
 		}
 	}
 }
 
 // ready claims in priority order across the open queues, merging their ready
 // trees. Jobs a limit refuses are passed over, so the jobs behind them still run.
-func (c *claimer) ready(open []string) {
-	sp := c.t.sp
+func (c *claimer) ready(open []sym) {
 	h := &merge{}
 	for _, q := range open {
-		if t := sp.ready[q]; t != nil {
+		if t := c.sp.ready[q]; t != nil {
 			if cur := (&cursor{t: t}); cur.fill() {
 				h.items = append(h.items, cur)
 			}
@@ -151,11 +164,10 @@ func (c *claimer) ready(open []string) {
 	}
 	heap.Init(h)
 	examined := 0
-	for h.Len() > 0 && len(c.out) < c.req.Limit && examined < maxExamine {
+	for h.Len() > 0 && len(c.out) < c.req.Limit && examined < maxExamine && c.err == nil {
 		cur := h.items[0]
-		k := cur.head()
-		if j := sp.jobs[k.id]; j != nil && j.State == runnel.StateWaiting {
-			if c.admit(j) {
+		if j, ok := c.sp.get(cur.head().id); ok && j.is(stWaiting) {
+			if c.admit(&j) {
 				c.take(j)
 			} else {
 				examined++
@@ -167,84 +179,6 @@ func (c *claimer) ready(open []string) {
 			heap.Pop(h)
 		}
 	}
-}
-
-// admit checks j against every running limit and rate limit, taking a token
-// from each rate bucket when it passes. A refusal marks the queue, tenant or
-// resource full for the rest of the claim.
-func (c *claimer) admit(j *runnel.Job) bool {
-	sp := c.t.sp
-	qk, qtk := "q|"+j.Queue, "qt|"+j.Queue+"|"+j.Tenant
-	rk, rtk := "r|"+j.Resource, "rt|"+j.Resource+"|"+j.Tenant
-	if c.full[qk] || c.full[qtk] || c.full[rk] || c.full[rtk] {
-		return false
-	}
-	q := sp.queueConfig(j.Queue)
-	if over(q.MaxRunning, sp.active[qk]) {
-		return c.refuse(qk)
-	}
-	if j.Tenant != "" && over(q.TenantMaxRunning, sp.active[qtk]) {
-		return c.refuse(qtk)
-	}
-	if j.Resource != "" {
-		r := sp.resourceConfig(j.Resource)
-		if over(r.MaxRunning, sp.active[rk]) {
-			return c.refuse(rk)
-		}
-		if j.Tenant != "" && over(r.TenantMaxRunning, sp.active[rtk]) {
-			return c.refuse(rtk)
-		}
-	}
-	var take []*token
-	if q.Rate > 0 {
-		b := c.bucket(qk, q.Rate, q.Burst)
-		if b.tokens < 1 {
-			return c.refuse(qk)
-		}
-		take = append(take, b)
-	}
-	if j.Tenant != "" && q.TenantRate > 0 {
-		b := c.bucket(qtk, q.TenantRate, q.TenantBurst)
-		if b.tokens < 1 {
-			return c.refuse(qtk)
-		}
-		take = append(take, b)
-	}
-	for _, b := range take {
-		b.tokens--
-		b.taken = true
-	}
-	return true
-}
-
-func over(limit, n int) bool { return limit > 0 && n >= limit }
-
-func (c *claimer) refuse(key string) bool {
-	c.full[key] = true
-	return false
-}
-
-type token struct {
-	tokens float64
-	taken  bool
-}
-
-// bucket returns the token bucket under key refilled to now. Only buckets the
-// claim took from are written back.
-func (c *claimer) bucket(key string, rate float64, burst int) *token {
-	if b, ok := c.buckets[key]; ok {
-		return b
-	}
-	capacity := float64(burst)
-	if burst <= 0 {
-		capacity = math.Max(1, math.Ceil(rate))
-	}
-	b := &token{tokens: capacity}
-	if old, ok := c.t.sp.buckets[key]; ok {
-		b.tokens = math.Min(capacity, old.tokens+float64(max(c.now-old.at, 0))*rate/1000)
-	}
-	c.buckets[key] = b
-	return b
 }
 
 // cursor walks one ready tree a page at a time, resuming after the last key it

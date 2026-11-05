@@ -11,7 +11,11 @@ func (s *Store) Apply(_ context.Context, ns string, changes []runnel.Change, now
 	out := make([]bool, len(changes))
 	err := s.write(ns, func(t *tx) error {
 		for i, c := range changes {
-			out[i] = applyOne(t, c, runnel.Millis(now))
+			ok, err := s.applyOne(t, c, ms(now))
+			if err != nil {
+				return err
+			}
+			out[i] = ok
 		}
 		return nil
 	})
@@ -28,71 +32,97 @@ func (s *Store) Apply(_ context.Context, ns string, changes []runnel.Change, now
 
 // applyOne writes c if its guards hold. The store keeps the fields it owns:
 // pending, unique key, dependencies and creation time.
-func applyOne(t *tx, c runnel.Change, now int64) bool {
-	old := t.sp.jobs[c.Job.ID]
-	if old == nil || old.Version != c.Job.Version || (c.From != "" && old.State != c.From) {
-		return false
+func (s *Store) applyOne(t *tx, c runnel.Change, now int64) (bool, error) {
+	sp := t.sp
+	id, ok := parseID(c.Job.ID)
+	if !ok {
+		return false, nil
 	}
-	if !c.LeaseBefore.IsZero() && runnel.Millis(old.LeaseUntil) >= runnel.Millis(c.LeaseBefore) {
-		return false
+	old, ok := sp.get(id)
+	if !ok || old.version != c.Job.Version || (c.From != "" && old.state != stateCode(c.From)) {
+		return false, nil
 	}
-	j := c.Job.Clone()
-	j.Version = old.Version + 1
-	j.Pending, j.UniqueKey, j.DependsOn, j.CreatedAt = old.Pending, old.UniqueKey, old.DependsOn, old.CreatedAt
-	t.putJob(j)
-	if j.State.Final() && !old.State.Final() {
-		finalize(t, j, now)
+	if !c.LeaseBefore.IsZero() && old.lease >= ms(c.LeaseBefore) {
+		return false, nil
 	}
-	return true
+	key, deps, err := s.keys(sp, &old)
+	if err != nil {
+		return false, err
+	}
+	j := *c.Job
+	j.UniqueKey, j.DependsOn = key, deps
+	h := sp.syms.hot(&j)
+	h.id, h.version, h.pending, h.created, h.flags = id, old.version+1, old.pending, old.created, old.flags
+	t.put(h, encodeBody(&j))
+	if h.final() && !old.final() {
+		return true, s.finalize(t, h, key, now)
+	}
+	return true, nil
+}
+
+// keys returns the unique key and dependencies of a job, reading its body only
+// when it has them.
+func (s *Store) keys(sp *space, h *job) (string, []string, error) {
+	if h.flags == 0 {
+		return "", nil, nil
+	}
+	b, err := sp.body(h, s.files)
+	if err != nil {
+		return "", nil, err
+	}
+	return keyOf(b)
 }
 
 // finalize records the event of a job reaching a final state, frees its unique
 // key and settles the jobs that depend on it: they run once all their
 // dependencies completed, and are cancelled when one did not.
-func finalize(t *tx, j *runnel.Job, now int64) {
+func (s *Store) finalize(t *tx, h job, key string, now int64) error {
 	sp := t.sp
 	sp.seq++
-	t.putEvent(runnel.Event{Seq: sp.seq, Namespace: sp.ns, JobID: j.ID, Queue: j.Queue, Kind: j.Kind, State: j.State, At: runnel.FromMillis(now)})
-	if j.UniqueKey != "" {
-		if u, ok := sp.uniques[j.UniqueKey]; ok && u.id == j.ID && u.until == 0 {
-			t.delUnique(j.UniqueKey)
+	t.putEvent(runnel.Event{Seq: sp.seq, Namespace: sp.ns, JobID: h.id.String(), Queue: sp.syms.name(h.queue),
+		Kind: sp.syms.name(h.kind), State: h.stateName(), At: fromMs(now)})
+	if key != "" {
+		if u, ok := sp.uniques[key]; ok && u.id == h.id && u.until == 0 {
+			t.delUnique(key)
 		}
 	}
-	kids := sp.kids[j.ID]
+	kids := sp.kids[h.id]
 	if len(kids) == 0 {
-		return
+		return nil
 	}
-	t.delKids(j.ID)
-	at := runnel.FromMillis(now)
+	t.delKids(h.id)
 	for _, id := range kids {
-		k := sp.jobs[id]
-		if k == nil || k.State != runnel.StateBlocked {
+		k, ok := sp.get(id)
+		if !ok || !k.is(stBlocked) {
 			continue
 		}
-		k = k.Clone()
-		k.Version++
-		k.UpdatedAt = at
+		k.version++
+		k.updated = now
 		switch {
-		case j.State != runnel.StateCompleted:
-			k.State, k.FinishedAt, k.StartBy = runnel.StateCancelled, at, time.Time{}
-			t.putJob(k)
-			finalize(t, k, now)
-			continue
-		case k.Pending > 1:
-			k.Pending--
-		default:
-			k.Pending = 0
-			k.State, k.WaitingSince = runnel.StateWaiting, at
-			if k.RunAt.Before(at) {
-				k.RunAt = at
+		case !h.is(stCompleted):
+			k.state, k.finished, k.startBy = stCancelled, now, 0
+			t.putHot(k)
+			kkey, _, err := s.keys(sp, &k)
+			if err != nil {
+				return err
 			}
-			k.StartBy = time.Time{}
-			if w := k.StartWindow(); w > 0 {
-				k.StartBy = at.Add(w)
+			if err := s.finalize(t, k, kkey, now); err != nil {
+				return err
+			}
+			continue
+		case k.pending > 1:
+			k.pending--
+		default:
+			k.pending, k.state, k.waitingSince = 0, stWaiting, now
+			k.runAt = max(k.runAt, now)
+			k.startBy = 0
+			if k.window > 0 {
+				k.startBy = now + k.window
 			}
 		}
-		t.putJob(k)
+		t.putHot(k)
 	}
+	return nil
 }
 
 func (s *Store) Extend(_ context.Context, ns, worker string, ids []string, until time.Time) ([]string, error) {
@@ -101,15 +131,16 @@ func (s *Store) Extend(_ context.Context, ns, worker string, ids []string, until
 	}
 	var lost []string
 	err := s.lease(ns, func(t *tx) error {
-		for _, id := range ids {
-			j := t.sp.jobs[id]
-			if j == nil || j.State != runnel.StateRunning || j.Worker != worker {
-				lost = append(lost, id)
+		w, known := t.sp.syms.find(worker)
+		for _, s := range ids {
+			id, ok := parseID(s)
+			h, found := t.sp.get(id)
+			if !ok || !found || !known || !h.is(stRunning) || h.worker != w {
+				lost = append(lost, s)
 				continue
 			}
-			j = j.Clone()
-			j.LeaseUntil = until
-			t.putJob(j)
+			h.lease = ms(until)
+			t.putHot(h)
 		}
 		return nil
 	})

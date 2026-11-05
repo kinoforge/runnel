@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,7 +34,8 @@ const (
 	// SyncPeriodic fsyncs every Interval. A crash of the machine, not of the
 	// process, can lose the last Interval of commits.
 	SyncPeriodic
-	// SyncOff leaves flushing to the operating system.
+	// SyncOff answers before writing: records are written every Interval and
+	// flushed by the operating system. Any crash can lose the last Interval.
 	SyncOff
 )
 
@@ -55,21 +57,25 @@ type Log struct {
 	opt  Options
 	lock *os.File
 
-	io   sync.Mutex
-	f    *os.File
-	seg  uint64
-	size int64
+	// io guards writes to f and swapping f; syncMu keeps f open while a
+	// background fsync runs, so that fsync never blocks writers.
+	io     sync.Mutex
+	syncMu sync.Mutex
+	f      *os.File
+	seg    uint64
+	size   atomic.Int64
 
 	mu       sync.Mutex
 	cond     *sync.Cond
 	buf      []byte
 	spare    []byte
+	end      int64
 	appended uint64
 	written  uint64
 	synced   uint64
+	writing  bool
 	err      error
 
-	kick chan struct{}
 	done chan struct{}
 	wg   sync.WaitGroup
 }
@@ -90,7 +96,7 @@ func Open(dir string, opt Options) (*Log, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	l := &Log{dir: dir, opt: opt, lock: lock, kick: make(chan struct{}, 1), done: make(chan struct{})}
+	l := &Log{dir: dir, opt: opt, lock: lock, done: make(chan struct{})}
 	l.cond = sync.NewCond(&l.mu)
 	return l, nil
 }
@@ -118,13 +124,15 @@ func (l *Log) Segments() ([]uint64, error) {
 	return out, nil
 }
 
-func (l *Log) path(seg uint64) string {
+// Path is the file of segment seg.
+func (l *Log) Path(seg uint64) string {
 	return filepath.Join(l.dir, fmt.Sprintf("%s%016d%s", segPrefix, seg, segSuffix))
 }
 
-// Replay calls fn with every record in segments from onward, in order. A torn
-// frame at the end of the newest segment is cut off; anywhere else it is an error.
-func (l *Log) Replay(from uint64, fn func(rec []byte) error) error {
+// Replay calls fn with every record in segments from onward, in order, with
+// the segment and offset where the record starts. A torn frame at the end of the
+// newest segment is cut off; anywhere else it is an error.
+func (l *Log) Replay(from uint64, fn func(seg uint64, off int64, rec []byte) error) error {
 	segs, err := l.Segments()
 	if err != nil {
 		return err
@@ -140,13 +148,13 @@ func (l *Log) Replay(from uint64, fn func(rec []byte) error) error {
 	return nil
 }
 
-func (l *Log) replayOne(seg uint64, last bool, fn func([]byte) error) error {
-	f, err := os.OpenFile(l.path(seg), os.O_RDWR, filePerm)
+func (l *Log) replayOne(seg uint64, last bool, fn func(uint64, int64, []byte) error) error {
+	f, err := os.OpenFile(l.Path(seg), os.O_RDWR, filePerm)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	good, err := ReadFrames(f, fn)
+	good, err := ReadFrames(f, func(off int64, rec []byte) error { return fn(seg, off, rec) })
 	if errors.Is(err, ErrTorn) && last {
 		if err := f.Truncate(good); err != nil {
 			return err
@@ -173,120 +181,20 @@ func (l *Log) Start() error {
 		return err
 	}
 	l.wg.Add(1)
-	go l.flusher()
+	go l.background()
 	return nil
 }
 
 func (l *Log) openSegment(seg uint64) error {
-	f, err := os.OpenFile(l.path(seg), os.O_CREATE|os.O_WRONLY|os.O_APPEND, filePerm)
+	f, err := os.OpenFile(l.Path(seg), os.O_CREATE|os.O_WRONLY|os.O_APPEND, filePerm)
 	if err != nil {
 		return err
 	}
-	l.f, l.seg, l.size = f, seg, 0
+	l.mu.Lock()
+	l.f, l.seg, l.end = f, seg, 0
+	l.mu.Unlock()
+	l.size.Store(0)
 	return SyncDir(l.dir)
-}
-
-// Append queues rec and returns its sequence number for Wait.
-func (l *Log) Append(rec []byte) (uint64, error) {
-	l.mu.Lock()
-	if l.err != nil {
-		l.mu.Unlock()
-		return 0, l.err
-	}
-	l.buf = AppendFrame(l.buf, rec)
-	l.appended++
-	lsn := l.appended
-	l.mu.Unlock()
-	select {
-	case l.kick <- struct{}{}:
-	default:
-	}
-	return lsn, nil
-}
-
-// Wait blocks until record lsn is written, and synced under SyncEach.
-func (l *Log) Wait(lsn uint64) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for l.err == nil && (l.written < lsn || (l.opt.Sync == SyncEach && l.synced < lsn)) {
-		l.cond.Wait()
-	}
-	if l.written >= lsn && (l.opt.Sync != SyncEach || l.synced >= lsn) {
-		return nil
-	}
-	return l.err
-}
-
-func (l *Log) flusher() {
-	defer l.wg.Done()
-	var tick <-chan time.Time
-	if l.opt.Sync == SyncPeriodic {
-		t := time.NewTicker(l.opt.Interval)
-		defer t.Stop()
-		tick = t.C
-	}
-	for {
-		select {
-		case <-l.kick:
-			l.io.Lock()
-			l.fail(l.flushLocked(l.opt.Sync == SyncEach))
-			l.io.Unlock()
-		case <-tick:
-			l.io.Lock()
-			l.fail(l.flushLocked(true))
-			l.io.Unlock()
-		case <-l.done:
-			return
-		}
-	}
-}
-
-// flushLocked writes queued frames and fsyncs when sync is set. The caller
-// holds l.io.
-func (l *Log) flushLocked(sync bool) error {
-	l.mu.Lock()
-	data, upto, synced := l.buf, l.appended, l.synced
-	l.buf, l.spare = l.spare[:0], nil
-	l.mu.Unlock()
-	if len(data) > 0 {
-		if _, err := l.f.Write(data); err != nil {
-			return err
-		}
-		l.size += int64(len(data))
-	}
-	if sync && (len(data) > 0 || synced < upto) {
-		if err := l.f.Sync(); err != nil {
-			return err
-		}
-	}
-	l.mu.Lock()
-	l.written = upto
-	if sync {
-		l.synced = upto
-	}
-	l.spare = data
-	l.cond.Broadcast()
-	l.mu.Unlock()
-	return nil
-}
-
-func (l *Log) fail(err error) {
-	if err == nil {
-		return
-	}
-	l.mu.Lock()
-	if l.err == nil {
-		l.err = err
-	}
-	l.cond.Broadcast()
-	l.mu.Unlock()
-}
-
-// Size is how many bytes the current segment holds.
-func (l *Log) Size() int64 {
-	l.io.Lock()
-	defer l.io.Unlock()
-	return l.size
 }
 
 // Rotate syncs and closes the current segment and opens the next one, whose
@@ -294,6 +202,8 @@ func (l *Log) Size() int64 {
 func (l *Log) Rotate() (uint64, error) {
 	l.io.Lock()
 	defer l.io.Unlock()
+	l.syncMu.Lock()
+	defer l.syncMu.Unlock()
 	if err := l.flushLocked(true); err != nil {
 		l.fail(err)
 		return 0, err
@@ -316,7 +226,7 @@ func (l *Log) Remove(before uint64) error {
 	}
 	for _, seg := range segs {
 		if seg < before {
-			if err := os.Remove(l.path(seg)); err != nil {
+			if err := os.Remove(l.Path(seg)); err != nil {
 				return err
 			}
 		}

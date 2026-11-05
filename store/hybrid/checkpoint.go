@@ -1,9 +1,7 @@
 package hybrid
 
 import (
-	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kinoforge/runnel"
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 )
 
@@ -19,24 +16,27 @@ const (
 	snapPrefix = "snap-"
 	snapSuffix = ".bin"
 	tmpSuffix  = ".tmp"
-	chunkBytes = 1 << 20
 )
 
 // recover loads the newest snapshot, then replays the log segments written
-// after it.
+// after it. Bodies stay on disk; jobs only learn where they are.
 func (s *Store) recover() error {
 	snaps, err := s.snapshots()
 	if err != nil {
 		return err
 	}
+	r := &replayer{get: s.space}
 	from := uint64(0)
 	if len(snaps) > 0 {
 		from = snaps[len(snaps)-1]
-		if err := s.loadSnapshot(from); err != nil {
+		if err := s.loadSnapshot(from, r); err != nil {
 			return err
 		}
 	}
-	return s.log.Replay(from, func(rec []byte) error { return replay(rec, s.space) })
+	return s.log.Replay(from, func(seg uint64, off int64, rec []byte) error {
+		r.file, r.base = uint32(seg), off
+		return r.record(rec)
+	})
 }
 
 func (s *Store) snapPath(seg uint64) string {
@@ -62,13 +62,17 @@ func (s *Store) snapshots() ([]uint64, error) {
 	return out, nil
 }
 
-func (s *Store) loadSnapshot(seg uint64) error {
+func (s *Store) loadSnapshot(seg uint64, r *replayer) error {
 	f, err := os.Open(s.snapPath(seg))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if _, err := wal.ReadFrames(f, func(rec []byte) error { return replay(rec, s.space) }); err != nil {
+	r.file = snapBit | uint32(seg)
+	if _, err := wal.ReadFrames(f, func(off int64, rec []byte) error {
+		r.base = off
+		return r.record(rec)
+	}); err != nil {
 		return fmt.Errorf("hybrid: snapshot %d: %w", seg, err)
 	}
 	return nil
@@ -92,8 +96,9 @@ func (s *Store) checkpointer() {
 	}
 }
 
-// Checkpoint writes a snapshot of every namespace and deletes the log segments
-// it covers. Calls pause only while the snapshot copies its pointers.
+// Checkpoint writes a snapshot of every namespace, bodies included, points the
+// jobs at their bodies in it, and deletes the log segments and snapshots it
+// replaces. Calls pause only while the snapshot copies the job records.
 func (s *Store) Checkpoint() error {
 	if s.log == nil {
 		return nil
@@ -108,9 +113,12 @@ func (s *Store) Checkpoint() error {
 	}
 	views := s.copyAll()
 	s.gate.Unlock()
-	if err := s.writeSnapshot(seg, views); err != nil {
+	moved, err := s.writeSnapshot(seg, views)
+	if err != nil {
 		return err
 	}
+	s.repoint(moved)
+	s.files.drop(func(id uint32) bool { return uint64(id&^snapBit) < seg })
 	old, err := s.snapshots()
 	if err != nil {
 		return err
@@ -125,136 +133,30 @@ func (s *Store) Checkpoint() error {
 	return s.log.Remove(seg)
 }
 
-// view is a point-in-time copy of a space. Jobs and event slices are shared,
-// which is safe because the store never changes them in place.
-type view struct {
-	ns      string
-	jobs    []*runnel.Job
-	uniques map[string]unique
-	kids    map[string][]string
-	events  []runnel.Event
-	seq     int64
-	cursors map[string]int64
-	configs map[runnel.ConfigKind]map[string][]byte
-	buckets map[string]bucket
+// moved is a body copied into a snapshot.
+type moved struct {
+	id       uid
+	from, to ref
 }
 
-// copyAll copies every space. The caller holds the gate exclusively.
-func (s *Store) copyAll() []view {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]view, 0, len(s.spaces))
-	for _, sp := range s.spaces {
-		v := view{ns: sp.ns, jobs: slices.Collect(maps.Values(sp.jobs)), uniques: maps.Clone(sp.uniques),
-			kids: maps.Clone(sp.kids), events: sp.events[:len(sp.events):len(sp.events)], seq: sp.seq,
-			cursors: maps.Clone(sp.cursors), configs: map[runnel.ConfigKind]map[string][]byte{}, buckets: maps.Clone(sp.buckets)}
-		for k, m := range sp.configs {
-			v.configs[k] = maps.Clone(m)
-		}
-		out = append(out, v)
-	}
-	return out
-}
-
-func (s *Store) writeSnapshot(seg uint64, views []view) error {
-	path := s.snapPath(seg)
-	f, err := os.OpenFile(path+tmpSuffix, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, filePerm)
-	if err != nil {
-		return err
-	}
-	err = writeViews(f, views)
-	if err == nil {
-		err = f.Sync()
-	}
-	err = errors.Join(err, f.Close())
-	if err == nil {
-		err = os.Rename(path+tmpSuffix, path)
-	}
-	if err != nil {
-		_ = os.Remove(path + tmpSuffix)
-		return err
-	}
-	return wal.SyncDir(s.opt.Dir)
-}
-
-// writeViews writes each view as records of about chunkBytes, each starting
-// with the namespace, in the format replay reads.
-func writeViews(f *os.File, views []view) error {
-	for _, v := range views {
-		if err := writeView(f, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeView(f *os.File, v view) error {
-	{
-		w := chunker{f: f, ns: v.ns}
-		w.start()
-		w.e.opSeq(v.seq)
-		for name, val := range v.cursors {
-			w.e.opCursor(name, val)
-		}
-		for kind, m := range v.configs {
-			for name, val := range m {
-				w.e.opConfig(kind, name, val)
+// repoint moves jobs whose body is still the one copied over to the copy in
+// the snapshot, so the older files can go.
+func (s *Store) repoint(byNS map[string][]moved) {
+	for ns, list := range byNS {
+		sp := s.space(ns)
+		sp.mu.Lock()
+		to := make(map[uid]moved, len(list))
+		for _, m := range list {
+			to[m.id] = m
+			if i, ok := sp.idx[m.id]; ok && sp.slots[i].body == m.from {
+				sp.slots[i].body = m.to
 			}
 		}
-		for key, b := range v.buckets {
-			w.e.opBucket(key, b)
-		}
-		for _, j := range v.jobs {
-			if err := w.e.opJob(j); err != nil {
-				return err
-			}
-			if err := w.maybeFlush(); err != nil {
-				return err
+		for i, l := range sp.cache.queue {
+			if m, ok := to[l.id]; ok && l.at == m.from {
+				sp.cache.queue[i].at = m.to
 			}
 		}
-		for key, u := range v.uniques {
-			w.e.opUnique(key, u)
-		}
-		for parent, kids := range v.kids {
-			for _, k := range kids {
-				w.e.opKid(parent, k)
-			}
-		}
-		for _, e := range v.events {
-			w.e.opEvent(e)
-			if err := w.maybeFlush(); err != nil {
-				return err
-			}
-		}
-		if err := w.flush(); err != nil {
-			return err
-		}
+		sp.mu.Unlock()
 	}
-	return nil
-}
-
-type chunker struct {
-	f   *os.File
-	ns  string
-	e   enc
-	buf []byte
-}
-
-func (c *chunker) start() {
-	c.e.b = c.e.b[:0]
-	c.e.str(c.ns)
-}
-
-func (c *chunker) maybeFlush() error {
-	if len(c.e.b) < chunkBytes {
-		return nil
-	}
-	return c.flush()
-}
-
-func (c *chunker) flush() error {
-	c.buf = wal.AppendFrame(c.buf[:0], c.e.b)
-	_, err := c.f.Write(c.buf)
-	c.start()
-	return err
 }

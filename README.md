@@ -141,7 +141,15 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 | Claims without limits | `SKIP LOCKED`, no lock | `SKIP LOCKED`, no lock | one writer | one Lua script | in memory, per namespace lock |
 | Good for | production | production | tests, tools, one machine | high throughput | highest throughput on one machine, no database |
 
-The hybrid store (`hybrid:/var/lib/runnel`) keeps every job in memory and logs each change to disk before it answers. `?sync=each` (the default) waits for the disk on every enqueue and result, and calls that arrive together share one flush. `?sync=periodic` flushes every 100ms, so a machine crash can lose the last 100ms, but a crash of the process loses nothing. `memory:` keeps nothing on disk. One process owns the directory, so run it behind `runnel serve` and point workers at the server. All jobs must fit in memory.
+The hybrid store (`hybrid:/var/lib/runnel`) keeps a small record of every job in memory, about 400 bytes whatever the payload, and logs each change to disk. Payloads, results, meta and errors stay on disk and in a cache of hot bodies. The cache defaults to a quarter of the container's memory limit (512 MiB without one), so a Docker or Kubernetes limit sizes it with no Runnel setting. `runnel` also keeps Go's heap under 90% of that limit.
+
+| `?sync=` | Answers after | A crash of the process loses | A crash of the machine loses |
+|---|---|---|---|
+| `each` (default) | the disk flush | nothing | nothing |
+| `periodic` | the write to the OS | nothing | the last 100 ms |
+| `off` | memory | the last 100 ms | the last 100 ms |
+
+`memory:` keeps nothing on disk. One process owns the directory, so run it behind `runnel serve` and point workers at the server.
 
 All stores pass the same conformance suite in `store/storetest`, under the race detector.
 
@@ -213,7 +221,7 @@ If the transaction rolls back, the job never existed. If it commits, the job is 
 - **SQL stores.** Claims of queues without limits lock rows with `SKIP LOCKED`, so workers never wait on each other. Claims under limits serialize per namespace, so counts stay exact, and read light rows in rounds that skip tenants and resources at their limit. Finishing a job needs no namespace lock: it updates the row under its version, records an event, releases its unique key and settles its dependants in one transaction. Postgres notifications are sent after commit and batched, so they never serialize commits. Each worker sends the results that pile up while a commit is in flight as one transaction, which adds no delay when it is idle.
 - **Durability.** Enqueues and results are committed to disk before they are acknowledged. On Postgres, claims commit without waiting for the disk: after a crash the last claims may be forgotten, and those jobs run again, which at-least-once delivery allows anyway.
 - **Redis family.** The same rules run as Lua scripts over hashes and sorted sets. A namespace's keys share a hash tag, so it works on Redis Cluster.
-- **Hybrid store.** The same rules run on in-memory B-trees. Each call logs what it changed as one checksummed record in a write-ahead log (`store/hybrid/wal`), and snapshots keep the log short. Restart loads the newest snapshot and replays the log after it, dropping a record cut short by a crash. Claims return without waiting for the disk, like on Postgres: the finish that follows makes the claim durable too.
+- **Hybrid store.** The same rules run on in-memory B-trees over fixed-size job records with no pointers, which the garbage collector skips. Each call logs what it changed as one checksummed record in a write-ahead log (`store/hybrid/wal`); job bodies are read back from the log and snapshots, so they are written once and never copied into a second file. Restart loads the newest snapshot and replays the log after it, dropping a record cut short by a crash. Claims return without waiting for the disk, like on Postgres: the finish that follows makes the claim durable too.
 - **Guarantees.** Delivery is at least once, so make handlers idempotent: use `j.ID` or a unique key. A job runs on one worker at a time while its lease lives. Every write is guarded by a version, so a stale worker, a reaper or a canceller never overwrites a newer state.
 
 ## Benchmarks
@@ -236,12 +244,14 @@ The hybrid store was measured on a different machine, a laptop with a SATA SSD t
 | Store (laptop) | Enqueue | Run | Direct start p50 |
 |---|---|---|---|
 | SQLite (WAL) | 5,350/s | 635/s | 3.2 ms |
-| Hybrid, `sync=each` | 2,440/s | 540/s | 67 ms |
+| Redis 7.4 | 17,900/s | 5,950/s | 0.9 ms |
+| Hybrid, `sync=each` | 1,700/s | 455/s | 67 ms |
 | Hybrid, `sync=each`, 4 x 200 slots | | 5,100/s | |
-| Hybrid, `sync=periodic` | 205,000/s | 12,000 to 35,000/s | 0.04 ms |
-| Memory only | 224,000/s | 87,000/s | 0.04 ms |
+| Hybrid, `sync=periodic` | 228,000/s | 75,000/s | 0.03 ms |
+| Hybrid, `sync=off` | 228,000/s | 85,000/s | 0.02 ms |
+| Memory only | 244,000/s | 75,000 to 98,000/s | 0.02 ms |
 
-With `sync=each` every enqueue and result waits for a flush, so throughput grows with the number of jobs in flight, not with CPU.
+Run is bound by the worker loop here; the store alone (`go test -bench Cycle ./store/hybrid`) claims and finishes 165,000 jobs/s in memory, 130,000 with `sync=off` and 120,000 with `sync=periodic`. With `sync=each` every enqueue and result waits for a flush, so throughput grows with the number of jobs in flight, not with CPU. 200,000 waiting jobs with 2 KB payloads take 89 MB of heap with a 16 MB cache, against 525 MB with every body in memory.
 
 ## Development
 

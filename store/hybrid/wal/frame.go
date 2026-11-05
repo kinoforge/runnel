@@ -10,6 +10,8 @@ import (
 )
 
 const (
+	// HeaderLen is the size of the header before each record.
+	HeaderLen = headerLen
 	headerLen = 8
 	maxRecord = 1 << 30
 )
@@ -28,9 +30,10 @@ func AppendFrame(b, rec []byte) []byte {
 	return append(append(b, h[:]...), rec...)
 }
 
-// ReadFrames calls fn with each record in r and returns how many bytes held whole
-// frames. It returns ErrTorn at the first bad frame.
-func ReadFrames(r io.Reader, fn func(rec []byte) error) (int64, error) {
+// ReadFrames calls fn with each record in r and the offset in r where the record
+// starts, and returns how many bytes held whole frames. It returns ErrTorn at
+// the first bad frame. rec is only valid during the call.
+func ReadFrames(r io.Reader, fn func(off int64, rec []byte) error) (int64, error) {
 	br := bufio.NewReaderSize(r, 1<<20)
 	var good int64
 	var h [headerLen]byte
@@ -56,7 +59,7 @@ func ReadFrames(r io.Reader, fn func(rec []byte) error) (int64, error) {
 		if crc32.Checksum(rec, table) != binary.LittleEndian.Uint32(h[4:]) {
 			return good, ErrTorn
 		}
-		if err := fn(rec); err != nil {
+		if err := fn(good+headerLen, rec); err != nil {
 			return good, fmt.Errorf("wal: applying record at %d: %w", good, err)
 		}
 		good += int64(headerLen + n)

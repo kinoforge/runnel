@@ -39,6 +39,7 @@ the store comes from --store, RUNNEL_STORE or the store key, for example
 `
 
 func main() {
+	fitContainer()
 	if err := runMain(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, errorLine(err))
 		os.Exit(1)

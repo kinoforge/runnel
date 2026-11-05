@@ -11,6 +11,7 @@ import (
 // ops, so recovery runs no job logic.
 const (
 	opPutJob byte = iota + 1
+	opPutHot
 	opDelJob
 	opPutUnique
 	opDelUnique
@@ -25,41 +26,72 @@ const (
 	opSeq
 )
 
-// tx records the ops of one store call on one namespace.
+// tx records the ops of one store call on one namespace. bodies lists where
+// in the record each new body starts, to point its job at the log once the
+// record has a place there.
 type tx struct {
-	sp   *space
-	rec  enc
-	wake bool
-	ends []string
-	err  error
-	head int
+	sp     *space
+	rec    *enc
+	head   int
+	wake   bool
+	ends   []string
+	bodies []placed
+	done   []uid
 }
 
-func newTx(sp *space) *tx {
+type placed struct {
+	id  uid
+	pos int
+	n   int
+}
+
+// newTx starts a call on sp; with logged unset it records nothing.
+func newTx(sp *space, logged bool) *tx {
 	t := &tx{sp: sp}
-	t.rec.str(sp.ns)
-	t.head = len(t.rec.b)
+	if logged {
+		t.rec = &enc{}
+		t.rec.str(sp.ns)
+		t.head = len(t.rec.b)
+	}
 	return t
 }
 
-func (t *tx) changed() bool { return len(t.rec.b) > t.head }
+func (t *tx) changed() bool { return t.rec != nil && len(t.rec.b) > t.head }
 
-func (t *tx) putJob(j *runnel.Job) {
-	normalize(j)
-	j.Namespace = t.sp.ns
-	t.sp.setJob(j)
-	if err := t.rec.opJob(j); err != nil && t.err == nil {
-		t.err = err
+// put stores h with a new body.
+func (t *tx) put(h job, body []byte) {
+	h.body = ref{}
+	t.sp.setJob(h)
+	t.sp.cache.put(h.id, body)
+	if t.rec != nil {
+		t.rec.byte(opPutJob)
+		t.rec.hot(&h, &t.sp.syms)
+		pos := t.rec.blob(body)
+		t.bodies = append(t.bodies, placed{id: h.id, pos: pos, n: len(body)})
 	}
-	if j.State == runnel.StateWaiting {
+	if h.is(stWaiting) {
 		t.wake = true
 	}
 }
 
-func (t *tx) delJob(id string) {
+// putHot stores h, keeping the body it has. A job that ends this way lets its
+// body leave the cache.
+func (t *tx) putHot(h job) {
+	t.sp.setJob(h)
+	if h.final() {
+		t.done = append(t.done, h.id)
+	}
+	t.rec.byte(opPutHot)
+	t.rec.hot(&h, &t.sp.syms)
+	if h.is(stWaiting) {
+		t.wake = true
+	}
+}
+
+func (t *tx) delJob(id uid) {
 	t.sp.delJob(id)
 	t.rec.byte(opDelJob)
-	t.rec.str(id)
+	t.rec.bytes(id[:])
 }
 
 func (t *tx) putUnique(key string, u unique) {
@@ -73,15 +105,15 @@ func (t *tx) delUnique(key string) {
 	t.rec.str(key)
 }
 
-func (t *tx) addKid(parent, kid string) {
+func (t *tx) addKid(parent, kid uid) {
 	t.sp.kids[parent] = append(t.sp.kids[parent], kid)
 	t.rec.opKid(parent, kid)
 }
 
-func (t *tx) delKids(parent string) {
+func (t *tx) delKids(parent uid) {
 	delete(t.sp.kids, parent)
 	t.rec.byte(opDelKids)
-	t.rec.str(parent)
+	t.rec.bytes(parent[:])
 }
 
 func (t *tx) putEvent(e runnel.Event) {
@@ -118,22 +150,26 @@ func (t *tx) putBucket(key string, b bucket) {
 	t.rec.opBucket(key, b)
 }
 
-func (e *enc) opJob(j *runnel.Job) error {
-	e.byte(opPutJob)
-	return encodeJob(e, j)
+// blob writes b with its length and returns where b starts in the record.
+func (e *enc) blob(b []byte) int {
+	if e == nil {
+		return 0
+	}
+	e.bytes(b)
+	return len(e.b) - len(b)
 }
 
 func (e *enc) opUnique(key string, u unique) {
 	e.byte(opPutUnique)
 	e.str(key)
-	e.str(u.id)
+	e.bytes(u.id[:])
 	e.int(u.until)
 }
 
-func (e *enc) opKid(parent, kid string) {
+func (e *enc) opKid(parent, kid uid) {
 	e.byte(opAddKid)
-	e.str(parent)
-	e.str(kid)
+	e.bytes(parent[:])
+	e.bytes(kid[:])
 }
 
 func (e *enc) opEvent(ev runnel.Event) {
@@ -171,38 +207,56 @@ func (e *enc) opSeq(seq int64) {
 	e.int(seq)
 }
 
-// replay applies one logged record to the spaces get returns.
-func replay(rec []byte, get func(ns string) *space) error {
-	d := &dec{b: rec}
-	sp := get(d.str())
+// replayer applies logged records. file and base say where the current record
+// sits on disk, so bodies are found there later instead of kept in memory.
+type replayer struct {
+	get  func(ns string) *space
+	file uint32
+	base int64
+}
+
+func (r *replayer) record(rec []byte) error {
+	d := newDec(rec)
+	sp := r.get(d.str())
 	for !d.done() {
-		if err := replayOp(d, sp); err != nil {
+		if err := r.op(d, sp); err != nil {
 			return err
 		}
 	}
 	return d.err
 }
 
-func replayOp(d *dec, sp *space) error {
+func readID(d *dec) uid {
+	var id uid
+	copy(id[:], d.bytes())
+	return id
+}
+
+func (r *replayer) op(d *dec, sp *space) error {
 	switch op := d.byte(); op {
-	case opPutJob:
-		j, err := decodeJob(d, sp.ns)
-		if err != nil {
-			return err
+	case opPutJob, opPutHot:
+		h := decodeHot(d, &sp.syms)
+		old, _ := sp.get(h.id)
+		h.body = old.body
+		if op == opPutJob {
+			b := d.bytes()
+			h.body = ref{file: r.file, n: uint32(len(b)), off: r.base + int64(d.pos()-len(b))}
 		}
-		sp.setJob(j)
+		if d.err == nil {
+			sp.setJob(h)
+		}
 	case opDelJob:
-		sp.delJob(d.str())
+		sp.delJob(readID(d))
 	case opPutUnique:
 		key := d.str()
-		sp.setUnique(key, unique{id: d.str(), until: d.int()})
+		sp.setUnique(key, unique{id: readID(d), until: d.int()})
 	case opDelUnique:
 		sp.dropUnique(d.str())
 	case opAddKid:
-		p := d.str()
-		sp.kids[p] = append(sp.kids[p], d.str())
+		p := readID(d)
+		sp.kids[p] = append(sp.kids[p], readID(d))
 	case opDelKids:
-		delete(sp.kids, d.str())
+		delete(sp.kids, readID(d))
 	case opPutEvent:
 		e := runnel.Event{Seq: d.int(), Namespace: sp.ns, JobID: d.str(), Queue: d.str(), Kind: d.str()}
 		e.State, e.At = runnel.State(d.str()), d.time()

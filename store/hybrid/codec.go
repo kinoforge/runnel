@@ -3,6 +3,7 @@ package hybrid
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -11,29 +12,56 @@ import (
 
 var errShort = errors.New("hybrid: record cut short")
 
+// enc builds a log record. A nil enc writes nothing, which is how a store
+// without a log skips encoding.
 type enc struct{ b []byte }
 
-func (e *enc) byte(v byte)      { e.b = append(e.b, v) }
-func (e *enc) int(v int64)      { e.b = binary.AppendVarint(e.b, v) }
+func (e *enc) byte(v byte) {
+	if e != nil {
+		e.b = append(e.b, v)
+	}
+}
+
+func (e *enc) int(v int64) {
+	if e != nil {
+		e.b = binary.AppendVarint(e.b, v)
+	}
+}
+
 func (e *enc) time(t time.Time) { e.int(runnel.Millis(t)) }
-func (e *enc) float(v float64)  { e.b = binary.LittleEndian.AppendUint64(e.b, math.Float64bits(v)) }
+
+func (e *enc) float(v float64) {
+	if e != nil {
+		e.b = binary.LittleEndian.AppendUint64(e.b, math.Float64bits(v))
+	}
+}
 
 func (e *enc) bytes(v []byte) {
-	e.b = binary.AppendUvarint(e.b, uint64(len(v)))
-	e.b = append(e.b, v...)
+	if e != nil {
+		e.b = binary.AppendUvarint(e.b, uint64(len(v)))
+		e.b = append(e.b, v...)
+	}
 }
 
 func (e *enc) str(v string) {
-	e.b = binary.AppendUvarint(e.b, uint64(len(v)))
-	e.b = append(e.b, v...)
+	if e != nil {
+		e.b = binary.AppendUvarint(e.b, uint64(len(v)))
+		e.b = append(e.b, v...)
+	}
 }
 
 // dec reads what enc wrote. The first failure sticks in err and later reads
 // return zero values.
 type dec struct {
 	b   []byte
+	n   int
 	err error
 }
+
+func newDec(b []byte) *dec { return &dec{b: b, n: len(b)} }
+
+// pos is how many bytes have been read.
+func (d *dec) pos() int { return d.n - len(d.b) }
 
 func (d *dec) done() bool { return d.err != nil || len(d.b) == 0 }
 
@@ -88,55 +116,40 @@ func (d *dec) bytes() []byte {
 
 func (d *dec) str() string { return string(d.bytes()) }
 
-func encodeJob(e *enc, j *runnel.Job) error {
-	data, err := j.EncodeData()
-	if err != nil {
-		return err
+// hot writes a job's in-memory fields, with names spelled out so a record
+// does not depend on the symbol numbers of one process.
+func (e *enc) hot(h *job, t *syms) {
+	if e == nil {
+		return
 	}
-	e.str(j.ID)
-	e.str(j.Queue)
-	e.str(j.Kind)
-	e.str(string(j.State))
-	e.int(int64(j.Priority))
-	e.str(j.Tenant)
-	e.str(j.Resource)
-	e.int(int64(j.Attempt))
-	e.int(int64(j.MaxAttempts))
-	for _, t := range []time.Time{j.RunAt, j.WaitingSince, j.StartBy, j.LeaseUntil, j.CreatedAt, j.UpdatedAt, j.StartedAt, j.FinishedAt} {
-		e.time(t)
+	e.bytes(h.id[:])
+	for _, v := range []sym{h.queue, h.kind, h.tenant, h.resource, h.worker} {
+		e.str(t.name(v))
 	}
-	e.str(j.Worker)
-	e.int(j.Version)
-	e.int(int64(j.Pending))
-	e.str(j.UniqueKey)
-	e.bytes(data)
-	return nil
+	e.byte(h.state)
+	e.byte(h.flags)
+	for _, v := range []int64{int64(h.prio), int64(h.attempt), int64(h.maxAttempts), int64(h.pending), h.runAt, h.waitingSince,
+		h.startBy, h.lease, h.created, h.updated, h.started, h.finished, h.version, h.window} {
+		e.int(v)
+	}
 }
 
-func decodeJob(d *dec, ns string) (*runnel.Job, error) {
-	j := &runnel.Job{Namespace: ns}
-	j.ID, j.Queue, j.Kind, j.State = d.str(), d.str(), d.str(), runnel.State(d.str())
-	j.Priority = int(d.int())
-	j.Tenant, j.Resource = d.str(), d.str()
-	j.Attempt, j.MaxAttempts = int(d.int()), int(d.int())
-	for _, t := range []*time.Time{&j.RunAt, &j.WaitingSince, &j.StartBy, &j.LeaseUntil, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.FinishedAt} {
-		*t = d.time()
+func decodeHot(d *dec, t *syms) job {
+	var h job
+	copy(h.id[:], d.bytes())
+	for _, p := range []*sym{&h.queue, &h.kind, &h.tenant, &h.resource, &h.worker} {
+		*p = t.id(d.str())
 	}
-	j.Worker = d.str()
-	j.Version = d.int()
-	j.Pending = int(d.int())
-	j.UniqueKey = d.str()
-	data := d.bytes()
-	if d.err != nil {
-		return nil, d.err
+	h.state, h.flags = d.byte(), d.byte()
+	for _, p := range []*int32{&h.prio, &h.attempt, &h.maxAttempts, &h.pending} {
+		*p = int32(d.int())
 	}
-	return j, j.DecodeData(data)
-}
-
-// normalize rounds a job's times to milliseconds, the precision every store
-// keeps, so a job reads back the same before and after a restart.
-func normalize(j *runnel.Job) {
-	for _, t := range []*time.Time{&j.RunAt, &j.WaitingSince, &j.StartBy, &j.LeaseUntil, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.FinishedAt} {
-		*t = runnel.FromMillis(runnel.Millis(*t))
+	for _, p := range []*int64{&h.runAt, &h.waitingSince, &h.startBy, &h.lease, &h.created, &h.updated, &h.started,
+		&h.finished, &h.version, &h.window} {
+		*p = d.int()
 	}
+	if d.err == nil && (h.state == 0 || h.state >= stCount) {
+		d.err = fmt.Errorf("hybrid: bad state %d", h.state)
+	}
+	return h
 }

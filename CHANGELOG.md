@@ -6,8 +6,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
-- Hybrid store: jobs in memory, every change in a write-ahead log, snapshots for fast restarts. Open it with `hybrid:DIR` (`?sync=each|periodic|off`), or `memory:` for no disk.
+- Hybrid store: a small record per job in memory, payloads and results on disk behind a cache sized from the container's memory limit, every change in a write-ahead log, snapshots for fast restarts. Open it with `hybrid:DIR` (`?sync=each|periodic|off`), or `memory:` for no disk.
 - `store/hybrid/wal`, a group-commit write-ahead log usable on its own.
+- `runnel` keeps Go's heap under 90% of the container's memory limit unless `GOMEMLIMIT` is set.
 
 ### Changed
 
