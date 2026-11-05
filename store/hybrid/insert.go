@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
 func (s *Store) Insert(_ context.Context, ns string, jobs []*runnel.Job, now time.Time) ([]runnel.Inserted, error) {
@@ -16,12 +17,16 @@ func (s *Store) Insert(_ context.Context, ns string, jobs []*runnel.Job, now tim
 			bodies[i] = encodeBody(j)
 		}
 	}
-	err := s.write(ns, func(t *tx) error {
-		in := inserter{t: t, now: ms(now), remap: map[string]string{}}
+	known, gen, err := s.coldKnown(ns, jobs)
+	if err != nil {
+		return nil, err
+	}
+	err = s.write(ns, func(t *tx) error {
+		in := inserter{s: s, t: t, now: ms(now), remap: map[string]string{}, known: known, gen: gen}
 		for i, j := range jobs {
 			out[i] = in.one(j, bodies[i])
 		}
-		return nil
+		return in.err
 	})
 	if err != nil {
 		return nil, err
@@ -32,9 +37,66 @@ func (s *Store) Insert(_ context.Context, ns string, jobs []*runnel.Job, now tim
 // inserter adds the jobs of one batch. remap points a job id of the batch at the
 // job that stands for it: the held job for a duplicate, "" for a refused job.
 type inserter struct {
+	s     *Store
 	t     *tx
 	now   int64
 	remap map[string]string
+	// known holds the states of the batch's ids and dependencies found in the
+	// cold store before the lock was taken, valid while no job left memory
+	// since: gen is the space's retired count then.
+	known map[uid]uint8
+	gen   uint64
+	err   error
+}
+
+// coldKnown looks up in the cold store the ids and dependencies of jobs,
+// before the namespace lock is taken.
+func (s *Store) coldKnown(ns string, jobs []*runnel.Job) (map[uid]uint8, uint64, error) {
+	if s.cold == nil {
+		return nil, 0, nil
+	}
+	sp := s.space(ns)
+	gen := sp.retired.Load()
+	known := map[uid]uint8{}
+	look := func(raw string) error {
+		id, ok := parseID(raw)
+		if !ok || !sp.mayBeCold(id) {
+			return nil
+		}
+		j, found, err := s.cold.Meta(ns, cold.ID(id))
+		if found {
+			known[id] = j.State
+		}
+		return err
+	}
+	for _, j := range jobs {
+		if err := look(j.ID); err != nil {
+			return nil, 0, err
+		}
+		for _, d := range j.DependsOn {
+			if err := look(d); err != nil {
+				return nil, 0, err
+			}
+		}
+	}
+	return known, gen, nil
+}
+
+// coldState returns the state of a job only the cold store holds.
+func (in *inserter) coldState(id uid) (uint8, bool) {
+	sp := in.t.sp
+	if in.s.cold == nil || !sp.mayBeCold(id) {
+		return 0, false
+	}
+	if sp.retired.Load() == in.gen {
+		st, ok := in.known[id]
+		return st, ok
+	}
+	j, ok, err := in.s.cold.Meta(sp.ns, cold.ID(id))
+	if err != nil && in.err == nil {
+		in.err = err
+	}
+	return j.State, ok
 }
 
 func (in *inserter) refuse(j *runnel.Job, err error) runnel.Inserted {
@@ -100,11 +162,16 @@ func (in *inserter) deps(ids []string) ([]string, []uid, bool) {
 		seen[d] = true
 		deps = append(deps, d)
 		id, _ := parseID(d)
-		p, ok := in.t.sp.get(id)
-		if !ok || p.is(stDead) || p.is(stCancelled) {
+		st := uint8(0)
+		if p, ok := in.t.sp.get(id); ok {
+			st = p.state
+		} else if c, ok := in.coldState(id); ok {
+			st = c
+		}
+		if st == 0 || st == stDead || st == stCancelled {
 			return nil, nil, false
 		}
-		if !p.is(stCompleted) {
+		if st != stCompleted {
 			wait = append(wait, id)
 		}
 	}
@@ -116,6 +183,9 @@ func (in *inserter) deps(ids []string) ([]string, []uid, bool) {
 func (in *inserter) held(id uid, key string) string {
 	sp := in.t.sp
 	if _, ok := sp.get(id); ok {
+		return id.String()
+	}
+	if _, ok := in.coldState(id); ok {
 		return id.String()
 	}
 	if key == "" {

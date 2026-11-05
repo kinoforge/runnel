@@ -3,12 +3,15 @@ package hybrid
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/store/hybrid/cold"
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 )
 
@@ -42,6 +45,12 @@ type Store struct {
 	// snapBytes is the size of the newest snapshot; the log grows at least
 	// that much before the next one, so rewriting stays in proportion.
 	snapBytes atomic.Int64
+	// cold holds finished jobs once they leave memory; coldMu keeps moving
+	// them there apart from pruning them.
+	cold        *cold.Store
+	coldMu      sync.Mutex
+	retireAfter time.Duration
+	retireEvery time.Duration
 
 	mu     sync.RWMutex
 	spaces map[string]*space
@@ -61,7 +70,9 @@ func Memory() *Store {
 }
 
 // Open loads the store in opt.Dir, replaying its snapshot and log.
-func Open(opt Options) (*Store, error) {
+func Open(opt Options) (*Store, error) { return open(opt, retireAfter, retireEvery) }
+
+func open(opt Options, after, every time.Duration) (*Store, error) {
 	s := Memory()
 	if opt.Dir == "" {
 		return s, nil
@@ -69,26 +80,67 @@ func Open(opt Options) (*Store, error) {
 	if opt.SnapshotBytes <= 0 {
 		opt.SnapshotBytes = defaultSnapshotBytes
 	}
-	s.opt = opt
+	s.opt, s.retireAfter, s.retireEvery = opt, after, every
 	s.files = &files{path: s.filePath, open: map[uint32]*os.File{}}
 	l, err := wal.Open(opt.Dir, wal.Options{Sync: opt.Sync, Interval: opt.SyncInterval})
 	if err != nil {
 		return nil, err
 	}
 	s.log = l
-	if err := s.recover(); err != nil {
+	if err := s.load(); err != nil {
 		s.files.close()
 		_ = l.Close()
+		if s.cold != nil {
+			_ = s.cold.Close()
+		}
 		return nil, err
 	}
-	if err := l.Start(); err != nil {
-		s.files.close()
-		_ = l.Close()
-		return nil, err
-	}
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.checkpointer()
+	go s.retirer()
 	return s, nil
+}
+
+// load opens the cold store, replays the snapshot and log into memory, starts
+// the log and moves every finished job to the cold store.
+func (s *Store) load() error {
+	c, err := cold.Open(filepath.Join(s.opt.Dir, coldDir))
+	if err != nil {
+		return err
+	}
+	s.cold = c
+	counts, err := c.Counts()
+	if err != nil {
+		return err
+	}
+	for k, n := range counts {
+		sp := s.space(k.NS)
+		sp.addCold(map[cold.Count]int64{k: n})
+		if sp.coldMax.Load() == nil {
+			top, ok, err := c.MaxID(k.NS)
+			if err != nil {
+				return err
+			}
+			if ok {
+				sp.noteCold(uid(top))
+			}
+		}
+	}
+	lasts, err := c.LastEvents()
+	if err != nil {
+		return err
+	}
+	for ns, seq := range lasts {
+		sp := s.space(ns)
+		sp.coldSeq, sp.seq = seq, max(sp.seq, seq)
+	}
+	if err := s.recover(); err != nil {
+		return err
+	}
+	if err := s.log.Start(); err != nil {
+		return err
+	}
+	return s.retire(math.MaxInt64)
 }
 
 func (s *Store) space(ns string) *space {
@@ -147,6 +199,9 @@ func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
 	if c.logErr == nil && c.pos.LSN > 0 && wait {
 		c.logErr = s.log.Wait(c.pos.LSN)
 	}
+	if c.logErr == nil && len(c.t.unretired) > 0 {
+		c.logErr = s.unretire(sp, c.t.unretired)
+	}
 	if c.logErr != nil {
 		s.fail(c.logErr)
 		return s.broken()
@@ -203,7 +258,7 @@ func (s *Store) Close() error {
 	}
 	err := s.log.Close()
 	s.files.close()
-	return err
+	return errors.Join(err, s.cold.Close())
 }
 
 // Subscribe signals when jobs in ns may be ready to claim.

@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - Hybrid store: a small record per job in memory, payloads and results on disk read through the OS page cache, every change in a write-ahead log, snapshots written without pausing calls. Open it with `hybrid:DIR` (`?sync=each|periodic|off`), or `memory:` for no disk.
 - `store/hybrid/wal`, a group-commit write-ahead log usable on its own.
+- `store/hybrid/cold`: finished jobs and their events leave memory for an embedded Pebble store on disk, so retention costs disk, not memory.
 - `runnel` keeps Go's heap under 70% of the container's memory limit unless `GOMEMLIMIT` is set.
 - `runnel bench -payload` sets the payload size.
 

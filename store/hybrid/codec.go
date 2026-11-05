@@ -111,13 +111,16 @@ func (d *dec) str() string { return string(d.bytes()) }
 
 // hot writes a job's in-memory fields, with names spelled out so a record
 // does not depend on the symbol numbers of one process.
-func (e *enc) hot(h *job, t *syms) {
+func (e *enc) hot(h *job, t *syms) { e.named(h, t.names5(h)) }
+
+// named writes h with the names its symbols stand for.
+func (e *enc) named(h *job, names [5]string) {
 	if e == nil {
 		return
 	}
 	e.bytes(h.id[:])
-	for _, v := range []sym{h.queue, h.kind, h.tenant, h.resource, h.worker} {
-		e.str(t.name(v))
+	for _, n := range names {
+		e.str(n)
 	}
 	e.byte(h.state)
 	e.byte(h.flags)

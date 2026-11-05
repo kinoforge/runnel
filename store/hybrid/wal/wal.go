@@ -238,13 +238,16 @@ func finish(f *os.File, data []byte) error {
 	return errors.Join(f.Sync(), f.Close())
 }
 
-// Sync writes and syncs every record appended so far.
+// Sync writes and syncs every record appended so far. Writers carry on
+// during the fsync.
 func (l *Log) Sync() error {
 	l.io.Lock()
-	defer l.io.Unlock()
-	l.syncMu.Lock()
-	defer l.syncMu.Unlock()
-	return l.flushLocked(true)
+	err := l.flushLocked(false)
+	l.io.Unlock()
+	if err == nil {
+		err = l.syncWritten()
+	}
+	return err
 }
 
 // Remove deletes the segments numbered below before.

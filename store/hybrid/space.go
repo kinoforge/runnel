@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/btree"
 	"github.com/kinoforge/runnel"
@@ -100,11 +101,19 @@ type space struct {
 	mu    sync.Mutex
 	queue queue
 	syms  syms
+	// coldCounts counts the jobs in the cold store by queue name and state;
+	// retired changes each time jobs leave memory for it.
+	coldCounts map[string]*[stCount]int64
+	retired    atomic.Uint64
+	coldSeq    int64
+	// coldMax is the largest id put in the cold store. Ids are time-ordered,
+	// so a new job's id is larger and needs no lookup there.
+	coldMax atomic.Pointer[uid]
 
-	idx   map[uid]int32
-	jobs  slabs
-	free  []int32
-	cache cache
+	idx     map[uid]int32
+	idxPeak int
+	jobs    slabs
+	cache   cache
 
 	uniques map[string]unique
 	expiry  *btree.BTreeG[uniqueKey]
@@ -132,7 +141,7 @@ type space struct {
 
 func newSpace(ns string) *space {
 	sp := &space{
-		ns: ns, syms: newSyms(), idx: map[uid]int32{}, cache: cache{bodies: map[uid][]byte{}},
+		ns: ns, syms: newSyms(), idx: map[uid]int32{}, cache: cache{bodies: map[uid][]byte{}}, coldCounts: map[string]*[stCount]int64{},
 		uniques: map[string]unique{}, expiry: btree.NewG(degree, lessUnique), kids: map[uid][]uid{},
 		cursors: map[string]int64{}, configs: map[runnel.ConfigKind]map[string][]byte{}, buckets: map[string]bucket{},
 		ready: map[sym]*readyTree{}, sched: map[sym]*timeTree{}, poll: map[sym]*timeTree{},
@@ -173,14 +182,8 @@ func (sp *space) setJob(h job) {
 		sp.index(&h)
 		return
 	}
-	if n := len(sp.free); n > 0 {
-		i := sp.free[n-1]
-		sp.free = sp.free[:n-1]
-		*sp.jobs.at(i) = h
-		sp.idx[h.id] = i
-	} else {
-		sp.idx[h.id] = sp.jobs.add(h)
-	}
+	sp.idx[h.id] = sp.jobs.put(h)
+	sp.idxPeak = max(sp.idxPeak, len(sp.idx))
 	sp.byState[h.state].ReplaceOrInsert(h.id)
 	sp.index(&h)
 }
@@ -190,9 +193,9 @@ func (sp *space) delJob(id uid) {
 		h := sp.jobs.at(i)
 		sp.byState[h.state].Delete(id)
 		sp.unindex(h)
-		*h = job{}
-		sp.free = append(sp.free, i)
+		sp.jobs.clear(i)
 		delete(sp.idx, id)
+		sp.shrinkIdx()
 	}
 	delete(sp.kids, id)
 	sp.cache.del(id)
@@ -203,6 +206,19 @@ func (sp *space) draft(h *job) draft {
 	d := sp.syms.draft(h)
 	d.body = sp.cache.bodies[h.id]
 	return d
+}
+
+// shrinkIdx rebuilds the id map once it holds a quarter of its peak, since Go
+// maps, cloned ones too, keep the memory of every entry they ever held.
+func (sp *space) shrinkIdx() {
+	if sp.idxPeak < shrinkAt || len(sp.idx)*4 > sp.idxPeak {
+		return
+	}
+	m := make(map[uid]int32, len(sp.idx))
+	for id, i := range sp.idx {
+		m[id] = i
+	}
+	sp.idx, sp.idxPeak = m, len(m)
 }
 
 // body returns a job's body from the cache or from disk.

@@ -38,6 +38,10 @@ func (s *Store) writeSnapshot(seg uint64) (map[*space][]moved, error) {
 		err = s.log.Sync()
 	}
 	if err == nil {
+		// Jobs that left memory for the cold store are not in the snapshot.
+		err = s.cold.Flush()
+	}
+	if err == nil {
 		err = f.Sync()
 	}
 	err = errors.Join(err, f.Close())

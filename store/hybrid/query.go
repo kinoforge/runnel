@@ -103,24 +103,27 @@ func (s *Store) Get(_ context.Context, ns string, ids []string) ([]*runnel.Job, 
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	var out []draft
+	var want []uid
+	var ds []draft
 	err := s.read(ns, func(sp *space) error {
 		seen := make(map[uid]bool, len(ids))
 		for _, raw := range ids {
 			id, ok := parseID(raw)
-			h, found := sp.get(id)
-			if !ok || !found || seen[id] {
+			if !ok || seen[id] {
 				continue
 			}
 			seen[id] = true
-			out = append(out, sp.draft(&h))
+			want = append(want, id)
+			if h, found := sp.get(id); found {
+				ds = append(ds, sp.draft(&h))
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return s.rebuild(ns, out)
+	return s.gather(ns, want, ds)
 }
 
 // filter holds the symbols a query matches; ok is false when a name it asks for
@@ -142,39 +145,44 @@ func (f filter) match(h *job) bool {
 }
 
 func (s *Store) List(_ context.Context, ns string, q runnel.Query) ([]*runnel.Job, string, error) {
-	var out []draft
-	next := ""
+	st := stateCode(q.State)
+	if q.State != "" && st == 0 {
+		return nil, "", nil
+	}
+	cur, hasCur := parseID(q.Cursor)
+	if q.Cursor != "" && !hasCur {
+		return nil, "", fmt.Errorf("%w: bad cursor", runnel.ErrInvalid)
+	}
+	var ram []uid
+	var ds []draft
 	err := s.read(ns, func(sp *space) error {
 		f := sp.filter(q)
-		trees := sp.byState[1:]
-		if q.State != "" {
-			st := stateCode(q.State)
-			trees = sp.byState[st : st+1]
-			if st == 0 {
-				return nil
-			}
-		}
 		if !f.ok {
 			return nil
 		}
-		cur, hasCur := parseID(q.Cursor)
-		if q.Cursor != "" && !hasCur {
-			return fmt.Errorf("%w: bad cursor", runnel.ErrInvalid)
+		trees := sp.byState[1:]
+		if st != 0 {
+			trees = sp.byState[st : st+1]
 		}
-		ids := sp.newest(trees, f, cur, hasCur, q.Limit)
-		for _, id := range ids {
+		ram = sp.newest(trees, f, cur, hasCur, q.Limit)
+		for _, id := range ram {
 			h, _ := sp.get(id)
-			out = append(out, sp.draft(&h))
-		}
-		if q.Limit > 0 && len(ids) == q.Limit {
-			next = ids[len(ids)-1].String()
+			ds = append(ds, sp.draft(&h))
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, "", err
 	}
-	jobs, err := s.rebuild(ns, out)
+	ids, err := s.coldNewest(ns, st, q, cur, hasCur, ram)
+	if err != nil {
+		return nil, "", err
+	}
+	jobs, err := s.gather(ns, ids, ds)
+	next := ""
+	if q.Limit > 0 && len(ids) == q.Limit {
+		next = ids[len(ids)-1].String()
+	}
 	return jobs, next, err
 }
 
@@ -242,7 +250,9 @@ func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.
 
 func (s *Store) Events(_ context.Context, ns string, after int64, limit int) ([]runnel.Event, error) {
 	var out []runnel.Event
+	var head int64
 	err := s.read(ns, func(sp *space) error {
+		head = sp.eventHead()
 		i, _ := slices.BinarySearchFunc(sp.events, after+1, cmpEvent)
 		end := min(len(sp.events), i+max(limit, 0))
 		out = make([]runnel.Event, 0, end-i)
@@ -251,15 +261,31 @@ func (s *Store) Events(_ context.Context, ns string, after int64, limit int) ([]
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return s.olderEvents(ns, after, head, limit, out)
 }
 
 func (s *Store) Stats(_ context.Context, ns string) ([]runnel.QueueStats, error) {
 	var out []runnel.QueueStats
 	err := s.read(ns, func(sp *space) error {
 		byName := map[string]*[stCount]int64{}
+		add := func(name string, c *[stCount]int64) {
+			sum := byName[name]
+			if sum == nil {
+				sum = &[stCount]int64{}
+				byName[name] = sum
+			}
+			for st, n := range c {
+				sum[st] += n
+			}
+		}
 		for q, c := range sp.counts {
-			byName[sp.syms.name(q)] = c
+			add(sp.syms.name(q), c)
+		}
+		for q, c := range sp.coldCounts {
+			add(q, c)
 		}
 		for _, name := range slices.Sorted(maps.Keys(byName)) {
 			counts := map[runnel.State]int64{}

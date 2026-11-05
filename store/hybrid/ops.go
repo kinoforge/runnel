@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
 // Every change to a namespace is one of these ops. A store call applies its ops
@@ -37,6 +38,8 @@ type tx struct {
 	wake   bool
 	ends   []uid
 	bodies []placed
+	// unretired are jobs brought back from the cold store.
+	unretired []uid
 }
 
 type placed struct {
@@ -210,6 +213,7 @@ func (e *enc) opSeq(seq int64) {
 // sits on disk, so bodies are found there later instead of kept in memory.
 type replayer struct {
 	get  func(ns string) *space
+	cold *cold.Store
 	file uint32
 	base int64
 }
@@ -235,7 +239,7 @@ func (r *replayer) op(d *dec, sp *space) error {
 	switch op := d.byte(); op {
 	case opPutJob, opPutHot:
 		h := decodeHot(d, &sp.syms)
-		old, _ := sp.get(h.id)
+		old, had := sp.get(h.id)
 		h.body = old.body
 		if op == opPutJob {
 			b := d.bytes()
@@ -243,9 +247,16 @@ func (r *replayer) op(d *dec, sp *space) error {
 		}
 		if d.err == nil {
 			sp.setJob(h)
+			if !had && !h.final() {
+				return r.uncold(sp, h.id)
+			}
 		}
 	case opDelJob:
-		sp.delJob(readID(d))
+		id := readID(d)
+		sp.delJob(id)
+		if err := r.uncold(sp, id); err != nil {
+			return err
+		}
 	case opPutUnique:
 		key := d.str()
 		sp.setUnique(key, unique{id: readID(d), until: d.int()})
@@ -263,11 +274,18 @@ func (r *replayer) op(d *dec, sp *space) error {
 		e.queue = sp.syms.id(d.str())
 		e.kind = sp.syms.id(d.str())
 		e.state, e.at = d.byte(), d.int()
-		if n := len(sp.events); n == 0 || e.seq > sp.events[n-1].seq {
+		if n := len(sp.events); e.seq > sp.coldSeq && (n == 0 || e.seq > sp.events[n-1].seq) {
 			sp.addEvent(e)
 		}
+		sp.seq = max(sp.seq, e.seq)
 	case opDropEvents:
-		sp.dropEvents(d.int())
+		seq := d.int()
+		sp.dropEvents(seq)
+		if r.cold != nil {
+			if err := r.cold.DropEvents(sp.ns, seq); err != nil {
+				return err
+			}
+		}
 	case opPutCursor:
 		name := d.str()
 		sp.cursors[name] = d.int()
@@ -288,4 +306,18 @@ func (r *replayer) op(d *dec, sp *space) error {
 		}
 	}
 	return d.err
+}
+
+// uncold deletes id from the cold store: a job back in memory unfinished, or
+// one pruned, has no copy there.
+func (r *replayer) uncold(sp *space, id uid) error {
+	if r.cold == nil || !sp.hasCold() {
+		return nil
+	}
+	delta, err := r.cold.Delete(sp.ns, []cold.ID{cold.ID(id)})
+	if err != nil {
+		return err
+	}
+	sp.addCold(delta)
+	return nil
 }

@@ -25,7 +25,7 @@ func (s *Store) recover() error {
 	if err != nil {
 		return err
 	}
-	r := &replayer{get: s.space}
+	r := &replayer{get: s.space, cold: s.cold}
 	from := uint64(0)
 	if len(snaps) > 0 {
 		from = snaps[len(snaps)-1]

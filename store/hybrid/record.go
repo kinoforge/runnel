@@ -184,8 +184,11 @@ type draft struct {
 	body  []byte
 }
 
-func (t *syms) draft(h *job) draft {
-	return draft{h: *h, names: [5]string{t.name(h.queue), t.name(h.kind), t.name(h.tenant), t.name(h.resource), t.name(h.worker)}}
+func (t *syms) draft(h *job) draft { return draft{h: *h, names: t.names5(h)} }
+
+// names5 returns the queue, kind, tenant, resource and worker of h.
+func (t *syms) names5(h *job) [5]string {
+	return [5]string{t.name(h.queue), t.name(h.kind), t.name(h.tenant), t.name(h.resource), t.name(h.worker)}
 }
 
 func (d *draft) job(ns string) (*runnel.Job, error) {

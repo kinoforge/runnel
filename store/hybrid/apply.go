@@ -46,15 +46,27 @@ func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, 
 		return false, nil
 	}
 	old, ok := sp.get(id)
+	var oldBody []byte
+	retired := false
+	if !ok {
+		var err error
+		if old, oldBody, ok, err = s.loadCold(sp.ns, id, &sp.syms); err != nil {
+			return false, err
+		}
+		retired = ok
+	}
 	if !ok || old.version != c.Job.Version || (c.From != "" && old.state != stateCode(c.From)) {
 		return false, nil
 	}
 	if !c.LeaseBefore.IsZero() && old.lease >= ms(c.LeaseBefore) {
 		return false, nil
 	}
-	key, deps, err := s.keys(sp, &old)
+	key, deps, err := s.keys(sp, &old, oldBody)
 	if err != nil {
 		return false, err
+	}
+	if retired {
+		t.unretired = append(t.unretired, id)
 	}
 	if key != c.Job.UniqueKey || !slices.Equal(deps, c.Job.DependsOn) {
 		j := *c.Job
@@ -70,17 +82,19 @@ func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, 
 	return true, nil
 }
 
-// keys returns the unique key and dependencies of a job, reading its body only
-// when it has them.
-func (s *Store) keys(sp *space, h *job) (string, []string, error) {
+// keys returns the unique key and dependencies of a job, reading its body,
+// unless given, only when it has them.
+func (s *Store) keys(sp *space, h *job, body []byte) (string, []string, error) {
 	if h.flags == 0 {
 		return "", nil, nil
 	}
-	b, err := sp.body(h, s.files)
-	if err != nil {
-		return "", nil, err
+	if body == nil {
+		var err error
+		if body, err = sp.body(h, s.files); err != nil {
+			return "", nil, err
+		}
 	}
-	return keyOf(b)
+	return keyOf(body)
 }
 
 // finalize records the event of a job reaching a final state, frees its unique
@@ -111,7 +125,7 @@ func (s *Store) finalize(t *tx, h job, key string, now int64) error {
 		case !h.is(stCompleted):
 			k.state, k.finished, k.startBy = stCancelled, now, 0
 			t.putHot(k)
-			kkey, _, err := s.keys(sp, &k)
+			kkey, _, err := s.keys(sp, &k, nil)
 			if err != nil {
 				return err
 			}
