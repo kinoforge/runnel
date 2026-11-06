@@ -172,7 +172,7 @@ func redact(u string) string {
 
 func cleanup(ctx context.Context, s runnel.Store, ns string) {
 	far := time.Now().Add(cleanupHorizon)
-	final := []runnel.State{runnel.StateCompleted, runnel.StateDead, runnel.StateCancelled}
+	final := []runnel.State{runnel.StateCompleted, runnel.StateDead, runnel.StateCancelled, runnel.StateExpired}
 	for {
 		n, err := s.Prune(ctx, ns, runnel.PruneRequest{States: final, Before: far, Limit: cleanupBatch})
 		if err != nil || n == 0 {

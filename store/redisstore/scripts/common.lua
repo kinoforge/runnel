@@ -22,7 +22,7 @@ local function save(j)
   for _, f in ipairs(F) do a[#a + 1] = f; a[#a + 1] = j[f] end
   redis.call("HSET", k("j:" .. j.id), unpack(a))
 end
-local function final(st) return st == "completed" or st == "dead" or st == "cancelled" end
+local function final(st) return st == "completed" or st == "dead" or st == "cancelled" or st == "expired" end
 local function ready_score(j) return (1000 - num(j, "priority")) * 1099511627776 + math.floor(num(j, "run_at") / 1000) end
 local function active(j, d)
   redis.call("HINCRBY", k("act"), "q|" .. j.queue, d)

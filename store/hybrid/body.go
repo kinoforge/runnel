@@ -31,13 +31,6 @@ func encodeBody(j *runnel.Job) []byte {
 	}
 	e.float(j.Backoff.Factor)
 	e.float(j.Backoff.Jitter)
-	e.int(int64(j.Fallback))
-	e.int(int64(len(j.Fallbacks)))
-	for _, f := range j.Fallbacks {
-		e.str(f.Queue)
-		e.str(f.Kind)
-		e.str(f.Pool)
-	}
 	e.int(int64(len(j.Meta)))
 	for k, v := range j.Meta {
 		e.str(k)
@@ -119,10 +112,6 @@ func decodeBody(b []byte, j *runnel.Job) error {
 		*p = runnel.Duration(d.int())
 	}
 	j.Backoff.Factor, j.Backoff.Jitter = d.float(), d.float()
-	j.Fallback = int(d.int())
-	for range count(d) {
-		j.Fallbacks = append(j.Fallbacks, runnel.Target{Queue: d.str(), Kind: d.str(), Pool: d.str()})
-	}
 	if n := count(d); n > 0 {
 		j.Meta = make(map[string]string, n)
 		for range n {

@@ -93,13 +93,20 @@ func testMaintainer(t *testing.T, open Opener) {
 	if j.State != runnel.StateWaiting || j.Attempt != 1 || len(j.Errors) != 1 {
 		t.Fatalf("not reaped: %+v", j)
 	}
-	moved := e.add("slow", runnel.StartTimeout(50*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "fast"}))
+	late := e.add("slow", runnel.StartTimeout(50*time.Millisecond))
+	kid := e.add("after", runnel.After(late.ID))
 	time.Sleep(80 * time.Millisecond)
 	if err := m.Tick(e.ctx, e.ns); err != nil {
 		t.Fatal(err)
 	}
-	if j := e.get(moved.ID); j.Queue != "fast" || j.State != runnel.StateWaiting || !j.StartBy.IsZero() {
-		t.Fatalf("not moved to fallback: %+v", j)
+	if j := e.get(late.ID); j.State != runnel.StateExpired || j.FinishedAt.IsZero() || len(j.Errors) != 1 || !j.StartBy.IsZero() {
+		t.Fatalf("not expired: %+v", j)
+	}
+	if j := e.get(kid.ID); j.State != runnel.StateCancelled {
+		t.Fatalf("dependent of an expired job %s", j.State)
+	}
+	if _, err := e.c.Retry(e.ctx, late.ID); err != nil {
+		t.Fatalf("retry an expired job: %v", err)
 	}
 }
 

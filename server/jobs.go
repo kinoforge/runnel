@@ -34,7 +34,6 @@ type JobRequest struct {
 	StartTimeout runnel.Duration   `json:"start_timeout,omitempty"`
 	Timeout      runnel.Duration   `json:"timeout,omitempty"`
 	Backoff      runnel.Backoff    `json:"backoff,omitzero"`
-	Fallbacks    []runnel.Target   `json:"fallbacks,omitempty"`
 	DependsOn    []string          `json:"depends_on,omitempty"`
 	CallbackURL  string            `json:"callback_url,omitempty"`
 	Meta         map[string]string `json:"meta,omitempty"`
@@ -54,7 +53,7 @@ func (s *Server) toJob(req JobRequest) (*runnel.Job, error) {
 	}
 	j := &runnel.Job{Queue: req.Queue, Kind: req.Kind, Payload: req.Payload, Priority: req.Priority, Group: req.Group,
 		Pool: req.Pool, RunAt: req.RunAt, MaxAttempts: req.MaxAttempts, UniqueKey: req.UniqueKey, UniqueFor: req.UniqueFor,
-		StartTimeout: req.StartTimeout, Timeout: req.Timeout, Backoff: req.Backoff, Fallbacks: req.Fallbacks,
+		StartTimeout: req.StartTimeout, Timeout: req.Timeout, Backoff: req.Backoff,
 		DependsOn: req.DependsOn, CallbackURL: req.CallbackURL, Meta: req.Meta}
 	if req.Delay > 0 {
 		runnel.In(req.Delay.D())(j)

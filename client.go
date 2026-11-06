@@ -234,10 +234,10 @@ func (c *Client) Cancel(ctx context.Context, id string) (*Job, error) {
 	})
 }
 
-// Retry runs a dead or cancelled job again from its first attempt.
+// Retry runs a dead, cancelled or expired job again from its first attempt.
 func (c *Client) Retry(ctx context.Context, id string) (*Job, error) {
 	return c.mutate(ctx, id, func(j *Job, now time.Time) (*Job, error) {
-		if j.State != StateDead && j.State != StateCancelled {
+		if j.State != StateDead && j.State != StateCancelled && j.State != StateExpired {
 			return nil, ErrNotFinal
 		}
 		if j.Pending > 0 {

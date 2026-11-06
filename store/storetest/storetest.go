@@ -107,7 +107,7 @@ func Run(t *testing.T, open Opener) {
 		"StatsAndList":               testStatsList,
 		"ConcurrentClaimsExclusive":  testConcurrentClaims,
 		"WorkerEndToEnd":             testWorkerEndToEnd,
-		"WorkerRetryFallbackDead":    testWorkerFallback,
+		"WorkerRetryDead":            testWorkerRetryDead,
 		"WorkerBusyKeepsWait":        testWorkerBusy,
 		"WorkerAsyncPoll":            testWorkerAsync,
 		"WorkerFlowResults":          testWorkerFlow,

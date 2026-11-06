@@ -139,8 +139,8 @@ func testCascadeFail(t *testing.T, open Opener) {
 func testDueStart(t *testing.T, open Opener) {
 	spec.Rule(t, "T01", "L02")
 	e := setup(t, open)
-	a := e.add("q", runnel.StartTimeout(100*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "q2"}))
-	e.add("q", runnel.StartTimeout(100*time.Millisecond))
+	a := e.add("q", runnel.StartTimeout(100*time.Millisecond))
+	e.add("q")
 	time.Sleep(150 * time.Millisecond)
 	due, err := e.s.Due(e.ctx, e.ns, runnel.DueStart, e.now(), 10)
 	if err != nil {

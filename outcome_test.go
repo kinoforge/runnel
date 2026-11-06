@@ -37,23 +37,11 @@ func TestDecide(t *testing.T) {
 			t.Fatalf("exhausted retry: %s", d.State)
 		}
 	})
-	t.Run("fallback walks targets in order", func(t *testing.T) {
-		spec.Rule(t, "O04", "O05")
-		j := running(1, 1)
-		j.Fallbacks = []Target{{Queue: "b", Pool: "p2"}, {Kind: "k3"}}
-		j.StartTimeout = Duration(time.Minute)
-		a := Decide(j, Outcome{Kind: OutcomeFail, Error: "x"}, now)
-		if a.Queue != "b" || a.Pool != "p2" || a.Fallback != 1 || a.Attempt != 0 || a.State != StateWaiting || a.StartBy != now.Add(time.Minute) {
-			t.Fatalf("first fallback %+v", a)
-		}
-		a.State, a.Attempt = StateRunning, 1
-		b := Decide(a, Outcome{Kind: OutcomeFallback}, now)
-		if b.Queue != "b" || b.Kind != "k3" || b.Fallback != 2 || !b.StartBy.IsZero() {
-			t.Fatalf("second fallback %+v", b)
-		}
-		b.State, b.Attempt = StateRunning, 1
-		if c := Decide(b, Outcome{Kind: OutcomeFail}, now); c.State != StateDead || len(c.Errors) != 3 {
-			t.Fatalf("after last fallback %+v", c)
+	t.Run("fail ends the job with attempts left", func(t *testing.T) {
+		spec.Rule(t, "O04")
+		j := running(1, 5)
+		if a := Decide(j, Outcome{Kind: OutcomeFail, Error: "x"}, now); a.State != StateDead || a.FinishedAt != now || len(a.Errors) != 1 {
+			t.Fatalf("fail %+v", a)
 		}
 	})
 	t.Run("busy gives the attempt back and keeps waiting_since", func(t *testing.T) {
@@ -90,12 +78,11 @@ func TestDecide(t *testing.T) {
 func TestOutcomeOf(t *testing.T) {
 	spec.Rule(t, "O08", "O09")
 	cases := map[OutcomeKind]error{
-		OutcomeDone:     nil,
-		OutcomeRetry:    errors.New("x"),
-		OutcomeFail:     Fail(errors.New("x")),
-		OutcomeFallback: Fallback(errors.New("x")),
-		OutcomeBusy:     Busy(time.Second),
-		OutcomePending:  Pending("h", time.Second),
+		OutcomeDone:    nil,
+		OutcomeRetry:   errors.New("x"),
+		OutcomeFail:    Fail(errors.New("x")),
+		OutcomeBusy:    Busy(time.Second),
+		OutcomePending: Pending("h", time.Second),
 	}
 	for want, err := range cases {
 		if got := OutcomeOf(err, nil).Kind; got != want {
@@ -138,7 +125,6 @@ func TestValidation(t *testing.T) {
 		"dep":      func(j *Job) { j.DependsOn = []string{"nope"} },
 		"callback": func(j *Job) { j.CallbackURL = "ftp://x" },
 		"webauth":  func(j *Job) { j.CallbackURL = "https://user:pw@x.com" },
-		"target":   func(j *Job) { j.Fallbacks = []Target{{}} },
 		"attempts": func(j *Job) { j.MaxAttempts = 0 },
 		"big":      func(j *Job) { j.Payload = json.RawMessage(`"` + strings.Repeat("x", 1<<20) + `"`) },
 		"negative": func(j *Job) { j.Timeout = -1 },

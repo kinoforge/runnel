@@ -8,10 +8,11 @@
 //
 // A queue's settings limit how many of its jobs run at once (MaxRunning), how
 // many per group (GroupMaxRunning) and how fast they start (Rate). A Pool is
-// a limit several queues share, such as one partner account. When a handler
-// cannot finish a job, its error says what happens next: retry later, Fail,
-// Fallback to the next target, Busy (the pool is full: try later without
-// using an attempt) or Pending (an outside task is running: poll it later).
+// a number of slots every job naming it shares, such as one partner account.
+// When a handler cannot finish a job, its error says what happens next: retry
+// later, Fail, Busy (the pool is full: try later without using an attempt) or
+// Pending (an outside task is running: poll it later). A job that waits past
+// its start timeout ends expired.
 //
 // A caller chooses how to wait for the result: come back later (Get), wait
 // (Client.Wait, EnqueueAndWait), or be called (a callback).

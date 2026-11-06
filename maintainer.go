@@ -50,7 +50,7 @@ type MaintainerConfig struct {
 }
 
 // Maintainer does the housekeeping of a store: it returns jobs whose worker
-// died, moves jobs past their start deadline to their fallback, fires schedules,
+// died, expires jobs past their start timeout, fires schedules,
 // turns events into callback jobs and prunes old jobs and events. Run as many as
 // you like; their work does not overlap.
 type Maintainer struct {
@@ -223,13 +223,13 @@ func (m *Maintainer) startWaits(ctx context.Context, ns string, now time.Time) e
 	}
 	changes := make([]Change, 0, len(jobs))
 	for _, j := range jobs {
-		if j.State != StateWaiting || j.Fallback >= len(j.Fallbacks) {
+		if j.State != StateWaiting {
 			continue
 		}
 		n := j.Clone()
 		n.addError("not started within "+j.StartTimeout.String(), now)
 		n.UpdatedAt = now
-		moveOn(n, now)
+		end(n, StateExpired, now)
 		changes = append(changes, Change{Job: n, From: StateWaiting})
 	}
 	if len(changes) == 0 {

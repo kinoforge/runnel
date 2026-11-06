@@ -22,10 +22,8 @@ const (
 	// OutcomeRetry tries again after the backoff, or after Delay, until attempts
 	// run out.
 	OutcomeRetry OutcomeKind = "retry"
-	// OutcomeFail stops retrying; the job moves to its next fallback or dies.
+	// OutcomeFail stops retrying; the job dies.
 	OutcomeFail OutcomeKind = "fail"
-	// OutcomeFallback moves the job to its next fallback now.
-	OutcomeFallback OutcomeKind = "fallback"
 	// OutcomeBusy puts the job back for Delay without using an attempt, for a
 	// pool that is full.
 	OutcomeBusy OutcomeKind = "busy"
@@ -36,7 +34,7 @@ const (
 	OutcomeRelease OutcomeKind = "release"
 )
 
-var OutcomeKinds = []OutcomeKind{OutcomeDone, OutcomeRetry, OutcomeFail, OutcomeFallback, OutcomeBusy, OutcomePending, OutcomeRelease}
+var OutcomeKinds = []OutcomeKind{OutcomeDone, OutcomeRetry, OutcomeFail, OutcomeBusy, OutcomePending, OutcomeRelease}
 
 // Outcome is the result of an attempt, as a worker reports it.
 type Outcome struct {
@@ -85,9 +83,6 @@ func Pending(handle string, delay time.Duration) error {
 // Fail returns an error that stops retrying the job.
 func Fail(err error) error { return &controlError{kind: OutcomeFail, err: err} }
 
-// Fallback returns an error that moves the job to its next fallback now.
-func Fallback(err error) error { return &controlError{kind: OutcomeFallback, err: err} }
-
 // RetryIn returns an error that retries after exactly delay.
 func RetryIn(delay time.Duration, err error) error {
 	return &controlError{kind: OutcomeRetry, delay: delay, err: err}
@@ -112,7 +107,7 @@ func OutcomeOf(err error, result json.RawMessage) Outcome {
 
 func (o Outcome) Validate() error {
 	switch o.Kind {
-	case OutcomeDone, OutcomeRetry, OutcomeFail, OutcomeFallback, OutcomeBusy, OutcomeRelease:
+	case OutcomeDone, OutcomeRetry, OutcomeFail, OutcomeBusy, OutcomeRelease:
 	case OutcomePending:
 		if len(o.Handle) > maxHandleLen {
 			return invalid("handle too long")
@@ -148,7 +143,7 @@ func Decide(j *Job, o Outcome, now time.Time) *Job {
 		}
 		if n.Handle == "" {
 			n.addError("pending without a handle", now)
-			moveOn(n, now)
+			end(n, StateDead, now)
 			return n
 		}
 		n.State, n.RunAt, n.StartBy = StatePolling, now.Add(delay), time.Time{}
@@ -172,33 +167,18 @@ func Decide(j *Job, o Outcome, now time.Time) *Job {
 			n.State, n.RunAt, n.StartBy = StateWaiting, now.Add(delay), time.Time{}
 			return n
 		}
-		moveOn(n, now)
-	case OutcomeFail, OutcomeFallback:
+		end(n, StateDead, now)
+	case OutcomeFail:
 		n.addError(orDefault(o.Error, string(o.Kind)), now)
-		moveOn(n, now)
+		end(n, StateDead, now)
 	}
 	return n
 }
 
-func moveOn(n *Job, now time.Time) {
+// end finishes n in the final state st.
+func end(n *Job, st State, now time.Time) {
 	n.Handle = ""
-	if n.Fallback < len(n.Fallbacks) {
-		t := n.Fallbacks[n.Fallback]
-		n.Fallback++
-		if t.Queue != "" {
-			n.Queue = t.Queue
-		}
-		if t.Kind != "" {
-			n.Kind = t.Kind
-		}
-		if t.Pool != "" {
-			n.Pool = t.Pool
-		}
-		n.Attempt, n.State, n.RunAt, n.WaitingSince = 0, StateWaiting, now, now
-		n.computeStartBy()
-		return
-	}
-	n.State, n.FinishedAt, n.StartBy = StateDead, now, time.Time{}
+	n.State, n.FinishedAt, n.StartBy = st, now, time.Time{}
 }
 
 func orDefault(s, d string) string {

@@ -350,7 +350,7 @@ paths:
       - $ref: "#/components/parameters/JobID"
     post:
       tags: [jobs]
-      summary: Run a dead or cancelled job again from attempt one
+      summary: Run a dead, cancelled or expired job again from attempt one
       responses:
         "200":
           description: The job, waiting again.
@@ -719,7 +719,7 @@ components:
       enum: [admin, producer, worker, reader]
     State:
       type: string
-      enum: [blocked, waiting, running, polling, completed, dead, cancelled]
+      enum: [blocked, waiting, running, polling, completed, dead, cancelled, expired]
     Problem:
       type: object
       properties:
@@ -727,13 +727,6 @@ components:
         title: {type: string, examples: ["queue full"]}
         status: {type: integer}
         detail: {type: string}
-    Target:
-      type: object
-      description: Where a job goes next when it falls back. Empty fields keep the current value.
-      properties:
-        queue: {$ref: "#/components/schemas/Name"}
-        kind: {$ref: "#/components/schemas/Name"}
-        pool: {$ref: "#/components/schemas/Name"}
     Backoff:
       type: object
       properties:
@@ -760,10 +753,6 @@ components:
         start_timeout: {$ref: "#/components/schemas/Duration"}
         timeout: {$ref: "#/components/schemas/Duration"}
         backoff: {$ref: "#/components/schemas/Backoff"}
-        fallbacks:
-          type: array
-          maxItems: 16
-          items: {$ref: "#/components/schemas/Target"}
         depends_on:
           type: array
           maxItems: 256
@@ -811,10 +800,6 @@ components:
         lease_until: {type: string, format: date-time}
         version: {type: integer, format: int64}
         handle: {type: string, description: "Set while the job polls an outside task."}
-        fallbacks:
-          type: array
-          items: {$ref: "#/components/schemas/Target"}
-        fallback: {type: integer, description: "How many fallbacks were used."}
         unique_key: {type: string}
         unique_for: {$ref: "#/components/schemas/Duration"}
         depends_on:
@@ -839,10 +824,10 @@ components:
       properties:
         kind:
           type: string
-          enum: [done, retry, fail, fallback, busy, pending, release]
+          enum: [done, retry, fail, busy, pending, release]
           description: |
             done: finished. retry: try again after backoff (or `delay`).
-            fail: no more attempts. fallback: move to the next target now.
+            fail: no more attempts, the job is dead.
             busy: the pool is full, try later without using an attempt.
             pending: an outside task runs; poll it with `handle` after `delay`.
             release: give the job back untouched, for shutdowns.
@@ -896,9 +881,6 @@ components:
         pool: {type: string}
         max_attempts: {type: integer}
         timeout: {$ref: "#/components/schemas/Duration"}
-        fallbacks:
-          type: array
-          items: {$ref: "#/components/schemas/Target"}
         callback_url: {type: string}
         meta:
           type: object

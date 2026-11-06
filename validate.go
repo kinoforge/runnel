@@ -46,7 +46,7 @@ func checkName(field, v string, optional bool) error {
 }
 
 func (j *Job) validate(l Limits) error {
-	for _, check := range []func(Limits) error{j.validateNames, j.validateSettings, j.validateFallbacks, j.validateExtras} {
+	for _, check := range []func(Limits) error{j.validateNames, j.validateSettings, j.validateExtras} {
 		if err := check(l); err != nil {
 			return err
 		}
@@ -85,27 +85,6 @@ func (j *Job) validateSettings(l Limits) error {
 	}
 	if j.Timeout < 0 || j.StartTimeout < 0 || j.UniqueFor < 0 {
 		return invalid("durations must not be negative")
-	}
-	return nil
-}
-
-func (j *Job) validateFallbacks(l Limits) error {
-	if len(j.Fallbacks) > l.MaxFallbacks {
-		return invalid("at most %d fallbacks", l.MaxFallbacks)
-	}
-	for _, t := range j.Fallbacks {
-		if t == (Target{}) {
-			return invalid("fallback target is empty")
-		}
-		if err := checkName("fallback queue", t.Queue, true); err != nil {
-			return err
-		}
-		if err := checkName("fallback kind", t.Kind, true); err != nil {
-			return err
-		}
-		if err := checkName("fallback pool", t.Pool, true); err != nil {
-			return err
-		}
 	}
 	return nil
 }

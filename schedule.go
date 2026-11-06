@@ -30,7 +30,6 @@ type Schedule struct {
 	Pool        string            `json:"pool,omitempty"`
 	MaxAttempts int               `json:"max_attempts,omitempty"`
 	Timeout     Duration          `json:"timeout,omitempty"`
-	Fallbacks   []Target          `json:"fallbacks,omitempty"`
 	CallbackURL string            `json:"callback_url,omitempty"`
 	Meta        map[string]string `json:"meta,omitempty"`
 }
@@ -44,7 +43,7 @@ func (s Schedule) Validate() error {
 		return invalid("schedule spec: %v", err)
 	}
 	probe := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Group: s.Group,
-		Pool: s.Pool, MaxAttempts: max(s.MaxAttempts, 1), Timeout: s.Timeout, Fallbacks: s.Fallbacks, CallbackURL: s.CallbackURL, Meta: s.Meta}
+		Pool: s.Pool, MaxAttempts: max(s.MaxAttempts, 1), Timeout: s.Timeout, CallbackURL: s.CallbackURL, Meta: s.Meta}
 	return probe.validate(DefaultLimits)
 }
 
@@ -117,7 +116,7 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 			continue
 		}
 		j := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Group: s.Group, Pool: s.Pool,
-			MaxAttempts: s.MaxAttempts, Timeout: s.Timeout, Fallbacks: s.Fallbacks, CallbackURL: s.CallbackURL,
+			MaxAttempts: s.MaxAttempts, Timeout: s.Timeout, CallbackURL: s.CallbackURL,
 			UniqueKey: "cron:" + name + ":" + strconv.FormatInt(fire.Unix(), 10), UniqueFor: Duration(cronUniqueFor)}
 		j.Meta = map[string]string{"schedule": name, "fire_at": fire.UTC().Format(time.RFC3339)}
 		maps.Copy(j.Meta, s.Meta)

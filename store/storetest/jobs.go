@@ -15,13 +15,13 @@ func testRoundTrip(t *testing.T, open Opener) {
 	spec.Rule(t, "J01", "J03")
 	e := setup(t, open)
 	res := e.add("q", runnel.Priority(3), runnel.Group("acme"), runnel.Pool("p1"), runnel.MaxAttempts(7),
-		runnel.Meta(map[string]string{"a": "b"}), runnel.Fallbacks(runnel.Target{Queue: "q2"}), runnel.StartTimeout(time.Minute),
+		runnel.Meta(map[string]string{"a": "b"}), runnel.StartTimeout(time.Minute),
 		runnel.Callback("https://example.com/h"), runnel.Timeout(time.Second))
 	j := e.get(res.ID)
 	if j.State != runnel.StateWaiting || j.Priority != 3 || j.Group != "acme" || j.Pool != "p1" || j.MaxAttempts != 7 {
 		t.Fatalf("bad job %+v", j)
 	}
-	if j.Meta["a"] != "b" || len(j.Fallbacks) != 1 || j.CallbackURL == "" || j.Timeout.D() != time.Second {
+	if j.Meta["a"] != "b" || j.CallbackURL == "" || j.Timeout.D() != time.Second {
 		t.Fatalf("data lost %+v", j)
 	}
 	if j.StartBy.IsZero() || j.StartBy.Sub(j.WaitingSince) != time.Minute {

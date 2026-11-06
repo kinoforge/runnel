@@ -30,9 +30,10 @@ A job's life:
 blocked    --dependencies complete-->     waiting
 waiting    --claimed-->                   running
 running    --nil-->                       completed
-running    --error, Busy, Fallback-->     waiting, later or on the next target
+running    --error, Busy-->               waiting, later
 running    --Pending-->                   polling --poll due--> running
-running    --no attempts or targets-->    dead
+running    --Fail, no attempts left-->    dead
+waiting    --start timeout passed-->      expired
 not final  --Cancel-->                    cancelled
 ```
 
@@ -72,7 +73,7 @@ Details:
 - **Pools** are limits shared across queues, such as one partner account several queues call.
 - **Rate limits are token buckets kept in the store,** so every worker on every host shares them.
 - **`Busy` is not a failure.** "The provider is at capacity" should not use up the attempts a job has for real errors. `Busy` puts the job back without using an attempt and without resetting how long it has waited.
-- **Fallbacks and start timeouts.** A job lists targets (queue, kind, pool) to move to when it fails, runs out of attempts, or waits longer than `start_timeout` to start. Each target gets a fresh set of attempts.
+- **No fallbacks, an `expired` end instead.** What to try after a failure (another provider, model or account) is the caller's logic, so a worker enqueues the next job itself, linking it through `meta`. The one case a worker cannot see is a job that never started, as no worker holds it: past its `start_timeout` it ends `expired`, with an event and its callback, and the caller decides what next. An earlier version moved jobs through a list of fallback targets inside Runnel; it tied business routing to the queue.
 
 ## Fair claiming
 

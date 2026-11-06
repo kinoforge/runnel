@@ -265,7 +265,7 @@ func (s *Store) depState(ctx context.Context, tx *txn, ns string, deps []string)
 	for _, d := range deps {
 		st, ok := states[d]
 		switch {
-		case !ok || st == runnel.StateDead || st == runnel.StateCancelled:
+		case !ok || st == runnel.StateDead || st == runnel.StateCancelled || st == runnel.StateExpired:
 			return 0, nil, runnel.ErrDependency
 		case st != runnel.StateCompleted:
 			waitOn = append(waitOn, d)
@@ -315,7 +315,7 @@ func (s *Store) insertRow(ctx context.Context, tx *txn, j *runnel.Job) error {
 	}
 	_, err = tx.ExecContext(ctx, s.q("INSERT INTO rn_jobs ("+jobCols+") VALUES ("+placeholders(jobColCount)+")"),
 		j.ID, j.Namespace, j.Queue, j.Kind, string(j.State), j.Priority, j.Group, j.Pool, j.Attempt, j.MaxAttempts,
-		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartWindow().Milliseconds(),
+		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartTimeout.D().Milliseconds(),
 		j.Worker, runnel.Millis(j.LeaseUntil), j.Version, j.Pending, j.UniqueKey,
 		runnel.Millis(j.CreatedAt), runnel.Millis(j.UpdatedAt), runnel.Millis(j.StartedAt), runnel.Millis(j.FinishedAt), data)
 	return err

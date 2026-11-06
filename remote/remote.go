@@ -141,7 +141,6 @@ type jobRequest struct {
 	StartTimeout runnel.Duration   `json:"start_timeout,omitempty"`
 	Timeout      runnel.Duration   `json:"timeout,omitempty"`
 	Backoff      runnel.Backoff    `json:"backoff,omitzero"`
-	Fallbacks    []runnel.Target   `json:"fallbacks,omitempty"`
 	DependsOn    []string          `json:"depends_on,omitempty"`
 	CallbackURL  string            `json:"callback_url,omitempty"`
 	Meta         map[string]string `json:"meta,omitempty"`
@@ -150,7 +149,7 @@ type jobRequest struct {
 func request(j *runnel.Job) jobRequest {
 	return jobRequest{Queue: j.Queue, Kind: j.Kind, Payload: j.Payload, Priority: j.Priority, Group: j.Group, Pool: j.Pool,
 		RunAt: j.RunAt, MaxAttempts: j.MaxAttempts, UniqueKey: j.UniqueKey, UniqueFor: j.UniqueFor, StartTimeout: j.StartTimeout,
-		Timeout: j.Timeout, Backoff: j.Backoff, Fallbacks: j.Fallbacks, DependsOn: j.DependsOn, CallbackURL: j.CallbackURL, Meta: j.Meta}
+		Timeout: j.Timeout, Backoff: j.Backoff, DependsOn: j.DependsOn, CallbackURL: j.CallbackURL, Meta: j.Meta}
 }
 
 func (c *Client) Enqueue(ctx context.Context, queue, kind string, payload any, opts ...runnel.Option) (runnel.Inserted, error) {

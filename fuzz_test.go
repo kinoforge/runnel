@@ -68,21 +68,16 @@ func FuzzCallbackURL(f *testing.F) {
 
 func FuzzDecide(f *testing.F) {
 	spec.Rule(f, "O10", "O11")
-	f.Add("done", "", int64(0), "", 1, 5, 0, 2)
-	f.Add("retry", "boom", int64(time.Second), "", 5, 5, 0, 0)
-	f.Add("fallback", "", int64(0), "", 1, 3, 1, 1)
-	f.Add("busy", "", int64(-5), "", 2, 2, 0, 0)
-	f.Add("pending", "", int64(time.Minute), "h-1", 1, 1, 0, 0)
-	f.Fuzz(func(t *testing.T, kind, msg string, delay int64, handle string, attempt, maxAttempts, used, fallbacks int) {
+	f.Add("done", "", int64(0), "", 1, 5)
+	f.Add("retry", "boom", int64(time.Second), "", 5, 5)
+	f.Add("fail", "", int64(0), "", 1, 3)
+	f.Add("busy", "", int64(-5), "", 2, 2)
+	f.Add("pending", "", int64(time.Minute), "h-1", 1, 1)
+	f.Fuzz(func(t *testing.T, kind, msg string, delay int64, handle string, attempt, maxAttempts int) {
 		now := time.Now().UTC().Truncate(time.Millisecond)
 		attempt, maxAttempts = 1+abs(attempt)%1000, 1+abs(maxAttempts)%1000
-		fallbacks = abs(fallbacks) % 17
-		used = abs(used) % (fallbacks + 1)
 		j := &Job{ID: NewID(), Queue: "q", Kind: "k", State: StateRunning, Attempt: attempt, MaxAttempts: maxAttempts,
-			Worker: "w", LeaseUntil: now.Add(time.Minute), WaitingSince: now, Version: 1, Fallback: used}
-		for range fallbacks {
-			j.Fallbacks = append(j.Fallbacks, Target{Queue: "other"})
-		}
+			Worker: "w", LeaseUntil: now.Add(time.Minute), WaitingSince: now, Version: 1}
 		o := Outcome{Kind: OutcomeKind(kind), Error: msg, Delay: Duration(delay), Handle: handle}
 		if o.Validate() != nil {
 			return
@@ -96,9 +91,6 @@ func FuzzDecide(f *testing.F) {
 		}
 		if n.State.Final() && n.FinishedAt.IsZero() {
 			t.Fatalf("final without finished_at")
-		}
-		if n.Fallback > len(n.Fallbacks) {
-			t.Fatalf("fallback index %d past %d targets", n.Fallback, len(n.Fallbacks))
 		}
 		if len(n.Errors) > maxErrors {
 			t.Fatalf("%d errors kept", len(n.Errors))

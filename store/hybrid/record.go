@@ -97,11 +97,12 @@ const (
 	stCompleted
 	stDead
 	stCancelled
+	stExpired
 	stCount
 )
 
 var stateNames = [stCount]runnel.State{"", runnel.StateBlocked, runnel.StateWaiting, runnel.StateRunning,
-	runnel.StatePolling, runnel.StateCompleted, runnel.StateDead, runnel.StateCancelled}
+	runnel.StatePolling, runnel.StateCompleted, runnel.StateDead, runnel.StateCancelled, runnel.StateExpired}
 
 func stateCode(s runnel.State) uint8 {
 	for i, n := range stateNames {
@@ -158,7 +159,7 @@ func (t *syms) hot(j *runnel.Job, like *job) job {
 		prio: int32(j.Priority), attempt: int32(j.Attempt), maxAttempts: int32(j.MaxAttempts), pending: int32(j.Pending),
 		runAt: ms(j.RunAt), waitingSince: ms(j.WaitingSince), startBy: ms(j.StartBy), lease: ms(j.LeaseUntil),
 		created: ms(j.CreatedAt), updated: ms(j.UpdatedAt), started: ms(j.StartedAt), finished: ms(j.FinishedAt),
-		version: j.Version, window: j.StartWindow().Milliseconds(), state: stateCode(j.State)}
+		version: j.Version, window: j.StartTimeout.D().Milliseconds(), state: stateCode(j.State)}
 	h.id, _ = parseID(j.ID)
 	if j.UniqueKey != "" {
 		h.flags |= flagUnique

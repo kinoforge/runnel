@@ -21,14 +21,14 @@ Store rules run against every backend through `store/storetest`. The reasons beh
 - **Lease**: a claim on a job that lasts while its worker heartbeats. When it ends, the job goes back.
 - **Namespace**: one isolated set of queues, jobs, settings and keys, usually one per service.
 - **Store**: the database or Redis that holds all of it. Producers and workers share nothing else.
-- **Maintainer**: the loop that takes back the jobs of dead workers, moves jobs to fallbacks, fires schedules, makes callback deliveries and prunes.
+- **Maintainer**: the loop that takes back the jobs of dead workers, expires jobs that waited too long to start, fires schedules, makes callback deliveries and prunes.
 
 A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an outside task it started is running), or final: `completed`, `dead` or `cancelled`. Running and polling jobs are active: they hold a slot.
 
 ## Jobs (J)
 
-- **J01** A job reads back as it was enqueued: queue, kind, payload, priority, group, pool, max attempts, timeout, start timeout, fallbacks, callback and meta. A new job is `waiting`, or `blocked` (F01). Its id is a UUID v7; reading an unknown id is `ErrNotFound`.
-- **J02** Input is checked before anything is written; bad input is `ErrInvalid`. Queue, kind and pool names are 1 to 128 letters, digits, dots, dashes or underscores, starting with a letter or digit. Priority is -1000 to 1000. The payload is JSON of at most 1 MiB. Max attempts is 1 to 1000. Durations are not negative. A fallback target is not empty. Dependencies are job ids. A unique key has no `|`. A callback is an absolute http or https URL without credentials.
+- **J01** A job reads back as it was enqueued: queue, kind, payload, priority, group, pool, max attempts, timeout, start timeout, callback and meta. A new job is `waiting`, or `blocked` (F01). Its id is a UUID v7; reading an unknown id is `ErrNotFound`.
+- **J02** Input is checked before anything is written; bad input is `ErrInvalid`. Queue, kind and pool names are 1 to 128 letters, digits, dots, dashes or underscores, starting with a letter or digit. Priority is -1000 to 1000. The payload is JSON of at most 1 MiB. Max attempts is 1 to 1000. Durations are not negative. Dependencies are job ids. A unique key has no `|`. A callback is an absolute http or https URL without credentials.
 - **J03** Options a job leaves unset come from its queue's settings: max attempts, backoff, timeout and start timeout. With neither set, a job has 5 attempts.
 - **J04** One call enqueues 1 to 1000 jobs. Each job gets its own answer: its id; or, as a duplicate, the id of the job holding its unique key; or its own error (`ErrDependency`, `ErrQueueFull`, `ErrGroupFull`) while the others go in.
 - **J05** A job given a start time (`At`, `In`, `run_at`, `delay`) is not claimed before it. `In` is measured on the store's clock.
@@ -73,10 +73,9 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 What a handler returns decides what happens to the job next.
 
 - **O01** `nil` completes the job, with the result set by `SetResult`.
-- **O02** Any other error retries after the backoff while attempts remain. Then the job moves to its next fallback, and with none left it is `dead`.
+- **O02** Any other error retries after the backoff while attempts remain. Then the job is `dead`.
 - **O03** The wait before retrying attempt n is `base * factor^(n-1)`, capped at `max`, then spread by up to `jitter` either way. Unset fields mean 1s, 10m, 2 and 0.2.
-- **O04** `Fail(err)` stops retrying: the next fallback, or dead.
-- **O05** `Fallback(err)` moves to the next fallback now. Fallbacks are used in order. Each can change the queue, kind and pool, and restarts the attempt count and the start timeout.
+- **O04** `Fail(err)` stops retrying: the job is `dead`.
 - **O06** `Busy(d)` puts the job back to `waiting` for `d` (15s when unset). It uses no attempt, records no error and keeps how long the job has been waiting.
 - **O07** `Pending(handle, d)` parks the job as `polling` and calls the kind's poller with the handle after `d` (5s when unset). The attempt stays the same through every poll. `Pending` without a handle is a failure.
 - **O08** `RetryIn(d, err)` retries after exactly `d`.
@@ -114,7 +113,7 @@ What a handler returns decides what happens to the job next.
 
 ## Maintenance (T)
 
-- **T01** A waiting job with fallbacks left that has not started within its start timeout moves to its next fallback, with an error recorded. A job with no fallbacks left keeps waiting.
+- **T01** A waiting job that has not started within its start timeout ends `expired`, with an error recorded. Like every final state, this is an event and a callback, and the jobs that depend on it are cancelled. A retried job waits from the retry again.
 - **T02** A schedule enqueues a job on its cron spec: five fields, or `@every 10m`, `@daily` and the like, in a time zone. Each firing is enqueued once, even with many maintainers running, and the job carries `schedule` and `fire_at` meta.
 - **T03** The maintainer deletes completed and cancelled jobs after 24h and dead jobs after 7 days, unless the queue sets its own retention, and can archive them first. Only final jobs can be pruned.
 - **T04** Events outlive the jobs they describe and are deleted after their own retention, 24h by default.

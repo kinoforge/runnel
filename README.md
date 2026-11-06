@@ -33,16 +33,15 @@ When a handler cannot finish a job, what it returns says what happens next:
 | Handler returns | Effect |
 |---|---|
 | `nil` | completed, with the result from `j.SetResult` |
-| any error | retry with backoff; when attempts run out, the next fallback, then dead |
-| `runnel.Fail(err)` | stop retrying: next fallback, or dead |
-| `runnel.Fallback(err)` | move to the next fallback now |
+| any error | retry with backoff; when attempts run out, dead |
+| `runnel.Fail(err)` | stop retrying: dead |
 | `runnel.Busy(d)` | the pool is full: try again after `d` without using an attempt |
 | `runnel.Pending(handle, d)` | an outside task is running: poll it with `handle` after `d` |
 | `runnel.RetryIn(d, err)` | retry after exactly `d` |
 
 ## Example: collecting data from suppliers
 
-A service collects sales data for its customers. Supplier A is preferred but allows 5 calls at a time; supplier B is the backup. A collection can take minutes. No customer may hold more than 2 slots, and nobody should wait more than a minute for A before trying B.
+A service collects sales data for its customers. Supplier A allows 5 calls at a time; supplier B is the backup. A collection can take minutes. No customer may hold more than 2 slots, and nobody should wait more than a minute for A. What to do next, here trying B, is the service's own choice: Runnel ends the job and the service enqueues the next one.
 
 ```go
 store, _ := postgres.Open("postgres://localhost/app")
@@ -50,14 +49,13 @@ store.Migrate(ctx)
 
 c := runnel.NewClient(store, "collector")
 c.SetQueue(ctx, runnel.QueueConfig{Name: "collect", GroupMaxRunning: 2, MaxQueued: 10000})
-c.SetPool(ctx, runnel.PoolConfig{Name: "supplier-a", MaxRunning: 5})
-c.SetPool(ctx, runnel.PoolConfig{Name: "supplier-b", MaxRunning: 20})
+c.SetPool(ctx, runnel.PoolConfig{Name: "supplier-a", Slots: 5})
+c.SetPool(ctx, runnel.PoolConfig{Name: "supplier-b", Slots: 20})
 
 c.Enqueue(ctx, "collect", "sales.collect", Request{Shop: 42},
 	runnel.Group("shop-42"),
 	runnel.Pool("supplier-a"),
 	runnel.StartTimeout(time.Minute),
-	runnel.Fallbacks(runnel.Target{Pool: "supplier-b", Kind: "sales.collect.b"}),
 	runnel.Unique("sales:42:2026-11-01", 24*time.Hour),
 	runnel.Callback("https://app.example.com/hooks/runnel"))
 
@@ -72,7 +70,8 @@ w.HandleFunc("sales.collect", func(ctx context.Context, j *runnel.Job) error {
 	case errors.Is(err, supplier.ErrRateLimited):
 		return runnel.Busy(30 * time.Second)
 	case errors.Is(err, supplier.ErrUnsupported):
-		return runnel.Fallback(err)
+		_, err := c.Enqueue(ctx, "collect", "sales.collect.b", r, runnel.Pool("supplier-b"), runnel.Meta(map[string]string{"parent": j.ID}))
+		return err
 	case err != nil:
 		return err
 	}
@@ -117,11 +116,10 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 | Limits | Max running per queue, per group, per pool and per group in a pool. Token-bucket rates per queue and per group. All are enforced across every worker. |
 | Queued caps | `max_queued` and `group_max_queued` refuse new jobs with `429` and `Retry-After` instead of letting a queue grow without end. |
 | Retries | Exponential backoff with jitter, per job or per queue. Every attempt's error is kept. |
-| Fallbacks | An ordered list of other queues, kinds or pools. |
-| Start deadlines | `StartTimeout(d)`: a job that waited `d` without starting moves to its next fallback. Busy requeues keep the time already waited. |
+| Start timeouts | `StartTimeout(d)`: a job that waited `d` without starting ends `expired`, with an event and its callback, so the caller decides what next. Busy requeues keep the time already waited. |
 | Leases | Workers heartbeat their jobs. A crashed worker's jobs return to the queue. Cancelling a running job stops its handler. |
 | Waiting for results | `Prefer: wait=N` on enqueue and on read, `Client.Wait`, `EnqueueAndWait`. Postgres and Redis wake waiters the moment a job ends. |
-| Direct start | `Worker.Do` runs a job on the calling goroutine when a slot is free. It is still a real job, with retries and fallbacks. |
+| Direct start | `Worker.Do` runs a job on the calling goroutine when a slot is free. It is still a real job, with retries. |
 | Transactional enqueue | `Client.EnqueueTx` on SQL stores: the job exists only if your own transaction commits. |
 | Unique jobs | By key, while the job runs or for a time window. |
 | Workflows | Chains and DAGs. Steps read their parents' results; a failure cancels everything downstream. |

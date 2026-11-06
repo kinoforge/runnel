@@ -83,7 +83,6 @@ type Callbacks struct {
 // Limits mirrors runnel.Limits so it converts directly.
 type Limits struct {
 	MaxPayload     int `yaml:"max_payload"`
-	MaxFallbacks   int `yaml:"max_fallbacks"`
 	MaxDependsOn   int `yaml:"max_depends_on"`
 	MaxMeta        int `yaml:"max_meta"`
 	MaxUniqueKey   int `yaml:"max_unique_key"`

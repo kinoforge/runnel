@@ -15,10 +15,9 @@ func TestBodyRoundTrip(t *testing.T) {
 		ID: "0193a000-0000-7000-8000-000000000001", UniqueKey: "u", DependsOn: []string{"a", "b"},
 		Payload: json.RawMessage(`{"to":"x"}`), Result: json.RawMessage(`{"ok":true}`), Handle: "h", CallbackURL: "https://example.com/hook",
 		StartTimeout: runnel.Duration(time.Second), Timeout: runnel.Duration(time.Minute), UniqueFor: runnel.Duration(time.Hour),
-		Backoff:  runnel.Backoff{Base: runnel.Duration(time.Second), Max: runnel.Duration(time.Minute), Factor: 1.5, Jitter: 0.1},
-		Fallback: 1, Fallbacks: []runnel.Target{{Queue: "q2", Kind: "k2", Pool: "r2"}},
-		Meta:   map[string]string{"trace": "abc"},
-		Errors: []runnel.AttemptError{{Attempt: 1, Queue: "q", Kind: "k", At: at, Error: "boom"}},
+		Backoff: runnel.Backoff{Base: runnel.Duration(time.Second), Max: runnel.Duration(time.Minute), Factor: 1.5, Jitter: 0.1},
+		Meta:    map[string]string{"trace": "abc"},
+		Errors:  []runnel.AttemptError{{Attempt: 1, Queue: "q", Kind: "k", At: at, Error: "boom"}},
 	}
 	out := &runnel.Job{ID: in.ID}
 	if err := decodeBody(encodeBody(in), out); err != nil {

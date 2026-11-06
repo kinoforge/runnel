@@ -14,11 +14,15 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Config sections `memory` and `hybrid` override every size and timing of the hybrid store; `hybrid.Options` and `cold.Options` take them in Go, defaults in `hybrid.DefaultOptions`.
 - `runnel bench -payload` sets the payload size.
 
+### Removed
+
+- Fallbacks (`runnel.Fallbacks`, `runnel.Target`, `runnel.Fallback`, the `fallback` outcome, `max_fallbacks`): what to try next is the caller's choice, so a worker enqueues the next job itself, linking it through `meta`.
+
 ### Changed
 
 - Tenants are now groups: a plain id with `group_max_queued`, `group_max_running`, `group_rate` and `group_burst`, the `group` job field and `runnel.Group`; `ErrGroupFull`.
 - Pools keep their name; a pool's limits are `slots` and `group_slots`.
-- `start_within` is now `start_timeout`.
+- `start_within` is now `start_timeout`: a job that waits longer ends in the new final state `expired`, with its event and callback; dependents are cancelled and `Retry` runs it again.
 - Webhooks are now callbacks: the job's `callback_url` (`runnel.Callback`), the namespace `callback_secret`, and the `callbacks` config section.
 - A busy worker claims once a quarter of its slots are free, or after 2ms, so claims take jobs in batches.
 - Queue limits use one pattern: `max_running` and `group_max_running` (were `concurrency` and `tenant_slots`), `max_queued` and `group_max_queued` (were `max_waiting` and `tenant_waiting`).

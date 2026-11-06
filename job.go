@@ -34,17 +34,20 @@ const (
 	StatePolling State = "polling"
 	// StateCompleted jobs finished successfully.
 	StateCompleted State = "completed"
-	// StateDead jobs ran out of attempts and fallbacks, or failed for good.
+	// StateDead jobs ran out of attempts, or failed for good.
 	StateDead State = "dead"
-	// StateCancelled jobs were cancelled, or a job they depended on died.
+	// StateCancelled jobs were cancelled, or a job they depended on did not
+	// complete.
 	StateCancelled State = "cancelled"
+	// StateExpired jobs waited longer than their start timeout without starting.
+	StateExpired State = "expired"
 )
 
-var States = []State{StateBlocked, StateWaiting, StateRunning, StatePolling, StateCompleted, StateDead, StateCancelled}
+var States = []State{StateBlocked, StateWaiting, StateRunning, StatePolling, StateCompleted, StateDead, StateCancelled, StateExpired}
 
 // Final reports whether the job can no longer change state on its own.
 func (s State) Final() bool {
-	return s == StateCompleted || s == StateDead || s == StateCancelled
+	return s == StateCompleted || s == StateDead || s == StateCancelled || s == StateExpired
 }
 
 // Active reports whether the job holds a slot: running or polling.
@@ -128,14 +131,6 @@ func (b Backoff) Delay(attempt int) time.Duration {
 	return time.Duration(d)
 }
 
-// Target is where a job goes when it falls back. Empty fields keep the job's
-// current queue, kind or pool.
-type Target struct {
-	Queue string `json:"queue,omitempty"`
-	Kind  string `json:"kind,omitempty"`
-	Pool  string `json:"pool,omitempty"`
-}
-
 // AttemptError records why an attempt did not complete.
 type AttemptError struct {
 	Attempt int       `json:"attempt"`
@@ -171,8 +166,6 @@ type Job struct {
 	LeaseUntil   time.Time         `json:"lease_until,omitzero"`
 	Version      int64             `json:"version"`
 	Handle       string            `json:"handle,omitempty"`
-	Fallbacks    []Target          `json:"fallbacks,omitempty"`
-	Fallback     int               `json:"fallback,omitempty"`
 	UniqueKey    string            `json:"unique_key,omitempty"`
 	UniqueFor    Duration          `json:"unique_for,omitempty"`
 	DependsOn    []string          `json:"depends_on,omitempty"`
@@ -195,8 +188,6 @@ type jobData struct {
 	Timeout      Duration          `json:"to,omitempty"`
 	Backoff      Backoff           `json:"bo,omitzero"`
 	Handle       string            `json:"h,omitempty"`
-	Fallbacks    []Target          `json:"fb,omitempty"`
-	Fallback     int               `json:"fi,omitempty"`
 	UniqueFor    Duration          `json:"uf,omitempty"`
 	DependsOn    []string          `json:"d,omitempty"`
 	CallbackURL  string            `json:"w,omitempty"`
@@ -209,7 +200,7 @@ type jobData struct {
 func (j *Job) EncodeData() ([]byte, error) {
 	return json.Marshal(jobData{
 		Payload: j.Payload, StartTimeout: j.StartTimeout, Timeout: j.Timeout, Backoff: j.Backoff,
-		Handle: j.Handle, Fallbacks: j.Fallbacks, Fallback: j.Fallback, UniqueFor: j.UniqueFor,
+		Handle: j.Handle, UniqueFor: j.UniqueFor,
 		DependsOn: j.DependsOn, CallbackURL: j.CallbackURL, Meta: j.Meta, Result: j.Result, Errors: j.Errors,
 	})
 }
@@ -223,22 +214,13 @@ func (j *Job) DecodeData(b []byte) error {
 		}
 	}
 	j.Payload, j.StartTimeout, j.Timeout, j.Backoff = d.Payload, d.StartTimeout, d.Timeout, d.Backoff
-	j.Handle, j.Fallbacks, j.Fallback, j.UniqueFor = d.Handle, d.Fallbacks, d.Fallback, d.UniqueFor
+	j.Handle, j.UniqueFor = d.Handle, d.UniqueFor
 	j.DependsOn, j.CallbackURL, j.Meta, j.Result, j.Errors = d.DependsOn, d.CallbackURL, d.Meta, d.Result, d.Errors
 	return nil
 }
 
-// StartWindow is how long the job may wait before it moves to its next fallback,
-// or zero when it has none left.
-func (j *Job) StartWindow() time.Duration {
-	if j.StartTimeout > 0 && j.Fallback < len(j.Fallbacks) {
-		return j.StartTimeout.D()
-	}
-	return 0
-}
-
 func (j *Job) computeStartBy() {
-	if w := j.StartWindow(); w > 0 && !j.WaitingSince.IsZero() {
+	if w := j.StartTimeout.D(); w > 0 && !j.WaitingSince.IsZero() {
 		j.StartBy = j.WaitingSince.Add(w)
 		return
 	}
@@ -262,7 +244,7 @@ func (j *Job) Prepare(now time.Time, l Limits) error {
 	}
 	j.RunAt = j.RunAt.UTC().Truncate(time.Millisecond)
 	j.State, j.Attempt, j.Version, j.Worker, j.LeaseUntil = StateWaiting, 0, 0, "", time.Time{}
-	j.Handle, j.Fallback, j.Pending, j.Result, j.Errors = "", 0, 0, nil, nil
+	j.Handle, j.Pending, j.Result, j.Errors = "", 0, nil, nil
 	j.WaitingSince, j.CreatedAt, j.UpdatedAt = j.RunAt, now, now
 	j.StartedAt, j.FinishedAt = time.Time{}, time.Time{}
 	j.computeStartBy()
@@ -293,7 +275,6 @@ func (j *Job) Clone() *Job {
 	c := *j
 	c.Payload = slices.Clone(j.Payload)
 	c.Result = slices.Clone(j.Result)
-	c.Fallbacks = slices.Clone(j.Fallbacks)
 	c.DependsOn = slices.Clone(j.DependsOn)
 	c.Errors = slices.Clone(j.Errors)
 	c.Meta = maps.Clone(j.Meta)

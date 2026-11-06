@@ -46,7 +46,6 @@ callbacks:
 
 limits:
   max_payload: 1048576
-  max_fallbacks: 16
   max_depends_on: 256
   max_meta: 32
   max_unique_key: 255

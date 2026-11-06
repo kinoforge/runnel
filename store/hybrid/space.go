@@ -302,7 +302,7 @@ func (sp *space) index(h *job) {
 		sp.leases.ReplaceOrInsert(timeKey{h.lease, h.id})
 	case stPolling:
 		treeOf(sp.poll, h.queue, lessTime).ReplaceOrInsert(timeKey{h.runAt, h.id})
-	case stCompleted, stDead, stCancelled:
+	case stCompleted, stDead, stCancelled, stExpired:
 		sp.fin.ReplaceOrInsert(timeKey{h.finished, h.id})
 	}
 }
@@ -325,7 +325,7 @@ func (sp *space) unindex(h *job) {
 		if t := sp.poll[h.queue]; t != nil {
 			t.Delete(timeKey{h.runAt, h.id})
 		}
-	case stCompleted, stDead, stCancelled:
+	case stCompleted, stDead, stCancelled, stExpired:
 		sp.fin.Delete(timeKey{h.finished, h.id})
 	}
 }

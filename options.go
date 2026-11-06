@@ -30,8 +30,7 @@ func MaxAttempts(n int) Option { return func(j *Job) { j.MaxAttempts = n } }
 // Timeout ends an attempt that runs longer than d.
 func Timeout(d time.Duration) Option { return func(j *Job) { j.Timeout = Duration(d) } }
 
-// StartTimeout moves the job to its next fallback when it waits longer than d to
-// start.
+// StartTimeout ends the job as expired when it waits longer than d to start.
 func StartTimeout(d time.Duration) Option { return func(j *Job) { j.StartTimeout = Duration(d) } }
 
 // WithBackoff spaces the job's retries.
@@ -42,10 +41,6 @@ func WithBackoff(b Backoff) Option { return func(j *Job) { j.Backoff = b } }
 func Unique(key string, window time.Duration) Option {
 	return func(j *Job) { j.UniqueKey, j.UniqueFor = key, Duration(window) }
 }
-
-// Fallbacks lists where the job goes, in order, when it fails, runs out of
-// attempts or waits too long to start.
-func Fallbacks(t ...Target) Option { return func(j *Job) { j.Fallbacks = append(j.Fallbacks, t...) } }
 
 // After makes the job wait until the jobs with these ids complete.
 func After(ids ...string) Option { return func(j *Job) { j.DependsOn = append(j.DependsOn, ids...) } }

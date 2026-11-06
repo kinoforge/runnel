@@ -75,7 +75,6 @@ func (p PoolConfig) Validate() error {
 // Limits bounds what a single job may carry.
 type Limits struct {
 	MaxPayload     int
-	MaxFallbacks   int
 	MaxDependsOn   int
 	MaxMeta        int
 	MaxUniqueKey   int
@@ -83,8 +82,8 @@ type Limits struct {
 }
 
 // DefaultLimits are the limits used unless a client or server sets others: 1 MiB
-// payloads, 16 fallbacks, 256 dependencies, 32 meta entries.
-var DefaultLimits = Limits{MaxPayload: 1 << 20, MaxFallbacks: 16, MaxDependsOn: 256, MaxMeta: 32, MaxUniqueKey: 255, MaxCallbackURL: 2048}
+// payloads, 256 dependencies, 32 meta entries.
+var DefaultLimits = Limits{MaxPayload: 1 << 20, MaxDependsOn: 256, MaxMeta: 32, MaxUniqueKey: 255, MaxCallbackURL: 2048}
 
 // PutTyped stores v as JSON under a configuration kind and name.
 func PutTyped(ctx context.Context, s Store, ns string, kind ConfigKind, name string, v any) error {

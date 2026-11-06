@@ -58,7 +58,7 @@ limits:
 	if cfg.Store != "postgres://localhost/app" || cfg.Server.MaxClaimWait != 10*time.Second {
 		t.Fatalf("yaml not applied: %+v", cfg)
 	}
-	if cfg.Server.Addr != ":8700" || cfg.Maintainer.Retention.Dead != runnel.DefaultRetention.Dead || cfg.Limits.MaxFallbacks != runnel.DefaultLimits.MaxFallbacks {
+	if cfg.Server.Addr != ":8700" || cfg.Maintainer.Retention.Dead != runnel.DefaultRetention.Dead || cfg.Limits.MaxMeta != runnel.DefaultLimits.MaxMeta {
 		t.Fatal("keys absent from yaml must keep their defaults")
 	}
 	if cfg.Maintainer.Retention.Completed != 2*time.Hour || cfg.Limits.MaxPayload != 2048 {

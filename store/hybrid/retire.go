@@ -297,7 +297,7 @@ func (s *Store) gather(ns string, want []uid, ds []draft) ([]*runnel.Job, error)
 }
 
 // finals are the states a job can end in.
-var finals = []uint8{stCompleted, stDead, stCancelled}
+var finals = []uint8{stCompleted, stDead, stCancelled, stExpired}
 
 // coldNewest adds to ram, the ids a listing found in memory, those of the
 // waiting and finished jobs in the cold store that match q, and returns the

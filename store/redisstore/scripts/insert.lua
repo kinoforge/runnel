@@ -25,7 +25,7 @@ for i, j in ipairs(jobs) do
   if not failed then
     for _, d in ipairs(deps) do
       local st = redis.call("HGET", k("j:" .. d), "state")
-      if not st or st == "dead" or st == "cancelled" then failed = true; break end
+      if not st or st == "dead" or st == "cancelled" or st == "expired" then failed = true; break end
       if st ~= "completed" then waiton[#waiton + 1] = d end
     end
   end

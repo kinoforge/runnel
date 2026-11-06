@@ -179,7 +179,7 @@ func (in *inserter) deps(ids []string) ([]string, []uid, bool) {
 		} else if c, ok := in.coldState(id); ok {
 			st = c
 		}
-		if st == 0 || st == stDead || st == stCancelled {
+		if st == 0 || st == stDead || st == stCancelled || st == stExpired {
 			return nil, nil, false
 		}
 		if st != stCompleted {

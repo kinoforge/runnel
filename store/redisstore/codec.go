@@ -28,7 +28,7 @@ func encode(j *runnel.Job) (map[string]string, error) {
 		"id": j.ID, "queue": j.Queue, "kind": j.Kind, "state": string(j.State), "priority": strconv.Itoa(j.Priority),
 		"group": j.Group, "pool": j.Pool, "attempt": strconv.Itoa(j.Attempt), "max_attempts": strconv.Itoa(j.MaxAttempts),
 		"run_at": ms(j.RunAt), "waiting_since": ms(j.WaitingSince), "start_by": ms(j.StartBy),
-		"start_timeout": strconv.FormatInt(j.StartWindow().Milliseconds(), 10), "worker": j.Worker, "lease_until": ms(j.LeaseUntil),
+		"start_timeout": strconv.FormatInt(j.StartTimeout.D().Milliseconds(), 10), "worker": j.Worker, "lease_until": ms(j.LeaseUntil),
 		"version": strconv.FormatInt(j.Version, 10), "pending": strconv.Itoa(j.Pending), "unique_key": j.UniqueKey,
 		"created_at": ms(j.CreatedAt), "updated_at": ms(j.UpdatedAt), "started_at": ms(j.StartedAt), "finished_at": ms(j.FinishedAt),
 		"data": string(data), "deps": strings.Join(j.DependsOn, ","),

@@ -69,7 +69,7 @@ func run() error {
 	res, err := client.Enqueue(ctx, "emails", "email.send", email{To: "ada@example.com", Subject: "Welcome"},
 		runnel.Group("acme"), runnel.Pool("smtp-primary"), runnel.MaxAttempts(3),
 		runnel.Unique("welcome:ada@example.com", 24*time.Hour),
-		runnel.StartTimeout(30*time.Second), runnel.Fallbacks(runnel.Target{Queue: "emails-backup", Pool: "smtp-backup"}))
+		runnel.StartTimeout(30*time.Second))
 	if err != nil {
 		return err
 	}

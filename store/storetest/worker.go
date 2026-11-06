@@ -73,33 +73,25 @@ func testWorkerEndToEnd(t *testing.T, open Opener) {
 	waitFor(t, "dead unknown kind", 5*time.Second, func() bool { return e.get(nh.ID).State == runnel.StateDead })
 }
 
-func testWorkerFallback(t *testing.T, open Opener) {
-	spec.Rule(t, "O02", "O05", "M02")
+func testWorkerRetryDead(t *testing.T, open Opener) {
+	spec.Rule(t, "O02", "M02")
 	e := setup(t, open)
-	w := runnel.NewWorker(e.s, e.ns, fast("primary", "backup"))
+	w := runnel.NewWorker(e.s, e.ns, fast("primary"))
 	w.HandleFunc("flaky", func(ctx context.Context, j *runnel.Job) error { return errors.New("provider down") })
-	w.HandleFunc("steady", func(ctx context.Context, j *runnel.Job) error { return j.SetResult(j.Queue) })
 	stop := runWorker(t, e, w)
 	defer stop()
 	res, _ := e.c.Enqueue(e.ctx, "primary", "flaky", nil, runnel.MaxAttempts(2),
-		runnel.WithBackoff(runnel.Backoff{Base: runnel.Duration(10 * time.Millisecond), Jitter: -1}),
-		runnel.Fallbacks(runnel.Target{Queue: "backup", Kind: "steady"}))
-	waitFor(t, "fallback completion", 5*time.Second, func() bool { return e.get(res.ID).State == runnel.StateCompleted })
-	j := e.get(res.ID)
-	if j.Queue != "backup" || j.Kind != "steady" || len(j.Errors) != 2 || string(j.Result) != `"backup"` {
-		t.Fatalf("fallback job %+v", j)
+		runnel.WithBackoff(runnel.Backoff{Base: runnel.Duration(10 * time.Millisecond), Jitter: -1}))
+	waitFor(t, "dead after retries", 5*time.Second, func() bool { return e.get(res.ID).State == runnel.StateDead })
+	if j := e.get(res.ID); j.Attempt != 2 || len(j.Errors) != 2 {
+		t.Fatalf("retried job %+v", j)
 	}
-	if _, err := e.c.Retry(e.ctx, res.ID); !errors.Is(err, runnel.ErrNotFinal) {
-		t.Fatalf("retried a completed job: %v", err)
-	}
-	dead, _ := e.c.Enqueue(e.ctx, "primary", "flaky", nil, runnel.MaxAttempts(1))
-	waitFor(t, "dead", 5*time.Second, func() bool { return e.get(dead.ID).State == runnel.StateDead })
-	if _, err := e.c.Retry(e.ctx, dead.ID); err != nil {
+	if _, err := e.c.Retry(e.ctx, res.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "dead again", 5*time.Second, func() bool {
-		j := e.get(dead.ID)
-		return j.State == runnel.StateDead && len(j.Errors) == 2
+		j := e.get(res.ID)
+		return j.State == runnel.StateDead && len(j.Errors) == 4
 	})
 }
 

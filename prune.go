@@ -25,6 +25,7 @@ func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error 
 			StateCompleted: pick(q.Retention.D(), m.cfg.Retention.Completed),
 			StateCancelled: pick(q.Retention.D(), m.cfg.Retention.Cancelled),
 			StateDead:      pick(q.DeadRetention.D(), m.cfg.Retention.Dead),
+			StateExpired:   pick(q.DeadRetention.D(), m.cfg.Retention.Dead),
 		}
 		for state, keep := range plan {
 			if keep <= 0 || st.Counts[state] == 0 {
