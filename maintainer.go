@@ -18,7 +18,7 @@ const (
 )
 
 // Retention says how long finished jobs and events are kept. Undelivered bounds
-// how long events wait for webhook delivery before they are dropped and logged.
+// how long events wait for callback delivery before they are dropped and logged.
 type Retention struct {
 	Completed   time.Duration
 	Cancelled   time.Duration
@@ -45,13 +45,13 @@ type MaintainerConfig struct {
 	Retention  Retention
 	Archive    bool
 	Batch      int
-	Webhooks   WebhookConfig
+	Callbacks  CallbackConfig
 	Logger     *slog.Logger
 }
 
 // Maintainer does the housekeeping of a store: it returns jobs whose worker
 // died, moves jobs past their start deadline to their fallback, fires schedules,
-// turns events into webhook jobs and prunes old jobs and events. Run as many as
+// turns events into callback jobs and prunes old jobs and events. Run as many as
 // you like; their work does not overlap.
 type Maintainer struct {
 	store Store
@@ -89,7 +89,7 @@ func NewMaintainer(s Store, cfg MaintainerConfig) *Maintainer {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	cfg.Webhooks = cfg.Webhooks.withDefaults()
+	cfg.Callbacks = cfg.Callbacks.withDefaults()
 	return &Maintainer{store: s, cfg: cfg, log: cfg.Logger, clock: ClockOf(s), clients: map[string]*Client{}, lastPrune: map[string]time.Time{},
 		specs: map[string]cron.Schedule{}, hooks: map[string]context.CancelFunc{}}
 }
@@ -117,7 +117,7 @@ func (m *Maintainer) namespaces(ctx context.Context) ([]string, error) {
 }
 
 // Run does a Tick for every namespace each Interval until ctx ends. With
-// webhooks enabled it also runs their delivery workers.
+// callbacks enabled it also runs their delivery workers.
 func (m *Maintainer) Run(ctx context.Context) error {
 	t := time.NewTicker(m.cfg.Interval)
 	defer t.Stop()
@@ -131,7 +131,7 @@ func (m *Maintainer) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				break
 			}
-			if m.cfg.Webhooks.Enabled {
+			if m.cfg.Callbacks.Enabled {
 				m.ensureHookWorker(ctx, ns)
 			}
 			if err := m.Tick(ctx, ns); err != nil && ctx.Err() == nil {
@@ -154,11 +154,11 @@ func (m *Maintainer) ensureHookWorker(ctx context.Context, ns string) {
 	}
 	hctx, cancel := context.WithCancel(ctx)
 	m.hooks[ns] = cancel
-	w := NewWorker(m.store, ns, WorkerConfig{Queues: []string{m.cfg.Webhooks.Queue}, Concurrency: m.cfg.Webhooks.Concurrency, Logger: m.log})
-	w.Handle(WebhookKind, NewWebhookHandler(m.store, m.cfg.Webhooks))
+	w := NewWorker(m.store, ns, WorkerConfig{Queues: []string{m.cfg.Callbacks.Queue}, Concurrency: m.cfg.Callbacks.Concurrency, Logger: m.log})
+	w.Handle(CallbackKind, NewCallbackHandler(m.store, m.cfg.Callbacks))
 	go func() {
 		if err := w.Run(hctx); err != nil {
-			m.log.Error("runnel: webhook worker stopped", "namespace", ns, "err", err)
+			m.log.Error("runnel: callback worker stopped", "namespace", ns, "err", err)
 		}
 	}()
 }
@@ -176,8 +176,8 @@ func (m *Maintainer) stopHooks() {
 func (m *Maintainer) Tick(ctx context.Context, ns string) error {
 	now := m.clock.Now()
 	steps := []func(context.Context, string, time.Time) error{m.reap, m.startWaits, m.schedules}
-	if m.cfg.Webhooks.Enabled {
-		steps = append(steps, m.webhooks)
+	if m.cfg.Callbacks.Enabled {
+		steps = append(steps, m.callbacks)
 	}
 	var first error
 	for _, step := range steps {
@@ -227,7 +227,7 @@ func (m *Maintainer) startWaits(ctx context.Context, ns string, now time.Time) e
 			continue
 		}
 		n := j.Clone()
-		n.addError("not started within "+j.StartWithin.String(), now)
+		n.addError("not started within "+j.StartTimeout.String(), now)
 		n.UpdatedAt = now
 		moveOn(n, now)
 		changes = append(changes, Change{Job: n, From: StateWaiting})
@@ -239,8 +239,8 @@ func (m *Maintainer) startWaits(ctx context.Context, ns string, now time.Time) e
 	return err
 }
 
-func (m *Maintainer) webhooks(ctx context.Context, ns string, now time.Time) error {
-	cur, err := m.store.Cursor(ctx, ns, "webhooks")
+func (m *Maintainer) callbacks(ctx context.Context, ns string, now time.Time) error {
+	cur, err := m.store.Cursor(ctx, ns, "callbacks")
 	if err != nil {
 		return err
 	}
@@ -263,10 +263,10 @@ func (m *Maintainer) webhooks(ctx context.Context, ns string, now time.Time) err
 	var hooks []*Job
 	for _, e := range events {
 		j := byID[e.JobID]
-		if j == nil || j.Webhook == "" || j.Queue == m.cfg.Webhooks.Queue {
+		if j == nil || j.CallbackURL == "" || j.Queue == m.cfg.Callbacks.Queue {
 			continue
 		}
-		hook, err := NewWebhookJob(j, "job."+string(e.State), e.Seq, m.cfg.Webhooks.Queue)
+		hook, err := NewCallbackJob(j, "job."+string(e.State), e.Seq, m.cfg.Callbacks.Queue)
 		if err != nil {
 			return err
 		}
@@ -277,7 +277,7 @@ func (m *Maintainer) webhooks(ctx context.Context, ns string, now time.Time) err
 			return err
 		}
 	}
-	_, err = m.store.SwapCursor(ctx, ns, "webhooks", cur, events[len(events)-1].Seq)
+	_, err = m.store.SwapCursor(ctx, ns, "callbacks", cur, events[len(events)-1].Seq)
 	return err
 }
 

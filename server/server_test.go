@@ -76,7 +76,7 @@ func TestAuthAndRoles(t *testing.T) {
 	if code, _ := call(t, srv, "wrong", "GET", "/v1/namespaces", nil); code != 401 {
 		t.Fatalf("bad token: %d", code)
 	}
-	if code, _ := call(t, srv, admin, "PUT", "/v1/namespaces/billing", map[string]any{"webhook_secret": "s3cret"}); code != 201 {
+	if code, _ := call(t, srv, admin, "PUT", "/v1/namespaces/billing", map[string]any{"callback_secret": "s3cret"}); code != 201 {
 		t.Fatalf("create ns: %d", code)
 	}
 	if code, _ := call(t, srv, admin, "PUT", "/v1/namespaces/Bad_NS!", nil); code != 400 {
@@ -123,8 +123,8 @@ func TestValidation(t *testing.T) {
 		{"unknown field", map[string]any{"queue": "q", "kind": "k", "evil": 1}, 400},
 		{"bad queue", map[string]any{"queue": "../etc", "kind": "k"}, 400},
 		{"bad json", `{"queue":`, 400},
-		{"http webhook", map[string]any{"queue": "q", "kind": "k", "webhook": "http://example.com"}, 400},
-		{"reserved queue", map[string]any{"queue": runnel.WebhookQueue, "kind": "k"}, 400},
+		{"http callback", map[string]any{"queue": "q", "kind": "k", "callback_url": "http://example.com"}, 400},
+		{"reserved queue", map[string]any{"queue": runnel.CallbackQueue, "kind": "k"}, 400},
 		{"priority range", map[string]any{"queue": "q", "kind": "k", "priority": 5000}, 400},
 		{"trailing data", `{"queue":"q","kind":"k"} {}`, 400},
 		{"ok", map[string]any{"queue": "q", "kind": "k", "payload": map[string]int{"a": 1}}, 201},

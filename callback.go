@@ -20,30 +20,30 @@ import (
 )
 
 const (
-	defaultWebhookConcurrency = 4
-	defaultWebhookTimeout     = 10 * time.Second
-	webhookMaxAttempts        = 10
-	webhookUniqueFor          = 48 * time.Hour
-	webhookBackoffBase        = 5 * time.Second
-	webhookBackoffMax         = 30 * time.Minute
-	secretCacheTTL            = 30 * time.Second
-	maxDrainBody              = 64 << 10
-	maxRetryAfterSeconds      = 3600
-	dialKeepAlive             = 30 * time.Second
-	maxIdleConns              = 50
-	idleConnTimeout           = 90 * time.Second
+	defaultCallbackConcurrency = 4
+	defaultCallbackTimeout     = 10 * time.Second
+	callbackMaxAttempts        = 10
+	callbackUniqueFor          = 48 * time.Hour
+	callbackBackoffBase        = 5 * time.Second
+	callbackBackoffMax         = 30 * time.Minute
+	secretCacheTTL             = 30 * time.Second
+	maxDrainBody               = 64 << 10
+	maxRetryAfterSeconds       = 3600
+	dialKeepAlive              = 30 * time.Second
+	maxIdleConns               = 50
+	idleConnTimeout            = 90 * time.Second
 )
 
 const (
-	// WebhookKind is the kind of the jobs that deliver webhooks.
-	WebhookKind = "runnel.webhook"
-	// WebhookQueue is the queue webhook deliveries run on. It is reserved.
-	WebhookQueue = "runnel.webhooks"
+	// CallbackKind is the kind of the jobs that deliver callbacks.
+	CallbackKind = "runnel.callback"
+	// CallbackQueue is the queue callback deliveries run on. It is reserved.
+	CallbackQueue = "runnel.callbacks"
 )
 
-// WebhookConfig configures webhook delivery. Deliveries refuse private addresses
+// CallbackConfig configures callback delivery. Deliveries refuse private addresses
 // unless AllowPrivate is set.
-type WebhookConfig struct {
+type CallbackConfig struct {
 	Enabled      bool
 	Queue        string
 	Concurrency  int
@@ -52,20 +52,20 @@ type WebhookConfig struct {
 	Client       *http.Client
 }
 
-func (c WebhookConfig) withDefaults() WebhookConfig {
+func (c CallbackConfig) withDefaults() CallbackConfig {
 	if c.Queue == "" {
-		c.Queue = WebhookQueue
+		c.Queue = CallbackQueue
 	}
 	if c.Concurrency <= 0 {
-		c.Concurrency = defaultWebhookConcurrency
+		c.Concurrency = defaultCallbackConcurrency
 	}
 	if c.Timeout <= 0 {
-		c.Timeout = defaultWebhookTimeout
+		c.Timeout = defaultCallbackTimeout
 	}
 	return c
 }
 
-// JobSummary is the body of a webhook: what a receiver needs to know about the
+// JobSummary is the body of a callback: what a receiver needs to know about the
 // finished job.
 type JobSummary struct {
 	ID         string            `json:"id"`
@@ -73,7 +73,7 @@ type JobSummary struct {
 	Queue      string            `json:"queue"`
 	Kind       string            `json:"kind"`
 	State      State             `json:"state"`
-	Tenant     string            `json:"tenant,omitempty"`
+	Group      string            `json:"group,omitempty"`
 	Attempt    int               `json:"attempt"`
 	Meta       map[string]string `json:"meta,omitempty"`
 	Result     json.RawMessage   `json:"result,omitempty"`
@@ -83,7 +83,7 @@ type JobSummary struct {
 }
 
 func summarize(j *Job) JobSummary {
-	s := JobSummary{ID: j.ID, Namespace: j.Namespace, Queue: j.Queue, Kind: j.Kind, State: j.State, Tenant: j.Tenant,
+	s := JobSummary{ID: j.ID, Namespace: j.Namespace, Queue: j.Queue, Kind: j.Kind, State: j.State, Group: j.Group,
 		Attempt: j.Attempt, Meta: j.Meta, Result: j.Result, CreatedAt: j.CreatedAt, FinishedAt: j.FinishedAt}
 	if n := len(j.Errors); n > 0 {
 		s.LastError = j.Errors[n-1].Error
@@ -91,39 +91,39 @@ func summarize(j *Job) JobSummary {
 	return s
 }
 
-type webhookTask struct {
+type callbackTask struct {
 	URL      string     `json:"url"`
 	Delivery int64      `json:"delivery"`
 	Event    string     `json:"event"`
 	Job      JobSummary `json:"job"`
 }
 
-// NewWebhookJob returns the job that delivers event for j. Delivery numbers keep
+// NewCallbackJob returns the job that delivers event for j. Delivery numbers keep
 // deliveries unique, so an event is posted once even when it is seen twice.
-func NewWebhookJob(j *Job, event string, delivery int64, queue string) (*Job, error) {
+func NewCallbackJob(j *Job, event string, delivery int64, queue string) (*Job, error) {
 	if queue == "" {
-		queue = WebhookQueue
+		queue = CallbackQueue
 	}
-	body, err := json.Marshal(webhookTask{URL: j.Webhook, Delivery: delivery, Event: event, Job: summarize(j)})
+	body, err := json.Marshal(callbackTask{URL: j.CallbackURL, Delivery: delivery, Event: event, Job: summarize(j)})
 	if err != nil {
 		return nil, err
 	}
-	return &Job{Queue: queue, Kind: WebhookKind, Payload: body, MaxAttempts: webhookMaxAttempts,
-		UniqueKey: fmt.Sprintf("webhook:%d", delivery), UniqueFor: Duration(webhookUniqueFor),
-		Backoff: Backoff{Base: Duration(webhookBackoffBase), Max: Duration(webhookBackoffMax)}}, nil
+	return &Job{Queue: queue, Kind: CallbackKind, Payload: body, MaxAttempts: callbackMaxAttempts,
+		UniqueKey: fmt.Sprintf("callback:%d", delivery), UniqueFor: Duration(callbackUniqueFor),
+		Backoff: Backoff{Base: Duration(callbackBackoffBase), Max: Duration(callbackBackoffMax)}}, nil
 }
 
-// SecretFunc returns the webhook secret of a namespace.
+// SecretFunc returns the callback secret of a namespace.
 type SecretFunc func(ctx context.Context, namespace string) (string, error)
 
-type webhookHandler struct {
+type callbackHandler struct {
 	secret SecretFunc
 	client *http.Client
 }
 
-// NewWebhookSender returns the handler of webhook jobs, signing each body with
+// NewCallbackSender returns the handler of callback jobs, signing each body with
 // the namespace's secret.
-func NewWebhookSender(secret SecretFunc, cfg WebhookConfig) Handler {
+func NewCallbackSender(secret SecretFunc, cfg CallbackConfig) Handler {
 	cfg = cfg.withDefaults()
 	client := cfg.Client
 	if client == nil {
@@ -132,16 +132,16 @@ func NewWebhookSender(secret SecretFunc, cfg WebhookConfig) Handler {
 	if secret == nil {
 		secret = func(context.Context, string) (string, error) { return "", nil }
 	}
-	return &webhookHandler{secret: secret, client: client}
+	return &callbackHandler{secret: secret, client: client}
 }
 
-// NewWebhookHandler returns a webhook sender that reads secrets from the
+// NewCallbackHandler returns a callback sender that reads secrets from the
 // namespaces in s.
-func NewWebhookHandler(s Store, cfg WebhookConfig) Handler {
+func NewCallbackHandler(s Store, cfg CallbackConfig) Handler {
 	var mu sync.Mutex
 	var cache map[string]string
 	var loaded time.Time
-	return NewWebhookSender(func(ctx context.Context, ns string) (string, error) {
+	return NewCallbackSender(func(ctx context.Context, ns string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if cache == nil || time.Since(loaded) > secretCacheTTL {
@@ -151,7 +151,7 @@ func NewWebhookHandler(s Store, cfg WebhookConfig) Handler {
 			}
 			cache = map[string]string{}
 			for name, n := range all {
-				cache[name] = n.WebhookSecret
+				cache[name] = n.CallbackSecret
 			}
 			loaded = time.Now()
 		}
@@ -169,12 +169,12 @@ func Sign(secret string, ts int64, body []byte) string {
 	return "t=" + strconv.FormatInt(ts, 10) + ",v1=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func (h *webhookHandler) Work(ctx context.Context, j *Job) error {
-	var t webhookTask
+func (h *callbackHandler) Work(ctx context.Context, j *Job) error {
+	var t callbackTask
 	if err := j.Bind(&t); err != nil {
 		return Fail(err)
 	}
-	if err := ValidWebhookURL(t.URL, DefaultLimits.MaxWebhookURL); err != nil {
+	if err := ValidCallbackURL(t.URL, DefaultLimits.MaxCallbackURL); err != nil {
 		return Fail(err)
 	}
 	body, err := json.Marshal(map[string]any{"event": t.Event, "delivery": t.Delivery, "job": t.Job})
@@ -190,7 +190,7 @@ func (h *webhookHandler) Work(ctx context.Context, j *Job) error {
 		return Fail(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "runnel-webhook/1")
+	req.Header.Set("User-Agent", "runnel-callback/1")
 	req.Header.Set("Runnel-Event", t.Event)
 	req.Header.Set("Runnel-Delivery", strconv.FormatInt(t.Delivery, 10))
 	if secret != "" {
@@ -210,15 +210,15 @@ func (h *webhookHandler) Work(ctx context.Context, j *Job) error {
 		return nil
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode >= 500:
 		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 && s <= maxRetryAfterSeconds {
-			return RetryIn(time.Duration(s)*time.Second, fmt.Errorf("webhook answered %d", resp.StatusCode))
+			return RetryIn(time.Duration(s)*time.Second, fmt.Errorf("callback answered %d", resp.StatusCode))
 		}
-		return fmt.Errorf("webhook answered %d", resp.StatusCode)
+		return fmt.Errorf("callback answered %d", resp.StatusCode)
 	default:
-		return Fail(fmt.Errorf("webhook answered %d", resp.StatusCode))
+		return Fail(fmt.Errorf("callback answered %d", resp.StatusCode))
 	}
 }
 
-var errBlockedAddress = errors.New("runnel: webhook address is private or reserved")
+var errBlockedAddress = errors.New("runnel: callback address is private or reserved")
 
 var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),

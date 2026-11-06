@@ -129,19 +129,19 @@ func (s *Store) Get(_ context.Context, ns string, ids []string) ([]*runnel.Job, 
 // filter holds the symbols a query matches; ok is false when a name it asks for
 // was never used, so nothing can match.
 type filter struct {
-	queue, kind, tenant sym
-	ok                  bool
+	queue, kind, group sym
+	ok                 bool
 }
 
 func (sp *space) filter(q runnel.Query) filter {
 	qs, ok1 := sp.syms.find(q.Queue)
 	ks, ok2 := sp.syms.find(q.Kind)
-	ts, ok3 := sp.syms.find(q.Tenant)
-	return filter{queue: qs, kind: ks, tenant: ts, ok: ok1 && ok2 && ok3}
+	ts, ok3 := sp.syms.find(q.Group)
+	return filter{queue: qs, kind: ks, group: ts, ok: ok1 && ok2 && ok3}
 }
 
 func (f filter) match(h *job) bool {
-	return (f.queue == 0 || h.queue == f.queue) && (f.kind == 0 || h.kind == f.kind) && (f.tenant == 0 || h.tenant == f.tenant)
+	return (f.queue == 0 || h.queue == f.queue) && (f.kind == 0 || h.kind == f.kind) && (f.group == 0 || h.group == f.group)
 }
 
 func (s *Store) List(_ context.Context, ns string, q runnel.Query) ([]*runnel.Job, string, error) {

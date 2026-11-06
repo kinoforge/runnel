@@ -69,17 +69,17 @@ local fullq, fullqt, fullr, fullrt = {}, {}, {}, {}
 local offset = {}
 local function verdict(j)
   local q = qcfg[j.queue]
-  if fullq[j.queue] or fullqt[j.queue .. "|" .. j.tenant] or fullr[j.resource] or fullrt[j.resource .. "|" .. j.tenant] then return "skip" end
+  if fullq[j.queue] or fullqt[j.queue .. "|" .. j.group] or fullr[j.pool] or fullrt[j.pool .. "|" .. j.group] then return "skip" end
   if n(q.max_running) > 0 and act("q|" .. j.queue) >= n(q.max_running) then fullq[j.queue] = true; return "skip" end
-  if j.tenant ~= "" and n(q.tenant_max_running) > 0 and act("qt|" .. j.queue .. "|" .. j.tenant) >= n(q.tenant_max_running) then
-    fullqt[j.queue .. "|" .. j.tenant] = true; return "skip"
+  if j.group ~= "" and n(q.group_max_running) > 0 and act("qt|" .. j.queue .. "|" .. j.group) >= n(q.group_max_running) then
+    fullqt[j.queue .. "|" .. j.group] = true; return "skip"
   end
-  if j.resource ~= "" then
-    if rcfg[j.resource] == nil then rcfg[j.resource] = cfg("resource", j.resource) end
-    local p = rcfg[j.resource]
-    if n(p.max_running) > 0 and act("r|" .. j.resource) >= n(p.max_running) then fullr[j.resource] = true; return "skip" end
-    if j.tenant ~= "" and n(p.tenant_max_running) > 0 and act("rt|" .. j.resource .. "|" .. j.tenant) >= n(p.tenant_max_running) then
-      fullrt[j.resource .. "|" .. j.tenant] = true; return "skip"
+  if j.pool ~= "" then
+    if rcfg[j.pool] == nil then rcfg[j.pool] = cfg("pool", j.pool) end
+    local p = rcfg[j.pool]
+    if n(p.slots) > 0 and act("r|" .. j.pool) >= n(p.slots) then fullr[j.pool] = true; return "skip" end
+    if j.group ~= "" and n(p.group_slots) > 0 and act("rt|" .. j.pool .. "|" .. j.group) >= n(p.group_slots) then
+      fullrt[j.pool .. "|" .. j.group] = true; return "skip"
     end
   end
   local take = {}
@@ -88,9 +88,9 @@ local function verdict(j)
     if b.t < 1 then fullq[j.queue] = true; return "skip" end
     take[#take + 1] = b
   end
-  if j.tenant ~= "" and n(q.tenant_rate) > 0 then
-    local b = bucket("qt|" .. j.queue .. "|" .. j.tenant, n(q.tenant_rate), n(q.tenant_burst))
-    if b.t < 1 then fullqt[j.queue .. "|" .. j.tenant] = true; return "skip" end
+  if j.group ~= "" and n(q.group_rate) > 0 then
+    local b = bucket("qt|" .. j.queue .. "|" .. j.group, n(q.group_rate), n(q.group_burst))
+    if b.t < 1 then fullqt[j.queue .. "|" .. j.group] = true; return "skip" end
     take[#take + 1] = b
   end
   for _, b in ipairs(take) do b.t = b.t - 1; b.dirty = true end
@@ -127,9 +127,9 @@ for round = 1, 64 do
   for _, c in ipairs(cands) do
     examined = examined + 1
     if #out >= limit then break end
-    local v = redis.call("HMGET", k("j:" .. c.id), "state", "queue", "tenant", "resource")
+    local v = redis.call("HMGET", k("j:" .. c.id), "state", "queue", "group", "pool")
     if v[1] == "waiting" then
-      local j = {queue = v[2], tenant = v[3] or "", resource = v[4] or ""}
+      local j = {queue = v[2], group = v[3] or "", pool = v[4] or ""}
       if verdict(j) == "ok" then
         local full = load(c.id)
         unindex(full)

@@ -18,10 +18,10 @@ const (
 var (
 	namePattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 	namespacePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-	tenantPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$`)
+	groupPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$`)
 )
 
-// ValidName reports whether s can name a queue, kind, resource or schedule: 1 to 128
+// ValidName reports whether s can name a queue, kind, pool or schedule: 1 to 128
 // letters, digits, dots, dashes or underscores, starting with a letter or digit.
 func ValidName(s string) bool { return namePattern.MatchString(s) }
 
@@ -29,7 +29,7 @@ func ValidName(s string) bool { return namePattern.MatchString(s) }
 // letters, digits, dashes or underscores.
 func ValidNamespace(s string) bool { return namespacePattern.MatchString(s) }
 
-func ValidTenant(s string) bool { return tenantPattern.MatchString(s) }
+func ValidGroup(s string) bool { return groupPattern.MatchString(s) }
 
 func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
@@ -61,11 +61,11 @@ func (j *Job) validateNames(Limits) error {
 	if err := checkName("kind", j.Kind, false); err != nil {
 		return err
 	}
-	if err := checkName("resource", j.Resource, true); err != nil {
+	if err := checkName("pool", j.Pool, true); err != nil {
 		return err
 	}
-	if j.Tenant != "" && !ValidTenant(j.Tenant) {
-		return invalid("tenant %q must match %s", j.Tenant, tenantPattern)
+	if j.Group != "" && !ValidGroup(j.Group) {
+		return invalid("group %q must match %s", j.Group, groupPattern)
 	}
 	return nil
 }
@@ -83,7 +83,7 @@ func (j *Job) validateSettings(l Limits) error {
 	if j.MaxAttempts < 1 || j.MaxAttempts > maxAttemptsLimit {
 		return invalid("max_attempts must be between 1 and %d", maxAttemptsLimit)
 	}
-	if j.Timeout < 0 || j.StartWithin < 0 || j.UniqueFor < 0 {
+	if j.Timeout < 0 || j.StartTimeout < 0 || j.UniqueFor < 0 {
 		return invalid("durations must not be negative")
 	}
 	return nil
@@ -103,7 +103,7 @@ func (j *Job) validateFallbacks(l Limits) error {
 		if err := checkName("fallback kind", t.Kind, true); err != nil {
 			return err
 		}
-		if err := checkName("fallback resource", t.Resource, true); err != nil {
+		if err := checkName("fallback pool", t.Pool, true); err != nil {
 			return err
 		}
 	}
@@ -125,8 +125,8 @@ func (j *Job) validateExtras(l Limits) error {
 	if err := ValidMeta(j.Meta, l); err != nil {
 		return err
 	}
-	if j.Webhook != "" {
-		return ValidWebhookURL(j.Webhook, l.MaxWebhookURL)
+	if j.CallbackURL != "" {
+		return ValidCallbackURL(j.CallbackURL, l.MaxCallbackURL)
 	}
 	return nil
 }
@@ -145,15 +145,15 @@ func ValidMeta(meta map[string]string, l Limits) error {
 	return nil
 }
 
-// ValidWebhookURL checks that raw is an absolute http or https URL without
+// ValidCallbackURL checks that raw is an absolute http or https URL without
 // credentials, at most maxLen bytes.
-func ValidWebhookURL(raw string, maxLen int) error {
+func ValidCallbackURL(raw string, maxLen int) error {
 	if len(raw) > maxLen {
-		return invalid("webhook url too long")
+		return invalid("callback url too long")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
-		return invalid("webhook must be an absolute http(s) url without credentials")
+		return invalid("callback must be an absolute http(s) url without credentials")
 	}
 	return nil
 }

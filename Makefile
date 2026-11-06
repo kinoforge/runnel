@@ -39,7 +39,7 @@ vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
 fuzz:
-	for f in FuzzDurationJSON FuzzParseAPIKey FuzzScheduleSpec FuzzWebhookURL FuzzDecide; do \
+	for f in FuzzDurationJSON FuzzParseAPIKey FuzzScheduleSpec FuzzCallbackURL FuzzDecide; do \
 		go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) . || exit 1; done
 	go test -run '^$$' -fuzz '^FuzzPreferWait$$' -fuzztime $(FUZZTIME) ./server
 

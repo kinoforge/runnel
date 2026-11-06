@@ -19,14 +19,14 @@ Runnel is developed by [Kinoforge](https://kinoforge.dev) and released under Apa
 | Term | What it is |
 |---|---|
 | **Job** | one piece of work: a `kind` (which handler runs it), a JSON payload, options |
-| **Queue** | where jobs wait, with its own limits: how many run at once (`max_running`), per tenant (`tenant_max_running`), how fast they start (`rate`), how many may wait (`max_queued`) |
-| **Resource** | a limit shared by the jobs of every queue that name it (`max_running`), such as one supplier account or one GPU box |
-| **Tenant** | whoever the job is for, so one customer cannot crowd out the others |
-| **Worker** | goroutines in your service, or processes anywhere, claiming the next jobs their limits allow |
+| **Queue** | where jobs wait, with its own limits: how many run at once (`max_running`), per group (`group_max_running`), how fast they start (`rate`), how many may wait (`max_queued`) |
+| **Pool** | a number of `slots` shared by every job that names it, whatever its queue, such as one provider account or one GPU box |
+| **Group** | any id you give a job (a customer, an API key, a project) with its own caps, so one group cannot crowd out the others |
+| **Worker** | your process, in Go or any language over HTTP, with slots of its own; it claims the next jobs the limits allow and runs one per slot |
 | **Lease** | a worker's claim on a job, kept alive by heartbeats; when the worker dies, the job goes back |
 | **Namespace** | one isolated set of queues, jobs, settings and keys, usually one per service |
 
-A caller gets a result in one of three ways: it holds the request open (`Prefer: wait`), comes back later (`GET` the job), or receives a webhook. With direct start, `Worker.Do` runs the job on the caller itself when a slot is free.
+A caller gets a result in one of three ways: it holds the request open (`Prefer: wait`), comes back later (`GET` the job), or receives a callback. With direct start, `Worker.Do` runs the job on the caller itself when a slot is free.
 
 When a handler cannot finish a job, what it returns says what happens next:
 
@@ -36,7 +36,7 @@ When a handler cannot finish a job, what it returns says what happens next:
 | any error | retry with backoff; when attempts run out, the next fallback, then dead |
 | `runnel.Fail(err)` | stop retrying: next fallback, or dead |
 | `runnel.Fallback(err)` | move to the next fallback now |
-| `runnel.Busy(d)` | the resource is full: try again after `d` without using an attempt |
+| `runnel.Busy(d)` | the pool is full: try again after `d` without using an attempt |
 | `runnel.Pending(handle, d)` | an outside task is running: poll it with `handle` after `d` |
 | `runnel.RetryIn(d, err)` | retry after exactly `d` |
 
@@ -49,17 +49,17 @@ store, _ := postgres.Open("postgres://localhost/app")
 store.Migrate(ctx)
 
 c := runnel.NewClient(store, "collector")
-c.SetQueue(ctx, runnel.QueueConfig{Name: "collect", TenantMaxRunning: 2, MaxQueued: 10000})
-c.SetResource(ctx, runnel.ResourceConfig{Name: "supplier-a", MaxRunning: 5})
-c.SetResource(ctx, runnel.ResourceConfig{Name: "supplier-b", MaxRunning: 20})
+c.SetQueue(ctx, runnel.QueueConfig{Name: "collect", GroupMaxRunning: 2, MaxQueued: 10000})
+c.SetPool(ctx, runnel.PoolConfig{Name: "supplier-a", MaxRunning: 5})
+c.SetPool(ctx, runnel.PoolConfig{Name: "supplier-b", MaxRunning: 20})
 
 c.Enqueue(ctx, "collect", "sales.collect", Request{Shop: 42},
-	runnel.Tenant("shop-42"),
-	runnel.Resource("supplier-a"),
-	runnel.StartWithin(time.Minute),
-	runnel.Fallbacks(runnel.Target{Resource: "supplier-b", Kind: "sales.collect.b"}),
+	runnel.Group("shop-42"),
+	runnel.Pool("supplier-a"),
+	runnel.StartTimeout(time.Minute),
+	runnel.Fallbacks(runnel.Target{Pool: "supplier-b", Kind: "sales.collect.b"}),
 	runnel.Unique("sales:42:2026-11-01", 24*time.Hour),
-	runnel.Webhook("https://app.example.com/hooks/runnel"))
+	runnel.Callback("https://app.example.com/hooks/runnel"))
 
 w := runnel.NewWorker(store, "collector", runnel.WorkerConfig{Queues: []string{"collect"}, Concurrency: 50})
 w.HandleFunc("sales.collect", func(ctx context.Context, j *runnel.Job) error {
@@ -113,12 +113,12 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 | | |
 |---|---|
 | Priority | -1000 to 1000. Higher runs first, then oldest first. |
-| Fair claiming | A tenant at its `tenant_max_running`, or a resource at its `max_running`, is skipped, and the jobs behind it run. |
-| Limits | Max running per queue, per tenant, per resource and per tenant in a resource. Token-bucket rates per queue and per tenant. All are enforced across every worker. |
-| Queued caps | `max_queued` and `tenant_max_queued` refuse new jobs with `429` and `Retry-After` instead of letting a queue grow without end. |
+| Fair claiming | A group at its `group_max_running`, or a pool with no free `slots`, is skipped, and the jobs behind it run. |
+| Limits | Max running per queue, per group, per pool and per group in a pool. Token-bucket rates per queue and per group. All are enforced across every worker. |
+| Queued caps | `max_queued` and `group_max_queued` refuse new jobs with `429` and `Retry-After` instead of letting a queue grow without end. |
 | Retries | Exponential backoff with jitter, per job or per queue. Every attempt's error is kept. |
-| Fallbacks | An ordered list of other queues, kinds or resources. |
-| Start deadlines | `StartWithin(d)`: a job that waited `d` without starting moves to its next fallback. Busy requeues keep the time already waited. |
+| Fallbacks | An ordered list of other queues, kinds or pools. |
+| Start deadlines | `StartTimeout(d)`: a job that waited `d` without starting moves to its next fallback. Busy requeues keep the time already waited. |
 | Leases | Workers heartbeat their jobs. A crashed worker's jobs return to the queue. Cancelling a running job stops its handler. |
 | Waiting for results | `Prefer: wait=N` on enqueue and on read, `Client.Wait`, `EnqueueAndWait`. Postgres and Redis wake waiters the moment a job ends. |
 | Direct start | `Worker.Do` runs a job on the calling goroutine when a slot is free. It is still a real job, with retries and fallbacks. |
@@ -126,8 +126,8 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 | Unique jobs | By key, while the job runs or for a time window. |
 | Workflows | Chains and DAGs. Steps read their parents' results; a failure cancels everything downstream. |
 | Cron | Cron specs, `@every`, time zones. Any number of maintainers, and each firing happens once. |
-| Webhooks | HMAC-SHA256 signed, retried, never redirected, never sent to private addresses. |
-| Namespaces | Each service gets its own queues, resources, schedules, webhook secret and API keys with roles. |
+| Callbacks | HMAC-SHA256 signed, retried, never redirected, never sent to private addresses. |
+| Namespaces | Each service gets its own queues, pools, schedules, callback secret and API keys with roles. |
 | One clock | Leases and schedules are measured on the store's clock, so servers whose clocks drift apart still agree. |
 | Operations | Pause and resume, retention with optional archive, Prometheus metrics, OpenAPI document, `runnel bench`. |
 
@@ -153,7 +153,7 @@ The hybrid store (`hybrid:/var/lib/runnel`) keeps a small record of each active 
 
 All stores pass the same conformance suite in `store/storetest`, under the race detector.
 
-On Redis, a claim examines at most 2,000 waiting jobs. If one tenant at its limit has more jobs than that ahead of everyone else, other tenants wait until its jobs drain below that depth. The SQL stores skip capped tenants inside the query and have no such bound.
+On Redis, a claim examines at most 2,000 waiting jobs. If one group at its limit has more jobs than that ahead of everyone else, other groups wait until its jobs drain below that depth. The SQL stores skip capped groups inside the query and have no such bound.
 
 ## Server
 
@@ -162,10 +162,10 @@ docker compose -f deploy/compose.yml up -d postgres
 export RUNNEL_STORE='postgres://runnel:runnel@localhost:55432/runnel?sslmode=disable'
 export RUNNEL_ADMIN_TOKEN=$(openssl rand -hex 24)
 
-runnel ns create collector --webhook-secret "$(openssl rand -hex 16)"
+runnel ns create collector --callback-secret "$(openssl rand -hex 16)"
 runnel key create collector --roles producer,reader --name api
 runnel key create collector --roles worker --name workers
-runnel queue set collector collect --json '{"tenant_max_running":2,"max_queued":10000}'
+runnel queue set collector collect --json '{"group_max_running":2,"max_queued":10000}'
 runnel serve
 ```
 
@@ -176,7 +176,7 @@ Enqueue from any language, and wait up to 30 seconds for the answer:
 ```
 curl -i localhost:8700/v1/ns/collector/jobs \
   -H "Authorization: Bearer $PRODUCER_KEY" -H "Prefer: wait=30" \
-  -d '{"queue":"collect","kind":"sales.collect","payload":{"shop":42},"tenant":"shop-42"}'
+  -d '{"queue":"collect","kind":"sales.collect","payload":{"shop":42},"group":"shop-42"}'
 ```
 
 The answer is `200` with the finished job, or `202` with a `Location` and `Retry-After` if it is still running. `GET` the location with `Prefer: wait=30` to wait again. Without `Prefer` the answer is `201` at once.
@@ -193,9 +193,9 @@ POST /v1/ns/collector/jobs/{id}/finish  {"worker":"py-1","version":3,"outcome":{
 
 Errors are RFC 9457 problem documents. Bodies are size-capped and parsed strictly. API keys are shown once and stored as SHA-256 hashes; a worker key can only finish jobs it claimed itself.
 
-### Webhooks
+### Callbacks
 
-When a job finishes, Runnel posts its summary to the job's webhook URL:
+When a job finishes, Runnel posts its summary to the job's callback URL:
 
 ```
 Runnel-Event: job.completed
@@ -218,7 +218,7 @@ If the transaction rolls back, the job never existed. If it commits, the job is 
 
 ## How it works
 
-- **SQL stores.** Claims of queues without limits lock rows with `SKIP LOCKED`, so workers never wait on each other. Claims under limits serialize per namespace, so counts stay exact, and read light rows in rounds that skip tenants and resources at their limit. Finishing a job needs no namespace lock: it updates the row under its version, records an event, releases its unique key and settles its dependants in one transaction. Postgres notifications are sent after commit and batched, so they never serialize commits. Each worker sends the results that pile up while a commit is in flight as one transaction, which adds no delay when it is idle.
+- **SQL stores.** Claims of queues without limits lock rows with `SKIP LOCKED`, so workers never wait on each other. Claims under limits serialize per namespace, so counts stay exact, and read light rows in rounds that skip groups and pools at their limit. Finishing a job needs no namespace lock: it updates the row under its version, records an event, releases its unique key and settles its dependants in one transaction. Postgres notifications are sent after commit and batched, so they never serialize commits. Each worker sends the results that pile up while a commit is in flight as one transaction, which adds no delay when it is idle.
 - **Durability.** Enqueues and results are committed to disk before they are acknowledged. On Postgres, claims commit without waiting for the disk: after a crash the last claims may be forgotten, and those jobs run again, which at-least-once delivery allows anyway.
 - **Redis family.** The same rules run as Lua scripts over hashes and sorted sets. A namespace's keys share a hash tag, so it works on Redis Cluster.
 - **Hybrid store.** The same rules run on in-memory B-trees over fixed-size job records with no pointers, which the garbage collector skips. Each call logs what it changed as one checksummed record in a write-ahead log (`store/hybrid/wal`); job bodies are read back from the log and snapshots through the OS page cache. Snapshots are written while calls go on. Restart loads the newest snapshot and replays the log after it, dropping a record cut short by a crash. Claims return without waiting for the disk, like on Postgres: the finish that follows makes the claim durable too.
@@ -226,7 +226,7 @@ If the transaction rolls back, the job never existed. If it commits, the job is 
 
 ## Benchmarks
 
-`runnel bench` enqueues 20,000 jobs in batches of 100, then 4 workers with 25 slots each run them with an empty handler. "Fair" runs 10,000 jobs spread over 50 tenants with `tenant_max_running: 2`, the limited path. Latency is one job from enqueue to finished result, through `Worker.Do` (direct start) or `EnqueueAndWait`.
+`runnel bench` enqueues 20,000 jobs in batches of 100, then 4 workers with 25 slots each run them with an empty handler. "Fair" runs 10,000 jobs spread over 50 groups with `group_max_running: 2`, the limited path. Latency is one job from enqueue to finished result, through `Worker.Do` (direct start) or `EnqueueAndWait`.
 
 | Store | Enqueue | Run | Run, fair | Direct start p50 | Enqueue and wait p50 |
 |---|---|---|---|---|---|
@@ -273,7 +273,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md). Security reports go through [SEC
 - SDKs for Python and TypeScript, generated from the OpenAPI document with a hand-written worker loop.
 - A dashboard built into `runnel serve`.
 - Worker labels, so jobs can ask for workers with certain abilities (a GPU, a region).
-- Per-tenant ready sets on Redis, removing the 2,000-job examination bound.
+- Per-group ready sets on Redis, removing the 2,000-job examination bound.
 
 ## License
 

@@ -35,10 +35,10 @@ func fill(t *testing.T, s runnel.Store) {
 	if err := c.SetQueue(ctx, runnel.QueueConfig{Name: "q", MaxRunning: 5, Rate: 100}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.SetResource(ctx, runnel.ResourceConfig{Name: "mail-1", MaxRunning: 2}); err != nil {
+	if err := c.SetPool(ctx, runnel.PoolConfig{Name: "mail-1", Slots: 2}); err != nil {
 		t.Fatal(err)
 	}
-	first, err := c.Enqueue(ctx, "q", "k", map[string]int{"n": 1}, runnel.Resource("mail-1"))
+	first, err := c.Enqueue(ctx, "q", "k", map[string]int{"n": 1}, runnel.Pool("mail-1"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,22 +5,22 @@ import (
 	"time"
 )
 
-const maxWebhookSecret = 256
+const maxCallbackSecret = 256
 
-// Namespace is one isolated queue system, usually one per service. WebhookSecret
-// signs its webhooks.
+// Namespace is one isolated queue system, usually one per service. CallbackSecret
+// signs its callbacks.
 type Namespace struct {
-	Name          string    `json:"name"`
-	WebhookSecret string    `json:"webhook_secret,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	Name           string    `json:"name"`
+	CallbackSecret string    `json:"callback_secret,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (n Namespace) Validate() error {
 	if !ValidNamespace(n.Name) {
 		return invalid("namespace %q must match %s", n.Name, namespacePattern)
 	}
-	if len(n.WebhookSecret) > maxWebhookSecret {
-		return invalid("webhook secret too long")
+	if len(n.CallbackSecret) > maxCallbackSecret {
+		return invalid("callback secret too long")
 	}
 	return nil
 }

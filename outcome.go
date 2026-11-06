@@ -27,7 +27,7 @@ const (
 	// OutcomeFallback moves the job to its next fallback now.
 	OutcomeFallback OutcomeKind = "fallback"
 	// OutcomeBusy puts the job back for Delay without using an attempt, for a
-	// resource that is full.
+	// pool that is full.
 	OutcomeBusy OutcomeKind = "busy"
 	// OutcomePending parks the job while an outside task runs; its poller is called
 	// with Handle after Delay.
@@ -191,8 +191,8 @@ func moveOn(n *Job, now time.Time) {
 		if t.Kind != "" {
 			n.Kind = t.Kind
 		}
-		if t.Resource != "" {
-			n.Resource = t.Resource
+		if t.Pool != "" {
+			n.Pool = t.Pool
 		}
 		n.Attempt, n.State, n.RunAt, n.WaitingSince = 0, StateWaiting, now, now
 		n.computeStartBy()

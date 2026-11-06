@@ -74,7 +74,7 @@ func (s *Store) List(ctx context.Context, ns string, q runnel.Query) ([]*runnel.
 			return nil, "", err
 		}
 		for _, j := range jobs {
-			if (q.Queue == "" || j.Queue == q.Queue) && (q.Kind == "" || j.Kind == q.Kind) && (q.Tenant == "" || j.Tenant == q.Tenant) &&
+			if (q.Queue == "" || j.Queue == q.Queue) && (q.Kind == "" || j.Kind == q.Kind) && (q.Group == "" || j.Group == q.Group) &&
 				(q.State == "" || j.State == q.State) {
 				out = append(out, j)
 				if len(out) == q.Limit {

@@ -28,7 +28,7 @@ type Config struct {
 	Log        Log        `yaml:"log"`
 	Server     Server     `yaml:"server"`
 	Maintainer Maintainer `yaml:"maintainer"`
-	Webhooks   Webhooks   `yaml:"webhooks"`
+	Callbacks  Callbacks  `yaml:"callbacks"`
 	Limits     Limits     `yaml:"limits"`
 	Memory     Memory     `yaml:"memory"`
 	Hybrid     Hybrid     `yaml:"hybrid"`
@@ -40,19 +40,19 @@ type Log struct {
 }
 
 type Server struct {
-	Addr              string        `yaml:"addr" env:"RUNNEL_ADDR"`
-	AdminToken        string        `yaml:"admin_token" env:"RUNNEL_ADMIN_TOKEN"`
-	MaxBody           int64         `yaml:"max_body"`
-	MaxClaimWait      time.Duration `yaml:"max_claim_wait"`
-	MaxResultWait     time.Duration `yaml:"max_result_wait"`
-	RetryAfter        time.Duration `yaml:"retry_after"`
-	AllowHTTPWebhooks bool          `yaml:"allow_http_webhooks"`
-	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout"`
-	ReadTimeout       time.Duration `yaml:"read_timeout"`
-	WriteTimeout      time.Duration `yaml:"write_timeout"`
-	IdleTimeout       time.Duration `yaml:"idle_timeout"`
-	MaxHeaderBytes    int           `yaml:"max_header_bytes"`
-	ShutdownTimeout   time.Duration `yaml:"shutdown_timeout"`
+	Addr               string        `yaml:"addr" env:"RUNNEL_ADDR"`
+	AdminToken         string        `yaml:"admin_token" env:"RUNNEL_ADMIN_TOKEN"`
+	MaxBody            int64         `yaml:"max_body"`
+	MaxClaimWait       time.Duration `yaml:"max_claim_wait"`
+	MaxResultWait      time.Duration `yaml:"max_result_wait"`
+	RetryAfter         time.Duration `yaml:"retry_after"`
+	AllowHTTPCallbacks bool          `yaml:"allow_http_callbacks"`
+	ReadHeaderTimeout  time.Duration `yaml:"read_header_timeout"`
+	ReadTimeout        time.Duration `yaml:"read_timeout"`
+	WriteTimeout       time.Duration `yaml:"write_timeout"`
+	IdleTimeout        time.Duration `yaml:"idle_timeout"`
+	MaxHeaderBytes     int           `yaml:"max_header_bytes"`
+	ShutdownTimeout    time.Duration `yaml:"shutdown_timeout"`
 }
 
 type Maintainer struct {
@@ -73,7 +73,7 @@ type Retention struct {
 	Undelivered time.Duration `yaml:"undelivered"`
 }
 
-type Webhooks struct {
+type Callbacks struct {
 	Enabled      bool          `yaml:"enabled"`
 	Concurrency  int           `yaml:"concurrency"`
 	Timeout      time.Duration `yaml:"timeout"`
@@ -82,12 +82,12 @@ type Webhooks struct {
 
 // Limits mirrors runnel.Limits so it converts directly.
 type Limits struct {
-	MaxPayload    int `yaml:"max_payload"`
-	MaxFallbacks  int `yaml:"max_fallbacks"`
-	MaxDependsOn  int `yaml:"max_depends_on"`
-	MaxMeta       int `yaml:"max_meta"`
-	MaxUniqueKey  int `yaml:"max_unique_key"`
-	MaxWebhookURL int `yaml:"max_webhook_url"`
+	MaxPayload     int `yaml:"max_payload"`
+	MaxFallbacks   int `yaml:"max_fallbacks"`
+	MaxDependsOn   int `yaml:"max_depends_on"`
+	MaxMeta        int `yaml:"max_meta"`
+	MaxUniqueKey   int `yaml:"max_unique_key"`
+	MaxCallbackURL int `yaml:"max_callback_url"`
 }
 
 func Default() Config {
@@ -104,7 +104,7 @@ func Default() Config {
 			ShutdownTimeout:   15 * time.Second,
 		},
 		Maintainer: Maintainer{Enabled: true, Retention: Retention(runnel.DefaultRetention)},
-		Webhooks:   Webhooks{Enabled: true},
+		Callbacks:  Callbacks{Enabled: true},
 		Limits:     Limits(runnel.DefaultLimits),
 		Memory:     Memory{HeapPercent: 70},
 		Hybrid:     defaultHybrid(),

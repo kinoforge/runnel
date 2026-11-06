@@ -30,15 +30,15 @@ var openAPI []byte
 // and MaxResultWait cap long-polls for claims (30s) and results (60s).
 // RetryAfter is the hint sent with 202 and 429 answers (1s).
 type Config struct {
-	AdminToken        string
-	MaxBody           int64
-	Limits            runnel.Limits
-	AllowHTTPWebhooks bool
-	MaxClaimWait      time.Duration
-	MaxResultWait     time.Duration
-	RetryAfter        time.Duration
-	Logger            *slog.Logger
-	Registry          *prometheus.Registry
+	AdminToken         string
+	MaxBody            int64
+	Limits             runnel.Limits
+	AllowHTTPCallbacks bool
+	MaxClaimWait       time.Duration
+	MaxResultWait      time.Duration
+	RetryAfter         time.Duration
+	Logger             *slog.Logger
+	Registry           *prometheus.Registry
 }
 
 // Server is the Runnel HTTP API: namespaces, keys, jobs, configuration and the

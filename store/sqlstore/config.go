@@ -21,10 +21,10 @@ func (s *Store) queueConfigs(ctx context.Context, q querier, ns string) (map[str
 	return out, err
 }
 
-func (s *Store) resourceConfigs(ctx context.Context, q querier, ns string) (map[string]runnel.ResourceConfig, error) {
-	out := map[string]runnel.ResourceConfig{}
-	err := s.eachConfig(ctx, q, ns, runnel.ConfigResource, func(name string, b []byte) error {
-		var c runnel.ResourceConfig
+func (s *Store) poolConfigs(ctx context.Context, q querier, ns string) (map[string]runnel.PoolConfig, error) {
+	out := map[string]runnel.PoolConfig{}
+	err := s.eachConfig(ctx, q, ns, runnel.ConfigPool, func(name string, b []byte) error {
+		var c runnel.PoolConfig
 		if err := json.Unmarshal(b, &c); err != nil {
 			return err
 		}

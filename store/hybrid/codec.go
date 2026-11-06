@@ -133,7 +133,7 @@ func (e *enc) named(h *job, names [5]string) {
 func decodeHot(d *dec, t *syms) job {
 	var h job
 	copy(h.id[:], d.bytes())
-	for _, p := range []*sym{&h.queue, &h.kind, &h.tenant, &h.resource, &h.worker} {
+	for _, p := range []*sym{&h.queue, &h.kind, &h.group, &h.pool, &h.worker} {
 		*p = t.id(d.str())
 	}
 	h.state, h.flags = d.byte(), d.byte()

@@ -99,8 +99,8 @@ func (c *Client) prepare(ctx context.Context, j *Job, now time.Time) error {
 	if j.Timeout == 0 {
 		j.Timeout = cfg.Timeout
 	}
-	if j.StartWithin == 0 {
-		j.StartWithin = cfg.StartWithin
+	if j.StartTimeout == 0 {
+		j.StartTimeout = cfg.StartTimeout
 	}
 	return j.Prepare(now, c.limits)
 }
@@ -281,19 +281,19 @@ func (c *Client) DeleteQueue(ctx context.Context, name string) error {
 	return c.store.DeleteConfig(ctx, c.ns, ConfigQueue, name)
 }
 
-func (c *Client) SetResource(ctx context.Context, p ResourceConfig) error {
+func (c *Client) SetPool(ctx context.Context, p PoolConfig) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	return PutTyped(ctx, c.store, c.ns, ConfigResource, p.Name, p)
+	return PutTyped(ctx, c.store, c.ns, ConfigPool, p.Name, p)
 }
 
-func (c *Client) Resources(ctx context.Context) (map[string]ResourceConfig, error) {
-	return LoadTyped[ResourceConfig](ctx, c.store, c.ns, ConfigResource)
+func (c *Client) Pools(ctx context.Context) (map[string]PoolConfig, error) {
+	return LoadTyped[PoolConfig](ctx, c.store, c.ns, ConfigPool)
 }
 
-func (c *Client) DeleteResource(ctx context.Context, name string) error {
-	return c.store.DeleteConfig(ctx, c.ns, ConfigResource, name)
+func (c *Client) DeletePool(ctx context.Context, name string) error {
+	return c.store.DeleteConfig(ctx, c.ns, ConfigPool, name)
 }
 
 func (c *Client) SetSchedule(ctx context.Context, s Schedule) error {

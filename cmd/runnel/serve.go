@@ -22,11 +22,11 @@ func newServeFlags(fs *flag.FlagSet) serveFlags {
 	return serveFlags{
 		addr:         fs.String("addr", "", "listen address (default :8700)"),
 		token:        fs.String("admin-token", "", "admin token (default RUNNEL_ADMIN_TOKEN)"),
-		noMaintain:   fs.Bool("no-maintain", false, "do not run lease recovery, start waits, cron, webhooks and pruning here"),
+		noMaintain:   fs.Bool("no-maintain", false, "do not run lease recovery, start waits, cron, callbacks and pruning here"),
 		archive:      fs.Bool("archive", false, "copy pruned jobs to the archive"),
-		noHooks:      fs.Bool("no-webhooks", false, "do not deliver webhooks"),
-		privateHooks: fs.Bool("allow-private-webhooks", false, "allow webhooks to private and loopback addresses"),
-		httpHooks:    fs.Bool("allow-http-webhooks", false, "allow plain http webhook urls"),
+		noHooks:      fs.Bool("no-callbacks", false, "do not deliver callbacks"),
+		privateHooks: fs.Bool("allow-private-callbacks", false, "allow callbacks to private and loopback addresses"),
+		httpHooks:    fs.Bool("allow-http-callbacks", false, "allow plain http callback urls"),
 		jsonLogs:     fs.Bool("json-logs", false, "log as JSON"),
 	}
 }
@@ -43,12 +43,12 @@ func (f serveFlags) apply(fs *flag.FlagSet, cfg *config.Config) {
 			cfg.Maintainer.Enabled = !*f.noMaintain
 		case "archive":
 			cfg.Maintainer.Archive = *f.archive
-		case "no-webhooks":
-			cfg.Webhooks.Enabled = !*f.noHooks
-		case "allow-private-webhooks":
-			cfg.Webhooks.AllowPrivate = *f.privateHooks
-		case "allow-http-webhooks":
-			cfg.Server.AllowHTTPWebhooks = *f.httpHooks
+		case "no-callbacks":
+			cfg.Callbacks.Enabled = !*f.noHooks
+		case "allow-private-callbacks":
+			cfg.Callbacks.AllowPrivate = *f.privateHooks
+		case "allow-http-callbacks":
+			cfg.Server.AllowHTTPCallbacks = *f.httpHooks
 		case "json-logs":
 			if *f.jsonLogs {
 				cfg.Log.Format = "json"
@@ -93,14 +93,14 @@ func serve(ctx context.Context, args []string) error {
 
 func serverConfig(cfg config.Config, log *slog.Logger) server.Config {
 	return server.Config{
-		AdminToken:        cfg.Server.AdminToken,
-		MaxBody:           cfg.Server.MaxBody,
-		Limits:            runnel.Limits(cfg.Limits),
-		AllowHTTPWebhooks: cfg.Server.AllowHTTPWebhooks,
-		MaxClaimWait:      cfg.Server.MaxClaimWait,
-		MaxResultWait:     cfg.Server.MaxResultWait,
-		RetryAfter:        cfg.Server.RetryAfter,
-		Logger:            log,
+		AdminToken:         cfg.Server.AdminToken,
+		MaxBody:            cfg.Server.MaxBody,
+		Limits:             runnel.Limits(cfg.Limits),
+		AllowHTTPCallbacks: cfg.Server.AllowHTTPCallbacks,
+		MaxClaimWait:       cfg.Server.MaxClaimWait,
+		MaxResultWait:      cfg.Server.MaxResultWait,
+		RetryAfter:         cfg.Server.RetryAfter,
+		Logger:             log,
 	}
 }
 
@@ -124,11 +124,11 @@ func runMaintainer(ctx context.Context, s runnel.Store, cfg config.Config, log *
 		Archive:    cfg.Maintainer.Archive,
 		Batch:      cfg.Maintainer.Batch,
 		Logger:     log,
-		Webhooks: runnel.WebhookConfig{
-			Enabled:      cfg.Webhooks.Enabled,
-			Concurrency:  cfg.Webhooks.Concurrency,
-			Timeout:      cfg.Webhooks.Timeout,
-			AllowPrivate: cfg.Webhooks.AllowPrivate,
+		Callbacks: runnel.CallbackConfig{
+			Enabled:      cfg.Callbacks.Enabled,
+			Concurrency:  cfg.Callbacks.Concurrency,
+			Timeout:      cfg.Callbacks.Timeout,
+			AllowPrivate: cfg.Callbacks.AllowPrivate,
 		},
 	})
 	if err := m.Run(ctx); err != nil {

@@ -58,25 +58,25 @@ const Waiting uint8 = 2
 // matter for a waiting job; Ready puts it in claim order rather than in run
 // time order.
 type Job struct {
-	NS                  string
-	ID                  ID
-	State               uint8
-	Finished            int64
-	Prio                int32
-	RunAt, StartBy      int64
-	Ready               bool
-	Queue, Kind, Tenant string
-	Data                []byte
+	NS                 string
+	ID                 ID
+	State              uint8
+	Finished           int64
+	Prio               int32
+	RunAt, StartBy     int64
+	Ready              bool
+	Queue, Kind, Group string
+	Data               []byte
 }
 
 func (j *Job) waiting() bool { return j.State == Waiting }
 
 // Count is a namespace's number of jobs in one queue and state, or, with
-// Tenant set, its number of waiting jobs of one tenant in one queue.
+// Group set, its number of waiting jobs of one group in one queue.
 type Count struct {
 	NS, Queue string
 	State     uint8
-	Tenant    string
+	Group     string
 }
 
 // Store is a cold store. Reads run concurrently; writes take turns, since
@@ -210,7 +210,7 @@ func (s *Store) Meta(ns string, id ID) (Job, bool, error) {
 // Counts returns every count in the store.
 func (s *Store) Counts() (map[Count]int64, error) {
 	out := map[Count]int64{}
-	for _, kind := range []byte{kCount, kTenant} {
+	for _, kind := range []byte{kCount, kGroup} {
 		it, err := s.db.NewIter(&pebble.IterOptions{LowerBound: []byte{kind}, UpperBound: []byte{kind + 1}})
 		if err != nil {
 			return nil, err
@@ -259,8 +259,8 @@ func drop(b *pebble.Batch, ns string, id ID, delta map[Count]int64) error {
 // count adds d to the counts j is in.
 func count(j *Job, delta map[Count]int64, d int64) {
 	delta[Count{NS: j.NS, Queue: j.Queue, State: j.State}] += d
-	if j.waiting() && j.Tenant != "" {
-		delta[Count{NS: j.NS, Queue: j.Queue, State: j.State, Tenant: j.Tenant}] += d
+	if j.waiting() && j.Group != "" {
+		delta[Count{NS: j.NS, Queue: j.Queue, State: j.State, Group: j.Group}] += d
 	}
 }
 

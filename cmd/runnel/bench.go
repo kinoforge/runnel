@@ -44,8 +44,8 @@ func bench(ctx context.Context, args []string) error {
 	workers := c.fs.Int("workers", 4, "workers")
 	concurrency := c.fs.Int("concurrency", 25, "slots per worker")
 	batch := c.fs.Int("batch", 100, "jobs per enqueue call")
-	tenants := c.fs.Int("tenants", 0, "spread jobs over this many tenants")
-	tenantMaxRunning := c.fs.Int("tenant-max-running", 0, "queue tenant_max_running")
+	groups := c.fs.Int("groups", 0, "spread jobs over this many groups")
+	groupMaxRunning := c.fs.Int("group-max-running", 0, "queue group_max_running")
 	samples := c.fs.Int("latency", 200, "single jobs timed from enqueue to result")
 	size := c.fs.Int("payload", 0, "payload bytes per job")
 	if _, err := c.parse(args, 0); err != nil {
@@ -70,7 +70,7 @@ func bench(ctx context.Context, args []string) error {
 	ns := "bench-" + strconv.FormatInt(time.Now().UnixNano()%1e12, 36)
 	cl := runnel.NewClient(s, ns)
 	defer cleanup(context.WithoutCancel(ctx), s, ns)
-	if err := cl.SetQueue(ctx, runnel.QueueConfig{Name: "bench", TenantMaxRunning: *tenantMaxRunning}); err != nil {
+	if err := cl.SetQueue(ctx, runnel.QueueConfig{Name: "bench", GroupMaxRunning: *groupMaxRunning}); err != nil {
 		return err
 	}
 
@@ -79,8 +79,8 @@ func bench(ctx context.Context, args []string) error {
 		jobs := make([]*runnel.Job, 0, *batch)
 		for k := i; k < min(i+*batch, *total); k++ {
 			var opts []runnel.Option
-			if *tenants > 0 {
-				opts = append(opts, runnel.Tenant("t"+strconv.Itoa(rand.IntN(*tenants))))
+			if *groups > 0 {
+				opts = append(opts, runnel.Group("t"+strconv.Itoa(rand.IntN(*groups))))
 			}
 			j, _ := runnel.NewJob("bench", "noop", payload, opts...)
 			jobs = append(jobs, j)
@@ -140,7 +140,7 @@ func bench(ctx context.Context, args []string) error {
 
 	tw := table()
 	fmt.Fprintf(tw, "store\t%s\n", redact(cfg.Store))
-	fmt.Fprintf(tw, "jobs\t%d (batch %d, payload %d bytes, %d tenants, tenant max running %d)\n", *total, *batch, *size, *tenants, *tenantMaxRunning)
+	fmt.Fprintf(tw, "jobs\t%d (batch %d, payload %d bytes, %d groups, group max running %d)\n", *total, *batch, *size, *groups, *groupMaxRunning)
 	fmt.Fprintf(tw, "workers\t%d x %d slots\n", *workers, *concurrency)
 	fmt.Fprintf(tw, "enqueue\t%.0f jobs/s\n", float64(*total)/enqueued.Seconds())
 	fmt.Fprintf(tw, "run\t%.0f jobs/s (claim, handle, finish)\n", float64(*total)/ran.Seconds())

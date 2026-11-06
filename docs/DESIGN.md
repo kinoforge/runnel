@@ -36,7 +36,7 @@ running    --no attempts or targets-->    dead
 not final  --Cancel-->                    cancelled
 ```
 
-The words are plain on purpose: job, queue, tenant, resource, worker, lease, namespace. SPEC.md defines each one.
+The words are plain on purpose: job, queue, group, pool, worker, lease, namespace. SPEC.md defines each one.
 
 ## One store, no broker
 
@@ -63,28 +63,28 @@ A namespace is the unit of isolation: its own queues, jobs, settings, events and
 
 There are two kinds, applied at different moments:
 
-- **At enqueue: queued caps** (`max_queued`, `tenant_max_queued`). These are back-pressure: the caller gets `ErrQueueFull` or `ErrTenantFull` (HTTP 429 with `Retry-After`) and can slow down, shed load or tell its own user.
-- **At claim: how much runs** (`max_running`, `tenant_max_running`, resource `max_running` and `tenant_max_running`, `rate` and `tenant_rate`). These are checked when a job starts, because a slot frees when a job ends.
+- **At enqueue: queued caps** (`max_queued`, `group_max_queued`). These are back-pressure: the caller gets `ErrQueueFull` or `ErrGroupFull` (HTTP 429 with `Retry-After`) and can slow down, shed load or tell its own user.
+- **At claim: how much runs** (`max_running`, `group_max_running`, pool `slots` and `group_slots`, `rate` and `group_rate`). These are checked when a job starts, because a slot frees when a job ends.
 
 Details:
 
-- **Active means running or polling.** A polling job still holds its slot, because the outside task it started still uses the resource, such as a render running at a provider. For the same reason, polls skip the limits: they already hold their slot.
-- **Resources** are limits shared across queues, such as one partner account several queues call.
+- **Active means running or polling.** A polling job still holds its slot, because the outside task it started still uses the pool, such as a render running at a provider. For the same reason, polls skip the limits: they already hold their slot.
+- **Pools** are limits shared across queues, such as one partner account several queues call.
 - **Rate limits are token buckets kept in the store,** so every worker on every host shares them.
 - **`Busy` is not a failure.** "The provider is at capacity" should not use up the attempts a job has for real errors. `Busy` puts the job back without using an attempt and without resetting how long it has waited.
-- **Fallbacks and start windows.** A job lists targets (queue, kind, resource) to move to when it fails, runs out of attempts, or waits longer than `start_within` to start. Each target gets a fresh set of attempts.
+- **Fallbacks and start timeouts.** A job lists targets (queue, kind, pool) to move to when it fails, runs out of attempts, or waits longer than `start_timeout` to start. Each target gets a fresh set of attempts.
 
 ## Fair claiming
 
-Jobs are claimed by priority, then time. Suppose the first 400 jobs in line belong to a tenant already at its cap. A simple claim reads the first rows, finds them all blocked, and returns nothing, so the other tenants wait behind a backlog that cannot run.
+Jobs are claimed by priority, then time. Suppose the first 400 jobs in line belong to a group already at its cap. A simple claim reads the first rows, finds them all blocked, and returns nothing, so the other groups wait behind a backlog that cannot run.
 
-- **SQL stores** scan light rows (id, queue, tenant, resource, priority, start time) and admit them in order. Each tenant, resource or queue found full is excluded from the next scan, for up to 4 rounds of `max(need*4, 32)` rows each. A capped tenant costs one round, not a read of its whole backlog.
-- **Redis** does the same in a Lua script that pages through the ready set, doubling the page up to 500 and stopping after 2000 jobs examined. **Known limit:** a capped tenant with more than 2000 jobs ahead of the others delays them until its own slots free. Per-tenant ready sets would remove the bound, and they are on the roadmap.
+- **SQL stores** scan light rows (id, queue, group, pool, priority, start time) and admit them in order. Each group, pool or queue found full is excluded from the next scan, for up to 4 rounds of `max(need*4, 32)` rows each. A capped group costs one round, not a read of its whole backlog.
+- **Redis** does the same in a Lua script that pages through the ready set, doubling the page up to 500 and stopping after 2000 jobs examined. **Known limit:** a capped group with more than 2000 jobs ahead of the others delays them until its own slots free. Per-group ready sets would remove the bound, and they are on the roadmap.
 
 ## SQL stores
 
 - **Claims with no limits** lock rows with `FOR UPDATE SKIP LOCKED`, so workers never wait on each other.
-- **Claims under any limit** take a per-namespace lock, so counting active jobs and admitting new ones is exact. Locking per tenant or per resource would be finer, but harder to get right and prone to deadlocks. **Known limit:** limited claims in one namespace run one at a time (about 675 jobs/s on Postgres on the reference box). Split hot workloads into namespaces.
+- **Claims under any limit** take a per-namespace lock, so counting active jobs and admitting new ones is exact. Locking per group or per pool would be finer, but harder to get right and prone to deadlocks. **Known limit:** limited claims in one namespace run one at a time (about 675 jobs/s on Postgres on the reference box). Split hot workloads into namespaces.
 - **Inserts** take the namespace lock only when a queued cap applies, because the count and the insert must agree.
 - **Finishing, cancelling and retrying** take no namespace lock. Each is a row update under the version, applied in id order to avoid deadlocks, and retried on serialization failures and deadlocks.
 - **Unique keys and dependencies** have their own tables, so checking them needs no scan of jobs.
@@ -106,13 +106,13 @@ Both use the same SQL store through a dialect. Neither has a wake-up signal, so 
 
 Every database round trip costs more than the work a claim does, so the hybrid store keeps the jobs in the process and only writes a log.
 
-- **Memory.** Each namespace has its own lock, fixed-size job records in blocks of 4096 that never move and are released once empty, and B-trees keyed by 16-byte ids: ready jobs per queue in claim order, scheduled and polling jobs by time, leases, start deadlines, finished jobs and ids by state. Queue, kind, tenant, resource and worker names are stored once per namespace and referred to by number. Records and index keys hold no pointers, so the garbage collector never scans them; this took the collector from 30% of CPU to 6%.
+- **Memory.** Each namespace has its own lock, fixed-size job records in blocks of 4096 that never move and are released once empty, and B-trees keyed by 16-byte ids: ready jobs per queue in claim order, scheduled and polling jobs by time, leases, start deadlines, finished jobs and ids by state. Queue, kind, group, pool and worker names are stored once per namespace and referred to by number. Records and index keys hold no pointers, so the garbage collector never scans them; this took the collector from 30% of CPU to 6%.
 - **Calls.** Calls that arrive while another holds a namespace queue up, and one of them runs the whole queue under one hold of the lock (flat combining), instead of the lock passing from goroutine to goroutine. Bodies are encoded before the lock is taken, and claimed jobs are rebuilt after it is released.
 - **Bodies.** Payload, result, meta, errors and the other fields claims never look at form a job's body, in a compact binary form. A body lives in the record that wrote it, in the log or a snapshot, and the job keeps where. A body stays in memory only until its record is written; after that it is read from the file, through the OS page cache, with one read for each run of neighbouring bodies. Keeping bodies in a cache of our own measured no faster and cost memory the page cache can use instead. Claims and lease extensions log only the small record, not the body again.
 - **Log.** A call applies its changes to memory and appends them as one checksummed record. `store/hybrid/wal` knows nothing about jobs. The first caller to wait writes everything queued so far, its record and those of the callers behind it, so one write and one fsync serve them all (group commit), with no hand-off to another goroutine. The periodic fsync runs beside writers instead of holding them up. Recovery replays the same records, so it runs no job logic.
 - **Snapshots.** When the log passes 64 MiB and the size of the last snapshot, the store rotates to a new log file and writes a snapshot while calls go on, copying one block of job records at a time under the namespace lock and their bodies in disk order. What the snapshot misses is in the new log file, and replaying it over the snapshot gives the same state: every op sets its value outright, and replay skips kids and events it already holds. The log is synced before the snapshot is renamed into place; then jobs whose body did not change are pointed at their copy, and the older log files and snapshot are deleted.
 - **Finished jobs.** A second after a job finishes, it moves with its event to a cold store on disk (`store/hybrid/cold`, built on Pebble, the storage engine of CockroachDB) and leaves memory, so retention costs disk, not memory. The cold store keeps each job by id, with indexes by state for listing and by finish time for pruning, and per-queue counts written in the same batch as the jobs. Reads, listings, counts, retries, duplicate ids and dependencies look in memory first, then there; ids are time-ordered, so a new job's id, larger than any in the cold store, needs no lookup. Pebble's own log is off: the store syncs its log before moving jobs, and flushes Pebble before a snapshot replaces the older log files, so a replay restores whatever Pebble lost.
-- **Backlog.** Memory holds the front of each queue; waiting jobs past a quarter of the memory limit (about 300 bytes each) move to the cold store, last in claim order first: future ones keyed by run time, ready ones by priority, run time and id, each entry holding the whole record so jobs come back in order without a lookup each. Each queue keeps its head there, the first job in claim order. A claim takes from memory only the jobs ahead of that head; when it reaches the head, it brings the next batch back, 8192 jobs or 4 MiB (logged like an insert, then deleted from the cold store) and goes on, so claim order holds across memory and disk. A claim first moves the future jobs due by its time to the ready order. Jobs others depend on, and jobs still being deleted from the cold store, stay in memory. Start deadlines and tenant counts of the jobs on disk stay in memory, so expiry and `tenant_max_queued` still apply. Inserts help move jobs out while memory holds twice the budget, so a producer faster than the disk slows down instead of filling memory.
+- **Backlog.** Memory holds the front of each queue; waiting jobs past a quarter of the memory limit (about 300 bytes each) move to the cold store, last in claim order first: future ones keyed by run time, ready ones by priority, run time and id, each entry holding the whole record so jobs come back in order without a lookup each. Each queue keeps its head there, the first job in claim order. A claim takes from memory only the jobs ahead of that head; when it reaches the head, it brings the next batch back, 8192 jobs or 4 MiB (logged like an insert, then deleted from the cold store) and goes on, so claim order holds across memory and disk. A claim first moves the future jobs due by its time to the ready order. Jobs others depend on, and jobs still being deleted from the cold store, stay in memory. Start deadlines and group counts of the jobs on disk stay in memory, so expiry and `group_max_queued` still apply. Inserts help move jobs out while memory holds twice the budget, so a producer faster than the disk slows down instead of filling memory.
 - **Failure.** If writing the log fails, memory holds changes the disk does not, so the store refuses every later call until it is reopened from disk.
 - **Why not an embedded key-value store for everything.** Active jobs change several times a second each; a KV store would add a second copy of every change and a second log. The job model already says what to index, and the log of changes is all that must reach the disk. Finished jobs change no more, so they suit one.
 
@@ -131,19 +131,19 @@ A caller waits in one of three ways:
 
 1. **Come back later:** the enqueue answer has a `Location`; read the job when you like.
 2. **Wait:** `Client.Wait` or `EnqueueAndWait` in Go. Over HTTP, `Prefer: wait=N` (RFC 7240) on the enqueue or on a read holds the request until the job is final, then answers 200; when N runs out, it answers 202 with `Location` and `Retry-After`. A standard header on the same endpoint means clients that do not send it get a plain enqueue, and no second API is needed.
-3. **Be called:** a webhook.
+3. **Be called:** a callback.
 
 **Direct start** (`Worker.Do`) is for a caller that is also a worker: when a slot is free, the first attempt runs on the caller at once, skipping the claim loop. The job is still ordinary: if that attempt fails, the other workers retry it.
 
 Stores that announce finished jobs (Postgres `LISTEN`, Redis pub/sub) wake waiters at once. One listener per client serves all its waiters and stops after a minute idle.
 
-## Events and webhooks
+## Events and callbacks
 
 - **Events are an outbox.** Every final state writes an event in the same transaction as the job. No final state is lost, and nothing is written to two places.
-- **Deliveries are jobs.** The maintainer turns events into delivery jobs on the reserved `runnel.webhooks` queue, so deliveries get retries, backoff (5s to 30m, 10 attempts) and a visible dead state for free. Each delivery is unique per event for 48h, so a maintainer that crashes between making the job and moving its cursor does not post twice.
+- **Deliveries are jobs.** The maintainer turns events into delivery jobs on the reserved `runnel.callbacks` queue, so deliveries get retries, backoff (5s to 30m, 10 attempts) and a visible dead state for free. Each delivery is unique per event for 48h, so a maintainer that crashes between making the job and moving its cursor does not post twice.
 - **Signed:** HMAC-SHA256 over the timestamp and the body. Receivers check it and refuse old timestamps.
-- **No requests into your network:** the delivery client checks the resolved address on every connection, which defeats DNS rebinding. It never follows redirects and uses no proxy. Over the API, webhooks must use https.
-- **Events wait for delivery.** Events are kept 24h, but with webhooks on they are not deleted before their delivery job exists, for up to 7 days. Past that they are dropped and logged. An earlier version deleted events with their jobs, so one queue with a short retention wiped the whole namespace's webhook backlog.
+- **No requests into your network:** the delivery client checks the resolved address on every connection, which defeats DNS rebinding. It never follows redirects and uses no proxy. Over the API, callbacks must use https.
+- **Events wait for delivery.** Events are kept 24h, but with callbacks on they are not deleted before their delivery job exists, for up to 7 days. Past that they are dropped and logged. An earlier version deleted events with their jobs, so one queue with a short retention wiped the whole namespace's callback backlog.
 
 ## Schedules
 
@@ -153,13 +153,13 @@ Stores that announce finished jobs (Postgres `LISTEN`, Redis pub/sub) wake waite
 
 ## The maintainer
 
-The maintainer is a loop with no state of its own; run as many as you like. Each tick (every second) it takes back jobs whose leases ended, moves jobs past their start window, fires schedules and makes webhook deliveries. Every minute it prunes old jobs and events in batches, optionally archiving jobs first. Versions and cursors make overlapping maintainers harmless.
+The maintainer is a loop with no state of its own; run as many as you like. Each tick (every second) it takes back jobs whose leases ended, moves jobs past their start timeout, fires schedules and makes callback deliveries. Every minute it prunes old jobs and events in batches, optionally archiving jobs first. Versions and cursors make overlapping maintainers harmless.
 
 ## HTTP server
 
 - **Same model, any language.** The server is built on the same client and worker code as the library. A remote worker speaks a small lease protocol: claim with a long-poll of up to 30s, extend, then finish with the version it claimed.
 - **Two kinds of credential.** The admin token manages namespaces and keys only. A server started without one keeps those routes closed rather than open. Namespace keys carry roles (`reader`, `producer`, `worker`, `admin`). A key is `rnk_<id>_<secret>`: the id finds it, and the 256-bit random secret is stored as SHA-256. A slow hash such as bcrypt protects guessable passwords; a random secret this long needs none.
-- **Never trust input.** Bodies are decoded strictly and capped at 4 MiB, every field is validated, the webhook queue is reserved, and nothing received is executed. A remote worker's name is prefixed with its key id, so one key can never touch another key's leases.
+- **Never trust input.** Bodies are decoded strictly and capped at 4 MiB, every field is validated, the callback queue is reserved, and nothing received is executed. A remote worker's name is prefixed with its key id, so one key can never touch another key's leases.
 - **Errors** are RFC 9457 problem documents, and the Go remote client maps them back to the same errors as the library.
 - **The OpenAPI document** is embedded and served, and a test keeps it equal to the routes. SDKs for other languages will be generated from it.
 
@@ -187,6 +187,6 @@ The maintainer is a loop with no state of its own; run as many as you like. Each
 - SDKs for Python and TypeScript, generated from the OpenAPI document with a hand-written worker loop.
 - A dashboard in `runnel serve`.
 - Worker labels, so a job can ask for workers with an ability such as a GPU or a region.
-- Per-tenant ready sets on Redis, removing the 2000-job bound.
+- Per-group ready sets on Redis, removing the 2000-job bound.
 - Partial indexes on Postgres for the hottest scans.
 - Connectors for brokers, outside the core, if users need them.

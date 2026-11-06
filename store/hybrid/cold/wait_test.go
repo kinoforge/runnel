@@ -8,7 +8,7 @@ import (
 
 func waiting(n byte, prio int32, at int64, ready bool) cold.Job {
 	return cold.Job{NS: "acme", ID: id(n), State: cold.Waiting, Prio: prio, RunAt: at, StartBy: int64(n) * 10,
-		Ready: ready, Queue: "q", Kind: "k", Tenant: "t", Data: []byte{n}}
+		Ready: ready, Queue: "q", Kind: "k", Group: "t", Data: []byte{n}}
 }
 
 // TestWaitingOrder checks ready jobs come back in claim order, negative
@@ -24,8 +24,8 @@ func TestWaitingOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if delta[cold.Count{NS: "acme", Queue: "q", State: cold.Waiting, Tenant: "t"}] != 5 {
-		t.Fatalf("tenant count %v", delta)
+	if delta[cold.Count{NS: "acme", Queue: "q", State: cold.Waiting, Group: "t"}] != 5 {
+		t.Fatalf("group count %v", delta)
 	}
 	h, err := s.Front("acme", "q")
 	if err != nil || !h.HasReady || h.Ready.ID != id(2) || !h.HasDue || h.Due != 40 {

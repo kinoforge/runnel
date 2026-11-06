@@ -16,9 +16,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
-- Pools are now resources: `ResourceConfig`, `SetResource`, `runnel.Resource`, the `resource` job field and `/v1/ns/{ns}/resources`.
+- Tenants are now groups: a plain id with `group_max_queued`, `group_max_running`, `group_rate` and `group_burst`, the `group` job field and `runnel.Group`; `ErrGroupFull`.
+- Pools keep their name; a pool's limits are `slots` and `group_slots`.
+- `start_within` is now `start_timeout`.
+- Webhooks are now callbacks: the job's `callback_url` (`runnel.Callback`), the namespace `callback_secret`, and the `callbacks` config section.
 - A busy worker claims once a quarter of its slots are free, or after 2ms, so claims take jobs in batches.
-- Limits use one pattern: `max_running` and `tenant_max_running` (were `concurrency`, `tenant_slots` and pool `slots`), `max_queued` and `tenant_max_queued` (were `max_waiting` and `tenant_waiting`).
+- Queue limits use one pattern: `max_running` and `group_max_running` (were `concurrency` and `tenant_slots`), `max_queued` and `group_max_queued` (were `max_waiting` and `tenant_waiting`).
 
 ## [0.0.1]
 

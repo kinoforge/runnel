@@ -3,14 +3,14 @@ package hybrid
 import "math"
 
 // admit checks h against every running limit and rate limit, taking a token
-// from each rate bucket when it passes. A refusal marks the queue, tenant or
-// resource full for the rest of the claim.
+// from each rate bucket when it passes. A refusal marks the queue, group or
+// pool full for the rest of the claim.
 func (c *claimer) admit(h *job) bool {
 	sp := c.sp
 	qk := countKey{cQueue, h.queue, 0}
-	qtk := countKey{cQueueTenant, h.queue, h.tenant}
-	rk := countKey{cResource, h.resource, 0}
-	rtk := countKey{cResourceTenant, h.resource, h.tenant}
+	qtk := countKey{cQueueGroup, h.queue, h.group}
+	rk := countKey{cPool, h.pool, 0}
+	rtk := countKey{cPoolGroup, h.pool, h.group}
 	if c.full[qk] || c.full[qtk] || c.full[rk] || c.full[rtk] {
 		return false
 	}
@@ -19,15 +19,15 @@ func (c *claimer) admit(h *job) bool {
 	if over(q.MaxRunning, sp.active[qk]) {
 		return c.refuse(qk)
 	}
-	if h.tenant != 0 && over(q.TenantMaxRunning, sp.active[qtk]) {
+	if h.group != 0 && over(q.GroupMaxRunning, sp.active[qtk]) {
 		return c.refuse(qtk)
 	}
-	if h.resource != 0 {
-		r := sp.resourceConfig(sp.syms.name(h.resource))
-		if over(r.MaxRunning, sp.active[rk]) {
+	if h.pool != 0 {
+		r := sp.poolConfig(sp.syms.name(h.pool))
+		if over(r.Slots, sp.active[rk]) {
 			return c.refuse(rk)
 		}
-		if h.tenant != 0 && over(r.TenantMaxRunning, sp.active[rtk]) {
+		if h.group != 0 && over(r.GroupSlots, sp.active[rtk]) {
 			return c.refuse(rtk)
 		}
 	}
@@ -39,8 +39,8 @@ func (c *claimer) admit(h *job) bool {
 		}
 		take = append(take, b)
 	}
-	if h.tenant != 0 && q.TenantRate > 0 {
-		b := c.bucket("qt|"+qname+"|"+sp.syms.name(h.tenant), q.TenantRate, q.TenantBurst)
+	if h.group != 0 && q.GroupRate > 0 {
+		b := c.bucket("qt|"+qname+"|"+sp.syms.name(h.group), q.GroupRate, q.GroupBurst)
 		if b.tokens < 1 {
 			return c.refuse(qtk)
 		}

@@ -13,9 +13,9 @@ var (
 	// ErrConflict means the job changed between reading and writing it, or the
 	// worker no longer holds it.
 	ErrConflict = errors.New("runnel: job changed concurrently")
-	// ErrTenantFull means the tenant already has the queue's tenant_max_queued jobs
+	// ErrGroupFull means the group already has the queue's group_max_queued jobs
 	// queued.
-	ErrTenantFull = errors.New("runnel: tenant has too many queued jobs")
+	ErrGroupFull = errors.New("runnel: group has too many queued jobs")
 	// ErrQueueFull means the queue already has max_queued jobs queued.
 	ErrQueueFull = errors.New("runnel: queue has too many queued jobs")
 	// ErrDependency means a job the new job depends on is missing, dead or
@@ -75,7 +75,7 @@ const (
 type Query struct {
 	Queue  string
 	Kind   string
-	Tenant string
+	Group  string
 	State  State
 	Cursor string
 	Limit  int
@@ -117,8 +117,8 @@ type ConfigKind string
 const (
 	// ConfigQueue holds QueueConfig values, one per queue.
 	ConfigQueue ConfigKind = "queue"
-	// ConfigResource holds ResourceConfig values.
-	ConfigResource ConfigKind = "resource"
+	// ConfigPool holds PoolConfig values.
+	ConfigPool ConfigKind = "pool"
 	// ConfigSchedule holds Schedule values.
 	ConfigSchedule ConfigKind = "schedule"
 	// ConfigNamespace holds Namespace values, stored outside any namespace.
@@ -144,7 +144,7 @@ type Store interface {
 	// waiting caps, and returns one result per job.
 	Insert(ctx context.Context, ns string, jobs []*Job, now time.Time) ([]Inserted, error)
 	// Claim leases ready jobs to a worker, honouring pauses, priorities,
-	// max running, tenant and resource limits and rate limits. Polling jobs due for a
+	// max running, group and pool limits and rate limits. Polling jobs due for a
 	// poll come first.
 	Claim(ctx context.Context, ns string, req ClaimRequest) ([]*Job, error)
 	// Extend moves the lease of the worker's running jobs to until and returns the
@@ -166,7 +166,7 @@ type Store interface {
 	PruneEvents(ctx context.Context, ns string, req EventPruneRequest) (int, error)
 	// Events returns up to limit events after the sequence number after.
 	Events(ctx context.Context, ns string, after int64, limit int) ([]Event, error)
-	// Cursor reads a named position, such as the last webhook event delivered.
+	// Cursor reads a named position, such as the last callback event delivered.
 	Cursor(ctx context.Context, ns, name string) (int64, error)
 	// SwapCursor sets a named position to next if it still is old, and reports
 	// whether it did.

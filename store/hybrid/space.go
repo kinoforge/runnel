@@ -80,8 +80,8 @@ type bucket struct {
 	at     int64
 }
 
-// countKey names a running count: a queue, a queue's tenant, a resource or a
-// resource's tenant.
+// countKey names a running count: a queue, a queue's group, a pool or a
+// pool's group.
 type countKey struct {
 	kind uint8
 	a, b sym
@@ -89,9 +89,9 @@ type countKey struct {
 
 const (
 	cQueue uint8 = iota + 1
-	cQueueTenant
-	cResource
-	cResourceTenant
+	cQueueGroup
+	cPool
+	cPoolGroup
 )
 
 // space holds one namespace. Jobs live in a slice of fixed-size records found
@@ -107,7 +107,7 @@ type space struct {
 	retired    atomic.Uint64
 	coldSeq    int64
 	// coldQueued counts the waiting jobs in the cold store by queue and
-	// tenant; heads holds the front of each queue's jobs there.
+	// group; heads holds the front of each queue's jobs there.
 	coldQueued map[[2]string]int64
 	heads      map[sym]cold.Head
 	spilled    atomic.Bool
@@ -147,8 +147,8 @@ type space struct {
 	active  map[countKey]int
 	queued  map[[2]sym]int
 
-	queueCfg    map[string]runnel.QueueConfig
-	resourceCfg map[string]runnel.ResourceConfig
+	queueCfg map[string]runnel.QueueConfig
+	poolCfg  map[string]runnel.PoolConfig
 }
 
 func newSpace(ns string) *space {
@@ -246,25 +246,25 @@ func (sp *space) body(h *job, fs *files) ([]byte, error) {
 }
 
 func (sp *space) count(h *job, d int) {
-	key := [2]sym{h.queue, h.tenant}
+	key := [2]sym{h.queue, h.group}
 	if h.state == stWaiting {
 		sp.hot.Add(int64(d))
 		sp.total.Add(int64(d))
 	}
 	switch h.state {
 	case stWaiting, stBlocked:
-		if h.tenant != 0 {
+		if h.group != 0 {
 			sp.queued[key] += d
 		}
 	case stRunning, stPolling:
 		sp.active[countKey{cQueue, h.queue, 0}] += d
-		if h.tenant != 0 {
-			sp.active[countKey{cQueueTenant, h.queue, h.tenant}] += d
+		if h.group != 0 {
+			sp.active[countKey{cQueueGroup, h.queue, h.group}] += d
 		}
-		if h.resource != 0 {
-			sp.active[countKey{cResource, h.resource, 0}] += d
-			if h.tenant != 0 {
-				sp.active[countKey{cResourceTenant, h.resource, h.tenant}] += d
+		if h.pool != 0 {
+			sp.active[countKey{cPool, h.pool, 0}] += d
+			if h.group != 0 {
+				sp.active[countKey{cPoolGroup, h.pool, h.group}] += d
 			}
 		}
 	}

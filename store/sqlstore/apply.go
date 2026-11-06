@@ -56,10 +56,10 @@ func (s *Store) applyOne(ctx context.Context, tx *txn, ns string, c runnel.Chang
 	if err != nil {
 		return false, err
 	}
-	query := `UPDATE rn_jobs SET queue=?, kind=?, state=?, priority=?, tenant=?, resource=?, attempt=?, max_attempts=?,
-		run_at=?, waiting_since=?, start_by=?, start_within=?, worker=?, lease_until=?, version=version+1, updated_at=?, started_at=?,
+	query := `UPDATE rn_jobs SET queue=?, kind=?, state=?, priority=?, grp=?, pool=?, attempt=?, max_attempts=?,
+		run_at=?, waiting_since=?, start_by=?, start_timeout=?, worker=?, lease_until=?, version=version+1, updated_at=?, started_at=?,
 		finished_at=?, data=? WHERE ns=? AND id=? AND version=?`
-	args := []any{j.Queue, j.Kind, string(j.State), j.Priority, j.Tenant, j.Resource, j.Attempt, j.MaxAttempts,
+	args := []any{j.Queue, j.Kind, string(j.State), j.Priority, j.Group, j.Pool, j.Attempt, j.MaxAttempts,
 		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartWindow().Milliseconds(),
 		j.Worker, runnel.Millis(j.LeaseUntil), runnel.Millis(j.UpdatedAt), runnel.Millis(j.StartedAt), runnel.Millis(j.FinishedAt),
 		data, ns, j.ID, j.Version}
@@ -131,7 +131,7 @@ func (s *Store) finalize(ctx context.Context, tx *txn, ns, id, queue, kind strin
 			return err
 		}
 		_, err := tx.ExecContext(ctx, s.q(`UPDATE rn_jobs SET state=?, run_at=CASE WHEN run_at > ? THEN run_at ELSE ? END, waiting_since=?,
-			start_by=CASE WHEN start_within > 0 THEN ? + start_within ELSE 0 END WHERE state=? AND pending<=0 AND id IN (`+in+")"),
+			start_by=CASE WHEN start_timeout > 0 THEN ? + start_timeout ELSE 0 END WHERE state=? AND pending<=0 AND id IN (`+in+")"),
 			strArgs([]any{string(runnel.StateWaiting), now, now, now, now, blocked}, kids)...)
 		tx.wake = true
 		return err

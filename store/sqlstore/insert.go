@@ -57,7 +57,7 @@ func (s *Store) InsertTx(ctx context.Context, raw *sql.Tx, ns string, jobs []*ru
 func capped(cfg *nsConfig, jobs []*runnel.Job) bool {
 	for _, j := range jobs {
 		q := cfg.queues[j.Queue]
-		if q.MaxQueued > 0 || (q.TenantMaxQueued > 0 && j.Tenant != "") {
+		if q.MaxQueued > 0 || (q.GroupMaxQueued > 0 && j.Group != "") {
 			return true
 		}
 	}
@@ -149,8 +149,8 @@ func (b *batchInsert) dependencies(ctx context.Context, j *runnel.Job) (depInfo,
 	return d, err == nil, err
 }
 
-func queueKey(j *runnel.Job) string  { return "q|" + j.Queue }
-func tenantKey(j *runnel.Job) string { return "t|" + j.Queue + "|" + j.Tenant }
+func queueKey(j *runnel.Job) string { return "q|" + j.Queue }
+func groupKey(j *runnel.Job) string { return "t|" + j.Queue + "|" + j.Group }
 
 func (b *batchInsert) overCap(ctx context.Context, j *runnel.Job) (rejected, err error) {
 	q := b.cfg.queues[j.Queue]
@@ -161,11 +161,11 @@ func (b *batchInsert) overCap(ctx context.Context, j *runnel.Job) (rejected, err
 			return runnel.ErrQueueFull, err
 		}
 	}
-	if q.TenantMaxQueued > 0 && j.Tenant != "" {
-		n, err := b.count(ctx, tenantKey(j), "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND queue=? AND tenant=? AND state IN (?, ?)",
-			b.ns, j.Queue, j.Tenant, string(runnel.StateWaiting), string(runnel.StateBlocked))
-		if err != nil || n >= q.TenantMaxQueued {
-			return runnel.ErrTenantFull, err
+	if q.GroupMaxQueued > 0 && j.Group != "" {
+		n, err := b.count(ctx, groupKey(j), "SELECT COUNT(*) FROM rn_jobs WHERE ns=? AND queue=? AND grp=? AND state IN (?, ?)",
+			b.ns, j.Queue, j.Group, string(runnel.StateWaiting), string(runnel.StateBlocked))
+		if err != nil || n >= q.GroupMaxQueued {
+			return runnel.ErrGroupFull, err
 		}
 	}
 	return nil, nil
@@ -199,7 +199,7 @@ func (b *batchInsert) write(ctx context.Context, j *runnel.Job, d depInfo) error
 	if err := b.s.insertRow(ctx, b.tx, j); err != nil {
 		return err
 	}
-	for _, key := range []string{queueKey(j), tenantKey(j)} {
+	for _, key := range []string{queueKey(j), groupKey(j)} {
 		if _, ok := b.waiting[key]; ok {
 			b.waiting[key]++
 		}
@@ -314,7 +314,7 @@ func (s *Store) insertRow(ctx context.Context, tx *txn, j *runnel.Job) error {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, s.q("INSERT INTO rn_jobs ("+jobCols+") VALUES ("+placeholders(jobColCount)+")"),
-		j.ID, j.Namespace, j.Queue, j.Kind, string(j.State), j.Priority, j.Tenant, j.Resource, j.Attempt, j.MaxAttempts,
+		j.ID, j.Namespace, j.Queue, j.Kind, string(j.State), j.Priority, j.Group, j.Pool, j.Attempt, j.MaxAttempts,
 		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartWindow().Milliseconds(),
 		j.Worker, runnel.Millis(j.LeaseUntil), j.Version, j.Pending, j.UniqueKey,
 		runnel.Millis(j.CreatedAt), runnel.Millis(j.UpdatedAt), runnel.Millis(j.StartedAt), runnel.Millis(j.FinishedAt), data)

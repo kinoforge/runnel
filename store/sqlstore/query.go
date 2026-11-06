@@ -11,7 +11,7 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-const jobCols = "id, ns, queue, kind, state, priority, tenant, resource, attempt, max_attempts, run_at, waiting_since, start_by, start_within, worker, lease_until, version, pending, unique_key, created_at, updated_at, started_at, finished_at, data"
+const jobCols = "id, ns, queue, kind, state, priority, grp, pool, attempt, max_attempts, run_at, waiting_since, start_by, start_timeout, worker, lease_until, version, pending, unique_key, created_at, updated_at, started_at, finished_at, data"
 
 var jobColCount = strings.Count(jobCols, ",") + 1
 
@@ -20,10 +20,10 @@ type scanner interface{ Scan(dest ...any) error }
 func scanJob(sc scanner) (*runnel.Job, error) {
 	var j runnel.Job
 	var state string
-	var runAt, waiting, startBy, startWithin, lease, created, updated, started, finished int64
+	var runAt, waiting, startBy, startTimeout, lease, created, updated, started, finished int64
 	var data []byte
-	err := sc.Scan(&j.ID, &j.Namespace, &j.Queue, &j.Kind, &state, &j.Priority, &j.Tenant, &j.Resource, &j.Attempt, &j.MaxAttempts,
-		&runAt, &waiting, &startBy, &startWithin, &j.Worker, &lease, &j.Version, &j.Pending, &j.UniqueKey,
+	err := sc.Scan(&j.ID, &j.Namespace, &j.Queue, &j.Kind, &state, &j.Priority, &j.Group, &j.Pool, &j.Attempt, &j.MaxAttempts,
+		&runAt, &waiting, &startBy, &startTimeout, &j.Worker, &lease, &j.Version, &j.Pending, &j.UniqueKey,
 		&created, &updated, &started, &finished, &data)
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func (s *Store) List(ctx context.Context, ns string, q runnel.Query) ([]*runnel.
 	}
 	add("queue", q.Queue)
 	add("kind", q.Kind)
-	add("tenant", q.Tenant)
+	add("grp", q.Group)
 	add("state", string(q.State))
 	if q.Cursor != "" {
 		where = append(where, "id<?")

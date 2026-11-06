@@ -240,13 +240,13 @@ func (in *inserter) full(j *runnel.Job) error {
 			return runnel.ErrQueueFull
 		}
 	}
-	if j.Tenant != "" && q.TenantMaxQueued > 0 {
-		n := sp.coldQueued[[2]string{j.Queue, j.Tenant}]
-		if ts, ok := sp.syms.find(j.Tenant); ok {
+	if j.Group != "" && q.GroupMaxQueued > 0 {
+		n := sp.coldQueued[[2]string{j.Queue, j.Group}]
+		if ts, ok := sp.syms.find(j.Group); ok {
 			n += int64(sp.queued[[2]sym{qs, ts}])
 		}
-		if n >= int64(q.TenantMaxQueued) {
-			return runnel.ErrTenantFull
+		if n >= int64(q.GroupMaxQueued) {
+			return runnel.ErrGroupFull
 		}
 	}
 	return nil

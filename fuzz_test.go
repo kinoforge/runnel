@@ -56,13 +56,13 @@ func FuzzScheduleSpec(f *testing.F) {
 	})
 }
 
-func FuzzWebhookURL(f *testing.F) {
+func FuzzCallbackURL(f *testing.F) {
 	spec.Rule(f, "J02")
 	for _, s := range []string{"https://example.com/h", "http://u:p@x", "javascript:alert(1)", "https://", "//x"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, raw string) {
-		_ = ValidWebhookURL(raw, DefaultLimits.MaxWebhookURL)
+		_ = ValidCallbackURL(raw, DefaultLimits.MaxCallbackURL)
 	})
 }
 

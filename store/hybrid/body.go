@@ -25,8 +25,8 @@ func encodeBody(j *runnel.Job) []byte {
 	e.bytes(j.Payload)
 	e.bytes(j.Result)
 	e.str(j.Handle)
-	e.str(j.Webhook)
-	for _, d := range []runnel.Duration{j.StartWithin, j.Timeout, j.UniqueFor, j.Backoff.Base, j.Backoff.Max} {
+	e.str(j.CallbackURL)
+	for _, d := range []runnel.Duration{j.StartTimeout, j.Timeout, j.UniqueFor, j.Backoff.Base, j.Backoff.Max} {
 		e.int(int64(d))
 	}
 	e.float(j.Backoff.Factor)
@@ -36,7 +36,7 @@ func encodeBody(j *runnel.Job) []byte {
 	for _, f := range j.Fallbacks {
 		e.str(f.Queue)
 		e.str(f.Kind)
-		e.str(f.Resource)
+		e.str(f.Pool)
 	}
 	e.int(int64(len(j.Meta)))
 	for k, v := range j.Meta {
@@ -114,14 +114,14 @@ func decodeBody(b []byte, j *runnel.Job) error {
 		d.str()
 	}
 	j.Payload, j.Result = raw(d.bytes()), raw(d.bytes())
-	j.Handle, j.Webhook = d.str(), d.str()
-	for _, p := range []*runnel.Duration{&j.StartWithin, &j.Timeout, &j.UniqueFor, &j.Backoff.Base, &j.Backoff.Max} {
+	j.Handle, j.CallbackURL = d.str(), d.str()
+	for _, p := range []*runnel.Duration{&j.StartTimeout, &j.Timeout, &j.UniqueFor, &j.Backoff.Base, &j.Backoff.Max} {
 		*p = runnel.Duration(d.int())
 	}
 	j.Backoff.Factor, j.Backoff.Jitter = d.float(), d.float()
 	j.Fallback = int(d.int())
 	for range count(d) {
-		j.Fallbacks = append(j.Fallbacks, runnel.Target{Queue: d.str(), Kind: d.str(), Resource: d.str()})
+		j.Fallbacks = append(j.Fallbacks, runnel.Target{Queue: d.str(), Kind: d.str(), Pool: d.str()})
 	}
 	if n := count(d); n > 0 {
 		j.Meta = make(map[string]string, n)

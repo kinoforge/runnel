@@ -17,7 +17,7 @@ server:
   max_claim_wait: 0s    # 30s
   max_result_wait: 0s   # 60s
   retry_after: 0s       # 1s
-  allow_http_webhooks: false
+  allow_http_callbacks: false
   read_header_timeout: 10s
   read_timeout: 1m
   write_timeout: 2m
@@ -38,7 +38,7 @@ maintainer:
     events: 24h
     undelivered: 168h
 
-webhooks:
+callbacks:
   enabled: true
   concurrency: 0 # 4
   timeout: 0s    # 10s
@@ -50,7 +50,7 @@ limits:
   max_depends_on: 256
   max_meta: 32
   max_unique_key: 255
-  max_webhook_url: 2048
+  max_callback_url: 2048
 
 memory:
   heap_percent: 70 # of the container limit

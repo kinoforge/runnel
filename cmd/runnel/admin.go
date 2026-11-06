@@ -22,7 +22,7 @@ func namespaces(ctx context.Context, args []string) error {
 		return fmt.Errorf("unknown ns command %q", args[0])
 	}
 	c := newCmd("ns " + args[0])
-	secret := c.fs.String("webhook-secret", "", "secret used to sign webhooks")
+	secret := c.fs.String("callback-secret", "", "secret used to sign callbacks")
 	pos, s, err := c.start(ctx, args[1:], need)
 	if err != nil {
 		return err
@@ -41,7 +41,7 @@ func namespaces(ctx context.Context, args []string) error {
 			n = runnel.Namespace{Name: pos[0]}
 		}
 		if *secret != "" {
-			n.WebhookSecret = *secret
+			n.CallbackSecret = *secret
 		}
 		if err := runnel.PutNamespace(ctx, s, n); err != nil {
 			return err

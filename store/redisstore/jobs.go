@@ -64,7 +64,7 @@ func (s *Store) Insert(ctx context.Context, ns string, jobs []*runnel.Job, now t
 		case "dep":
 			res.Err = runnel.ErrDependency
 		case "full":
-			res.Err = runnel.ErrTenantFull
+			res.Err = runnel.ErrGroupFull
 		case "qfull":
 			res.Err = runnel.ErrQueueFull
 		default:

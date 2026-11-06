@@ -104,7 +104,7 @@ func (s *Store) coldJobs(ns string, ds []draft, now int64) ([]cold.Job, error) {
 		h := &d.h
 		out[i] = cold.Job{NS: ns, ID: cold.ID(h.id), State: h.state, Finished: h.finished,
 			Prio: h.prio, RunAt: h.runAt, StartBy: h.startBy, Ready: h.runAt <= now,
-			Queue: d.names[0], Kind: d.names[1], Tenant: d.names[2], Data: e.b}
+			Queue: d.names[0], Kind: d.names[1], Group: d.names[2], Data: e.b}
 	}
 	return out, nil
 }
@@ -223,8 +223,8 @@ func (sp *space) addCold(delta map[cold.Count]int64) {
 		if c.NS != sp.ns || c.State == 0 || c.State >= stCount {
 			continue
 		}
-		if c.Tenant != "" {
-			k := [2]string{c.Queue, c.Tenant}
+		if c.Group != "" {
+			k := [2]string{c.Queue, c.Group}
 			if sp.coldQueued[k] += d; sp.coldQueued[k] == 0 {
 				delete(sp.coldQueued, k)
 			}
@@ -315,7 +315,7 @@ func (s *Store) coldNewest(ns string, st uint8, q runnel.Query, cur uid, hasCur 
 		c := cold.ID(cur)
 		at = &c
 	}
-	f := cold.Filter{Queue: q.Queue, Kind: q.Kind, Tenant: q.Tenant}
+	f := cold.Filter{Queue: q.Queue, Kind: q.Kind, Group: q.Group}
 	seen := make(map[uid]bool, len(ram))
 	ids := slices.Clone(ram)
 	for _, id := range ram {

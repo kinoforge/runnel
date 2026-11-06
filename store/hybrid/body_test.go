@@ -13,10 +13,10 @@ func TestBodyRoundTrip(t *testing.T) {
 	at := time.Date(2026, 11, 5, 7, 0, 0, 123456789, time.UTC)
 	in := &runnel.Job{
 		ID: "0193a000-0000-7000-8000-000000000001", UniqueKey: "u", DependsOn: []string{"a", "b"},
-		Payload: json.RawMessage(`{"to":"x"}`), Result: json.RawMessage(`{"ok":true}`), Handle: "h", Webhook: "https://example.com/hook",
-		StartWithin: runnel.Duration(time.Second), Timeout: runnel.Duration(time.Minute), UniqueFor: runnel.Duration(time.Hour),
+		Payload: json.RawMessage(`{"to":"x"}`), Result: json.RawMessage(`{"ok":true}`), Handle: "h", CallbackURL: "https://example.com/hook",
+		StartTimeout: runnel.Duration(time.Second), Timeout: runnel.Duration(time.Minute), UniqueFor: runnel.Duration(time.Hour),
 		Backoff:  runnel.Backoff{Base: runnel.Duration(time.Second), Max: runnel.Duration(time.Minute), Factor: 1.5, Jitter: 0.1},
-		Fallback: 1, Fallbacks: []runnel.Target{{Queue: "q2", Kind: "k2", Resource: "r2"}},
+		Fallback: 1, Fallbacks: []runnel.Target{{Queue: "q2", Kind: "k2", Pool: "r2"}},
 		Meta:   map[string]string{"trace": "abc"},
 		Errors: []runnel.AttemptError{{Attempt: 1, Queue: "q", Kind: "k", At: at, Error: "boom"}},
 	}

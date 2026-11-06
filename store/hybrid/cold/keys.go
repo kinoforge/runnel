@@ -13,7 +13,7 @@ const (
 	kDeadline byte = 'd'
 	kFuture   byte = 'f'
 	kJob      byte = 'j'
-	kTenant   byte = 'q'
+	kGroup    byte = 'q'
 	kReady    byte = 'r'
 	kState    byte = 's'
 	kTime     byte = 't'
@@ -46,11 +46,11 @@ func timeKey(ns string, at int64, id ID) []byte {
 	return append(binary.BigEndian.AppendUint64(prefix(kTime, ns, 8+len(id)), uint64(at)), id[:]...)
 }
 
-// key is where c is stored: a tenant's count names its queue with a length,
-// so the tenant can follow it.
+// key is where c is stored: a group's count names its queue with a length,
+// so the group can follow it.
 func (c Count) key() []byte {
-	if c.Tenant != "" {
-		return append(appendStr(prefix(kTenant, c.NS, 1+len(c.Queue)+len(c.Tenant)), c.Queue), c.Tenant...)
+	if c.Group != "" {
+		return append(appendStr(prefix(kGroup, c.NS, 1+len(c.Queue)+len(c.Group)), c.Queue), c.Group...)
 	}
 	return append(append(prefix(kCount, c.NS, 1+len(c.Queue)), c.State), c.Queue...)
 }
@@ -61,10 +61,10 @@ func decodeCountKey(k []byte) (Count, bool) {
 		return Count{}, false
 	}
 	c := Count{NS: string(k[1:i])}
-	if k[0] == kTenant {
+	if k[0] == kGroup {
 		q, rest, ok := readStr(k[i+1:])
-		c.Queue, c.State, c.Tenant = q, Waiting, string(rest)
-		return c, ok && c.Tenant != ""
+		c.Queue, c.State, c.Group = q, Waiting, string(rest)
+		return c, ok && c.Group != ""
 	}
 	c.State, c.Queue = k[i+1], string(k[i+2:])
 	return c, true
@@ -80,7 +80,7 @@ func idOf(k []byte) ID {
 // A record holds the state, finish time, the order of a waiting job and the
 // names, then the caller's data.
 func encodeJob(j *Job) []byte {
-	b := make([]byte, 0, 2+4*binary.MaxVarintLen64+len(j.Queue)+len(j.Kind)+len(j.Tenant)+3+len(j.Data))
+	b := make([]byte, 0, 2+4*binary.MaxVarintLen64+len(j.Queue)+len(j.Kind)+len(j.Group)+3+len(j.Data))
 	b = append(b, j.State)
 	for _, v := range []int64{j.Finished, int64(j.Prio), j.RunAt, j.StartBy} {
 		b = binary.AppendVarint(b, v)
@@ -90,7 +90,7 @@ func encodeJob(j *Job) []byte {
 		ready = 1
 	}
 	b = append(b, ready)
-	b = appendStr(appendStr(appendStr(b, j.Queue), j.Kind), j.Tenant)
+	b = appendStr(appendStr(appendStr(b, j.Queue), j.Kind), j.Group)
 	return append(b, j.Data...)
 }
 
@@ -117,7 +117,7 @@ func decodeJob(ns string, id ID, v []byte, data bool) (Job, error) {
 	if !ok {
 		return j, errBadKey
 	}
-	j.Queue, j.Kind, j.Tenant = q, k, t
+	j.Queue, j.Kind, j.Group = q, k, t
 	if data {
 		j.Data = bytes.Clone(rest)
 	}
@@ -125,7 +125,7 @@ func decodeJob(ns string, id ID, v []byte, data bool) (Job, error) {
 }
 
 func encodeNames(j *Job) []byte {
-	return appendStr(appendStr(appendStr(nil, j.Queue), j.Kind), j.Tenant)
+	return appendStr(appendStr(appendStr(nil, j.Queue), j.Kind), j.Group)
 }
 
 func readNames(b []byte) (q, k, t string, rest []byte, ok bool) {

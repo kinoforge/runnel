@@ -43,7 +43,7 @@ func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) (
 // openQueues returns the requested queues that are not paused, and whether
 // any limit applies so the claim must lock.
 func openQueues(cfg *nsConfig, queues []string) ([]string, bool) {
-	locked := cfg.resourceLimits()
+	locked := cfg.poolLimits()
 	var open []string
 	for _, q := range queues {
 		c := cfg.queues[q]
@@ -91,8 +91,8 @@ func (t *taker) claimFree(ctx context.Context, open []string, need int) ([]*runn
 	return t.take(ctx, cands, false)
 }
 
-// claimLimited scans in rounds: each round excludes the queues, tenants and
-// resources found full, so jobs behind a capped tenant or resource still run.
+// claimLimited scans in rounds: each round excludes the queues, groups and
+// pools found full, so jobs behind a capped group or pool still run.
 func (t *taker) claimLimited(ctx context.Context, cfg *nsConfig, open []string, need int) ([]*runnel.Job, error) {
 	act, err := t.s.activeCounts(ctx, t.tx, t.ns)
 	if err != nil {
@@ -145,7 +145,7 @@ func (a *admission) pick(ctx context.Context, cands []cand, need int) ([]cand, b
 		if a.ex.skip(c) {
 			continue
 		}
-		why, err := admit(ctx, c, a.cfg.queues[c.queue], a.cfg.resources[c.resource], a.act, a.lim)
+		why, err := admit(ctx, c, a.cfg.queues[c.queue], a.cfg.pools[c.pool], a.act, a.lim)
 		if err != nil {
 			return nil, false, err
 		}
@@ -154,7 +154,7 @@ func (a *admission) pick(ctx context.Context, cands []cand, need int) ([]cand, b
 			blocked = true
 			continue
 		}
-		a.act.add(c.queue, c.tenant, c.resource, 1)
+		a.act.add(c.queue, c.group, c.pool, 1)
 		pick = append(pick, c)
 	}
 	return pick, blocked, nil
@@ -171,9 +171,9 @@ func unique(list []string) []string {
 }
 
 type cand struct {
-	id, queue, tenant, resource string
-	priority                    int
-	runAt                       int64
+	id, queue, group, pool string
+	priority               int
+	runAt                  int64
 }
 
 type verdict int
@@ -181,28 +181,28 @@ type verdict int
 const (
 	admitted verdict = iota
 	queueFull
-	queueTenantFull
-	resourceFull
-	resourceTenantFull
+	queueGroupFull
+	poolFull
+	poolGroupFull
 )
 
 type exclusions struct {
-	queues          map[string]bool
-	queueTenants    map[[2]string]bool
-	resources       map[string]bool
-	resourceTenants map[[2]string]bool
+	queues      map[string]bool
+	queueGroups map[[2]string]bool
+	pools       map[string]bool
+	poolGroups  map[[2]string]bool
 }
 
 func (e *exclusions) add(v verdict, c cand) {
 	switch v {
 	case queueFull:
 		e.queues = setOf(e.queues, c.queue)
-	case queueTenantFull:
-		e.queueTenants = setOf(e.queueTenants, [2]string{c.queue, c.tenant})
-	case resourceFull:
-		e.resources = setOf(e.resources, c.resource)
-	case resourceTenantFull:
-		e.resourceTenants = setOf(e.resourceTenants, [2]string{c.resource, c.tenant})
+	case queueGroupFull:
+		e.queueGroups = setOf(e.queueGroups, [2]string{c.queue, c.group})
+	case poolFull:
+		e.pools = setOf(e.pools, c.pool)
+	case poolGroupFull:
+		e.poolGroups = setOf(e.poolGroups, [2]string{c.pool, c.group})
 	}
 }
 
@@ -215,7 +215,7 @@ func setOf[K comparable](m map[K]bool, k K) map[K]bool {
 }
 
 func (e *exclusions) skip(c cand) bool {
-	return e.queues[c.queue] || e.queueTenants[[2]string{c.queue, c.tenant}] || e.resources[c.resource] || e.resourceTenants[[2]string{c.resource, c.tenant}]
+	return e.queues[c.queue] || e.queueGroups[[2]string{c.queue, c.group}] || e.pools[c.pool] || e.poolGroups[[2]string{c.pool, c.group}]
 }
 
 func (e *exclusions) where(queue string) (string, []any) {
@@ -224,18 +224,18 @@ func (e *exclusions) where(queue string) (string, []any) {
 	}
 	var sb strings.Builder
 	var args []any
-	for qt := range e.queueTenants {
+	for qt := range e.queueGroups {
 		if qt[0] == queue {
-			sb.WriteString(" AND tenant<>?")
+			sb.WriteString(" AND grp<>?")
 			args = append(args, qt[1])
 		}
 	}
-	for p := range e.resources {
-		sb.WriteString(" AND resource<>?")
+	for p := range e.pools {
+		sb.WriteString(" AND pool<>?")
 		args = append(args, p)
 	}
-	for pt := range e.resourceTenants {
-		sb.WriteString(" AND NOT (resource=? AND tenant=?)")
+	for pt := range e.poolGroups {
+		sb.WriteString(" AND NOT (pool=? AND grp=?)")
 		args = append(args, pt[0], pt[1])
 	}
 	return sb.String(), args
@@ -263,14 +263,14 @@ func (t *taker) scan(ctx context.Context, state runnel.State, queues []string, e
 			args = strArgs(args, t.only)
 		}
 		extra, more := ex.where(q)
-		rows, err := t.tx.QueryContext(ctx, t.s.q("SELECT id, queue, tenant, resource, priority, run_at FROM rn_jobs WHERE "+where+extra+order+" LIMIT ?"+t.s.d.skipLocked()),
+		rows, err := t.tx.QueryContext(ctx, t.s.q("SELECT id, queue, grp, pool, priority, run_at FROM rn_jobs WHERE "+where+extra+order+" LIMIT ?"+t.s.d.skipLocked()),
 			append(append(args, more...), limit)...)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var c cand
-			if err := rows.Scan(&c.id, &c.queue, &c.tenant, &c.resource, &c.priority, &c.runAt); err != nil {
+			if err := rows.Scan(&c.id, &c.queue, &c.group, &c.pool, &c.priority, &c.runAt); err != nil {
 				rows.Close()
 				return nil, err
 			}

@@ -93,7 +93,7 @@ func testMaintainer(t *testing.T, open Opener) {
 	if j.State != runnel.StateWaiting || j.Attempt != 1 || len(j.Errors) != 1 {
 		t.Fatalf("not reaped: %+v", j)
 	}
-	moved := e.add("slow", runnel.StartWithin(50*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "fast"}))
+	moved := e.add("slow", runnel.StartTimeout(50*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "fast"}))
 	time.Sleep(80 * time.Millisecond)
 	if err := m.Tick(e.ctx, e.ns); err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func testMaintainerEvents(t *testing.T, open Opener) {
 	}
 	all, _ := e.c.Events(e.ctx, 0, 10)
 	time.Sleep(20 * time.Millisecond)
-	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}, Batch: 1, Webhooks: runnel.WebhookConfig{Enabled: true},
+	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}, Batch: 1, Callbacks: runnel.CallbackConfig{Enabled: true},
 		Retention: runnel.Retention{Completed: time.Millisecond, Events: time.Millisecond}})
 	if err := m.Tick(e.ctx, e.ns); err != nil {
 		t.Fatal(err)
@@ -190,45 +190,45 @@ func testMaintainerEvents(t *testing.T, open Opener) {
 	if stats, _ := e.c.Stats(e.ctx); len(stats) > 0 && stats[0].Counts[runnel.StateCompleted] != 0 {
 		t.Fatalf("jobs not pruned %+v", stats)
 	}
-	cur, _ := e.s.Cursor(e.ctx, e.ns, "webhooks")
+	cur, _ := e.s.Cursor(e.ctx, e.ns, "callbacks")
 	left, _ := e.c.Events(e.ctx, 0, 10)
 	if len(all) != 3 || cur != all[0].Seq || len(left) != 2 || left[0].Seq != all[1].Seq {
-		t.Fatalf("webhook backlog lost: cursor %d, events before %d, after %+v", cur, len(all), left)
+		t.Fatalf("callback backlog lost: cursor %d, events before %d, after %+v", cur, len(all), left)
 	}
 }
 
-func testWebhookJobs(t *testing.T, open Opener) {
+func testCallbackJobs(t *testing.T, open Opener) {
 	spec.Rule(t, "H01")
 	e := setup(t, open)
-	hooked := e.add("q", runnel.Webhook("https://example.com/hook"))
+	hooked := e.add("q", runnel.Callback("https://example.com/hook"))
 	e.add("q")
 	for _, j := range e.claim([]string{"q"}, 2) {
 		e.finish(j, runnel.Outcome{Kind: runnel.OutcomeDone})
 	}
-	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}, Webhooks: runnel.WebhookConfig{Enabled: true}})
+	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}, Callbacks: runnel.CallbackConfig{Enabled: true}})
 	if err := m.Tick(e.ctx, e.ns); err != nil {
 		t.Fatal(err)
 	}
-	cur, err := e.s.Cursor(e.ctx, e.ns, "webhooks")
+	cur, err := e.s.Cursor(e.ctx, e.ns, "callbacks")
 	if err != nil || cur == 0 {
-		t.Fatalf("webhook cursor %d %v", cur, err)
+		t.Fatalf("callback cursor %d %v", cur, err)
 	}
-	if ok, err := e.s.SwapCursor(e.ctx, e.ns, "webhooks", cur, 0); err != nil || !ok {
+	if ok, err := e.s.SwapCursor(e.ctx, e.ns, "callbacks", cur, 0); err != nil || !ok {
 		t.Fatalf("rewind cursor %v %v", ok, err)
 	}
 	if err := m.Tick(e.ctx, e.ns); err != nil {
 		t.Fatal(err)
 	}
-	hooks, _, err := e.c.List(e.ctx, runnel.Query{Queue: runnel.WebhookQueue, Limit: 10})
+	hooks, _, err := e.c.List(e.ctx, runnel.Query{Queue: runnel.CallbackQueue, Limit: 10})
 	if err != nil || len(hooks) != 1 {
-		t.Fatalf("%d deliveries for one webhook seen twice, %v", len(hooks), err)
+		t.Fatalf("%d deliveries for one callback seen twice, %v", len(hooks), err)
 	}
 	var task struct {
 		URL   string
 		Event string
 		Job   struct{ ID string }
 	}
-	if err := hooks[0].Bind(&task); err != nil || hooks[0].Kind != runnel.WebhookKind || task.URL != "https://example.com/hook" ||
+	if err := hooks[0].Bind(&task); err != nil || hooks[0].Kind != runnel.CallbackKind || task.URL != "https://example.com/hook" ||
 		task.Event != "job.completed" || task.Job.ID != hooked.ID {
 		t.Fatalf("delivery %+v of %+v, %v", task, hooks[0], err)
 	}

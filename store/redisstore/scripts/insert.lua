@@ -61,10 +61,10 @@ for i, j in ipairs(jobs) do
       end
     end
   end
-  if status == "ok" and j.tenant ~= "" then
-    local cap = tonumber(queue_cfg(j.queue).tenant_max_queued) or 0
+  if status == "ok" and j.group ~= "" then
+    local cap = tonumber(queue_cfg(j.queue).group_max_queued) or 0
     if cap > 0 then
-      local n = tonumber(redis.call("HGET", k("wait"), j.queue .. "|" .. j.tenant) or "0")
+      local n = tonumber(redis.call("HGET", k("wait"), j.queue .. "|" .. j.group) or "0")
       if n >= cap then
         status = "full"
         remap[j.id] = ""

@@ -21,7 +21,7 @@ We confirm receipt within 3 working days and send a first assessment within 10. 
 
 In scope: the `runnel` server and CLI, the Go packages in this module, and the release artifacts.
 
-Examples: authentication or role bypass, one namespace reading or changing another, webhook delivery reaching private addresses, signature forgery, or a crafted request that crashes the server or exhausts its memory.
+Examples: authentication or role bypass, one namespace reading or changing another, callback delivery reaching private addresses, signature forgery, or a crafted request that crashes the server or exhausts its memory.
 
 Out of scope: attacks that need the admin token or direct access to the database, and deployments that expose the server without TLS.
 
@@ -29,6 +29,6 @@ Out of scope: attacks that need the admin token or direct access to the database
 
 - Run the server behind TLS. Keep the admin token out of shell history and logs.
 - Give each service its own namespace and keys with the fewest roles it needs.
-- Webhooks are signed (`Runnel-Signature`, HMAC-SHA256 with a timestamp). Verify them, and reject old timestamps.
-- Webhooks need `https` and never follow redirects. Delivery refuses private, loopback and link-local addresses, checked on every connection, so DNS tricks cannot reach them. `--allow-http-webhooks` and `--allow-private-webhooks` lift these rules for local development only.
+- Callbacks are signed (`Runnel-Signature`, HMAC-SHA256 with a timestamp). Verify them, and reject old timestamps.
+- Callbacks need `https` and never follow redirects. Delivery refuses private, loopback and link-local addresses, checked on every connection, so DNS tricks cannot reach them. `--allow-http-callbacks` and `--allow-private-callbacks` lift these rules for local development only.
 - Release archives come with a checksum file signed with Sigstore cosign, and images on `ghcr.io/kinoforge/runnel` are signed too. Verify them before you deploy.

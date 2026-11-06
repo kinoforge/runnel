@@ -69,7 +69,7 @@ func (e *APIError) Unwrap() error {
 		if e.Title == "queue full" {
 			return runnel.ErrQueueFull
 		}
-		return runnel.ErrTenantFull
+		return runnel.ErrGroupFull
 	case http.StatusUnprocessableEntity:
 		return runnel.ErrDependency
 	case http.StatusBadRequest:
@@ -128,29 +128,29 @@ func waitHeader(ctx context.Context, most time.Duration) http.Header {
 func (c *Client) path(p string) string { return "/v1/ns/" + url.PathEscape(c.ns) + p }
 
 type jobRequest struct {
-	Queue       string            `json:"queue"`
-	Kind        string            `json:"kind"`
-	Payload     json.RawMessage   `json:"payload,omitempty"`
-	Priority    int               `json:"priority,omitempty"`
-	Tenant      string            `json:"tenant,omitempty"`
-	Resource    string            `json:"resource,omitempty"`
-	RunAt       time.Time         `json:"run_at,omitzero"`
-	MaxAttempts int               `json:"max_attempts,omitempty"`
-	UniqueKey   string            `json:"unique_key,omitempty"`
-	UniqueFor   runnel.Duration   `json:"unique_for,omitempty"`
-	StartWithin runnel.Duration   `json:"start_within,omitempty"`
-	Timeout     runnel.Duration   `json:"timeout,omitempty"`
-	Backoff     runnel.Backoff    `json:"backoff,omitzero"`
-	Fallbacks   []runnel.Target   `json:"fallbacks,omitempty"`
-	DependsOn   []string          `json:"depends_on,omitempty"`
-	Webhook     string            `json:"webhook,omitempty"`
-	Meta        map[string]string `json:"meta,omitempty"`
+	Queue        string            `json:"queue"`
+	Kind         string            `json:"kind"`
+	Payload      json.RawMessage   `json:"payload,omitempty"`
+	Priority     int               `json:"priority,omitempty"`
+	Group        string            `json:"group,omitempty"`
+	Pool         string            `json:"pool,omitempty"`
+	RunAt        time.Time         `json:"run_at,omitzero"`
+	MaxAttempts  int               `json:"max_attempts,omitempty"`
+	UniqueKey    string            `json:"unique_key,omitempty"`
+	UniqueFor    runnel.Duration   `json:"unique_for,omitempty"`
+	StartTimeout runnel.Duration   `json:"start_timeout,omitempty"`
+	Timeout      runnel.Duration   `json:"timeout,omitempty"`
+	Backoff      runnel.Backoff    `json:"backoff,omitzero"`
+	Fallbacks    []runnel.Target   `json:"fallbacks,omitempty"`
+	DependsOn    []string          `json:"depends_on,omitempty"`
+	CallbackURL  string            `json:"callback_url,omitempty"`
+	Meta         map[string]string `json:"meta,omitempty"`
 }
 
 func request(j *runnel.Job) jobRequest {
-	return jobRequest{Queue: j.Queue, Kind: j.Kind, Payload: j.Payload, Priority: j.Priority, Tenant: j.Tenant, Resource: j.Resource,
-		RunAt: j.RunAt, MaxAttempts: j.MaxAttempts, UniqueKey: j.UniqueKey, UniqueFor: j.UniqueFor, StartWithin: j.StartWithin,
-		Timeout: j.Timeout, Backoff: j.Backoff, Fallbacks: j.Fallbacks, DependsOn: j.DependsOn, Webhook: j.Webhook, Meta: j.Meta}
+	return jobRequest{Queue: j.Queue, Kind: j.Kind, Payload: j.Payload, Priority: j.Priority, Group: j.Group, Pool: j.Pool,
+		RunAt: j.RunAt, MaxAttempts: j.MaxAttempts, UniqueKey: j.UniqueKey, UniqueFor: j.UniqueFor, StartTimeout: j.StartTimeout,
+		Timeout: j.Timeout, Backoff: j.Backoff, Fallbacks: j.Fallbacks, DependsOn: j.DependsOn, CallbackURL: j.CallbackURL, Meta: j.Meta}
 }
 
 func (c *Client) Enqueue(ctx context.Context, queue, kind string, payload any, opts ...runnel.Option) (runnel.Inserted, error) {
@@ -232,7 +232,7 @@ func (c *Client) Get(ctx context.Context, id string) (*runnel.Job, error) {
 // List returns a page of jobs and the cursor of the next page.
 func (c *Client) List(ctx context.Context, q runnel.Query) ([]*runnel.Job, string, error) {
 	v := url.Values{}
-	for k, s := range map[string]string{"queue": q.Queue, "kind": q.Kind, "tenant": q.Tenant, "state": string(q.State), "cursor": q.Cursor} {
+	for k, s := range map[string]string{"queue": q.Queue, "kind": q.Kind, "group": q.Group, "state": string(q.State), "cursor": q.Cursor} {
 		if s != "" {
 			v.Set(k, s)
 		}

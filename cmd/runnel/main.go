@@ -20,16 +20,16 @@ import (
 const usage = `runnel: queues for every service
 
 usage:
-  runnel serve      [--addr :8700] [--no-maintain] [--archive] [--no-webhooks]
+  runnel serve      [--addr :8700] [--no-maintain] [--archive] [--no-callbacks]
   runnel migrate
-  runnel ns create NAME [--webhook-secret S] | ns list | ns delete NAME
+  runnel ns create NAME [--callback-secret S] | ns list | ns delete NAME
   runnel key create NS --roles producer,worker [--name N] [--expires 720h] | key list NS | key delete NS ID
-  runnel enqueue NS QUEUE KIND [--payload JSON] [--priority N] [--delay 10s] [--tenant T] [--resource R]
+  runnel enqueue NS QUEUE KIND [--payload JSON] [--priority N] [--delay 10s] [--group T] [--pool R]
   runnel jobs NS [--queue Q] [--state S] [--limit N]
   runnel job NS ID | cancel NS ID | retry NS ID | stats NS
-  runnel queue|resource|schedule set NS NAME --json '{...}' | list NS | delete NS NAME
+  runnel queue|pool|schedule set NS NAME --json '{...}' | list NS | delete NS NAME
   runnel version
-  runnel bench [--jobs 20000] [--workers 4] [--concurrency 25] [--batch 100] [--tenants N] [--tenant-max-running N]
+  runnel bench [--jobs 20000] [--workers 4] [--concurrency 25] [--batch 100] [--groups N] [--group-max-running N]
 
 every command reads settings from defaults, then --config FILE or RUNNEL_CONFIG
 (YAML, see deploy/runnel.example.yaml), then RUNNEL_* variables, then flags.
@@ -183,8 +183,8 @@ func run(ctx context.Context, name string, args []string) error {
 		return nil
 	case "queue":
 		return configCommand[runnel.QueueConfig](ctx, name, runnel.ConfigQueue, args)
-	case "resource":
-		return configCommand[runnel.ResourceConfig](ctx, name, runnel.ConfigResource, args)
+	case "pool":
+		return configCommand[runnel.PoolConfig](ctx, name, runnel.ConfigPool, args)
 	case "schedule":
 		return configCommand[runnel.Schedule](ctx, name, runnel.ConfigSchedule, args)
 	}

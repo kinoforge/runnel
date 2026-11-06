@@ -26,12 +26,12 @@ type Schedule struct {
 	Kind        string            `json:"kind"`
 	Payload     json.RawMessage   `json:"payload,omitempty"`
 	Priority    int               `json:"priority,omitempty"`
-	Tenant      string            `json:"tenant,omitempty"`
-	Resource    string            `json:"resource,omitempty"`
+	Group       string            `json:"group,omitempty"`
+	Pool        string            `json:"pool,omitempty"`
 	MaxAttempts int               `json:"max_attempts,omitempty"`
 	Timeout     Duration          `json:"timeout,omitempty"`
 	Fallbacks   []Target          `json:"fallbacks,omitempty"`
-	Webhook     string            `json:"webhook,omitempty"`
+	CallbackURL string            `json:"callback_url,omitempty"`
 	Meta        map[string]string `json:"meta,omitempty"`
 }
 
@@ -43,8 +43,8 @@ func (s Schedule) Validate() error {
 	if _, err := parseSpec(s.Spec, s.Timezone); err != nil {
 		return invalid("schedule spec: %v", err)
 	}
-	probe := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Tenant: s.Tenant,
-		Resource: s.Resource, MaxAttempts: max(s.MaxAttempts, 1), Timeout: s.Timeout, Fallbacks: s.Fallbacks, Webhook: s.Webhook, Meta: s.Meta}
+	probe := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Group: s.Group,
+		Pool: s.Pool, MaxAttempts: max(s.MaxAttempts, 1), Timeout: s.Timeout, Fallbacks: s.Fallbacks, CallbackURL: s.CallbackURL, Meta: s.Meta}
 	return probe.validate(DefaultLimits)
 }
 
@@ -116,8 +116,8 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 		if !won {
 			continue
 		}
-		j := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Tenant: s.Tenant, Resource: s.Resource,
-			MaxAttempts: s.MaxAttempts, Timeout: s.Timeout, Fallbacks: s.Fallbacks, Webhook: s.Webhook,
+		j := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Group: s.Group, Pool: s.Pool,
+			MaxAttempts: s.MaxAttempts, Timeout: s.Timeout, Fallbacks: s.Fallbacks, CallbackURL: s.CallbackURL,
 			UniqueKey: "cron:" + name + ":" + strconv.FormatInt(fire.Unix(), 10), UniqueFor: Duration(cronUniqueFor)}
 		j.Meta = map[string]string{"schedule": name, "fire_at": fire.UTC().Format(time.RFC3339)}
 		maps.Copy(j.Meta, s.Meta)

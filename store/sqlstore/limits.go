@@ -59,21 +59,21 @@ func (l *limiter) save(ctx context.Context) error {
 
 type counts map[string]int
 
-func (c counts) add(queue, tenant, resource string, d int) {
+func (c counts) add(queue, group, pool string, d int) {
 	c["q|"+queue] += d
-	if tenant != "" {
-		c["qt|"+queue+"|"+tenant] += d
+	if group != "" {
+		c["qt|"+queue+"|"+group] += d
 	}
-	if resource != "" {
-		c["r|"+resource] += d
-		if tenant != "" {
-			c["rt|"+resource+"|"+tenant] += d
+	if pool != "" {
+		c["r|"+pool] += d
+		if group != "" {
+			c["rt|"+pool+"|"+group] += d
 		}
 	}
 }
 
 func (s *Store) activeCounts(ctx context.Context, tx *txn, ns string) (counts, error) {
-	rows, err := tx.QueryContext(ctx, s.q("SELECT queue, tenant, resource, COUNT(*) FROM rn_jobs WHERE ns=? AND state IN (?, ?) GROUP BY queue, tenant, resource"),
+	rows, err := tx.QueryContext(ctx, s.q("SELECT queue, grp, pool, COUNT(*) FROM rn_jobs WHERE ns=? AND state IN (?, ?) GROUP BY queue, grp, pool"),
 		ns, string(runnel.StateRunning), string(runnel.StatePolling))
 	if err != nil {
 		return nil, err
@@ -81,29 +81,29 @@ func (s *Store) activeCounts(ctx context.Context, tx *txn, ns string) (counts, e
 	defer rows.Close()
 	c := counts{}
 	for rows.Next() {
-		var queue, tenant, resource string
+		var queue, group, pool string
 		var n int
-		if err := rows.Scan(&queue, &tenant, &resource, &n); err != nil {
+		if err := rows.Scan(&queue, &group, &pool, &n); err != nil {
 			return nil, err
 		}
-		c.add(queue, tenant, resource, n)
+		c.add(queue, group, pool, n)
 	}
 	return c, rows.Err()
 }
 
-func admit(ctx context.Context, j cand, q runnel.QueueConfig, p runnel.ResourceConfig, act counts, lim *limiter) (verdict, error) {
+func admit(ctx context.Context, j cand, q runnel.QueueConfig, p runnel.PoolConfig, act counts, lim *limiter) (verdict, error) {
 	if q.MaxRunning > 0 && act["q|"+j.queue] >= q.MaxRunning {
 		return queueFull, nil
 	}
-	if j.tenant != "" && q.TenantMaxRunning > 0 && act["qt|"+j.queue+"|"+j.tenant] >= q.TenantMaxRunning {
-		return queueTenantFull, nil
+	if j.group != "" && q.GroupMaxRunning > 0 && act["qt|"+j.queue+"|"+j.group] >= q.GroupMaxRunning {
+		return queueGroupFull, nil
 	}
-	if j.resource != "" {
-		if p.MaxRunning > 0 && act["r|"+j.resource] >= p.MaxRunning {
-			return resourceFull, nil
+	if j.pool != "" {
+		if p.Slots > 0 && act["r|"+j.pool] >= p.Slots {
+			return poolFull, nil
 		}
-		if j.tenant != "" && p.TenantMaxRunning > 0 && act["rt|"+j.resource+"|"+j.tenant] >= p.TenantMaxRunning {
-			return resourceTenantFull, nil
+		if j.group != "" && p.GroupSlots > 0 && act["rt|"+j.pool+"|"+j.group] >= p.GroupSlots {
+			return poolGroupFull, nil
 		}
 	}
 	var take []*bucket
@@ -117,13 +117,13 @@ func admit(ctx context.Context, j cand, q runnel.QueueConfig, p runnel.ResourceC
 		}
 		take = append(take, b)
 	}
-	if j.tenant != "" && q.TenantRate > 0 {
-		b, err := lim.get(ctx, "qt|"+j.queue+"|"+j.tenant, q.TenantRate, q.TenantBurst)
+	if j.group != "" && q.GroupRate > 0 {
+		b, err := lim.get(ctx, "qt|"+j.queue+"|"+j.group, q.GroupRate, q.GroupBurst)
 		if err != nil {
 			return 0, err
 		}
 		if b.tokens < 1 {
-			return queueTenantFull, nil
+			return queueGroupFull, nil
 		}
 		take = append(take, b)
 	}

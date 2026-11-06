@@ -20,42 +20,42 @@ const (
 
 // JobRequest is the JSON body that enqueues a job.
 type JobRequest struct {
-	Queue       string            `json:"queue"`
-	Kind        string            `json:"kind"`
-	Payload     json.RawMessage   `json:"payload,omitempty"`
-	Priority    int               `json:"priority,omitempty"`
-	Tenant      string            `json:"tenant,omitempty"`
-	Resource    string            `json:"resource,omitempty"`
-	RunAt       time.Time         `json:"run_at,omitzero"`
-	Delay       runnel.Duration   `json:"delay,omitempty"`
-	MaxAttempts int               `json:"max_attempts,omitempty"`
-	UniqueKey   string            `json:"unique_key,omitempty"`
-	UniqueFor   runnel.Duration   `json:"unique_for,omitempty"`
-	StartWithin runnel.Duration   `json:"start_within,omitempty"`
-	Timeout     runnel.Duration   `json:"timeout,omitempty"`
-	Backoff     runnel.Backoff    `json:"backoff,omitzero"`
-	Fallbacks   []runnel.Target   `json:"fallbacks,omitempty"`
-	DependsOn   []string          `json:"depends_on,omitempty"`
-	Webhook     string            `json:"webhook,omitempty"`
-	Meta        map[string]string `json:"meta,omitempty"`
+	Queue        string            `json:"queue"`
+	Kind         string            `json:"kind"`
+	Payload      json.RawMessage   `json:"payload,omitempty"`
+	Priority     int               `json:"priority,omitempty"`
+	Group        string            `json:"group,omitempty"`
+	Pool         string            `json:"pool,omitempty"`
+	RunAt        time.Time         `json:"run_at,omitzero"`
+	Delay        runnel.Duration   `json:"delay,omitempty"`
+	MaxAttempts  int               `json:"max_attempts,omitempty"`
+	UniqueKey    string            `json:"unique_key,omitempty"`
+	UniqueFor    runnel.Duration   `json:"unique_for,omitempty"`
+	StartTimeout runnel.Duration   `json:"start_timeout,omitempty"`
+	Timeout      runnel.Duration   `json:"timeout,omitempty"`
+	Backoff      runnel.Backoff    `json:"backoff,omitzero"`
+	Fallbacks    []runnel.Target   `json:"fallbacks,omitempty"`
+	DependsOn    []string          `json:"depends_on,omitempty"`
+	CallbackURL  string            `json:"callback_url,omitempty"`
+	Meta         map[string]string `json:"meta,omitempty"`
 }
 
 func (s *Server) toJob(req JobRequest) (*runnel.Job, error) {
-	if req.Webhook != "" {
-		if err := s.checkWebhook(req.Webhook); err != nil {
+	if req.CallbackURL != "" {
+		if err := s.checkCallback(req.CallbackURL); err != nil {
 			return nil, err
 		}
 	}
 	if req.Delay < 0 || req.Delay.D() > maxDelayDays*24*time.Hour {
 		return nil, fmt.Errorf("%w: delay must be between 0 and %d days", runnel.ErrInvalid, maxDelayDays)
 	}
-	if req.Queue == runnel.WebhookQueue || req.Kind == runnel.WebhookKind {
-		return nil, fmt.Errorf("%w: %s is reserved", runnel.ErrInvalid, runnel.WebhookQueue)
+	if req.Queue == runnel.CallbackQueue || req.Kind == runnel.CallbackKind {
+		return nil, fmt.Errorf("%w: %s is reserved", runnel.ErrInvalid, runnel.CallbackQueue)
 	}
-	j := &runnel.Job{Queue: req.Queue, Kind: req.Kind, Payload: req.Payload, Priority: req.Priority, Tenant: req.Tenant,
-		Resource: req.Resource, RunAt: req.RunAt, MaxAttempts: req.MaxAttempts, UniqueKey: req.UniqueKey, UniqueFor: req.UniqueFor,
-		StartWithin: req.StartWithin, Timeout: req.Timeout, Backoff: req.Backoff, Fallbacks: req.Fallbacks,
-		DependsOn: req.DependsOn, Webhook: req.Webhook, Meta: req.Meta}
+	j := &runnel.Job{Queue: req.Queue, Kind: req.Kind, Payload: req.Payload, Priority: req.Priority, Group: req.Group,
+		Pool: req.Pool, RunAt: req.RunAt, MaxAttempts: req.MaxAttempts, UniqueKey: req.UniqueKey, UniqueFor: req.UniqueFor,
+		StartTimeout: req.StartTimeout, Timeout: req.Timeout, Backoff: req.Backoff, Fallbacks: req.Fallbacks,
+		DependsOn: req.DependsOn, CallbackURL: req.CallbackURL, Meta: req.Meta}
 	if req.Delay > 0 {
 		runnel.In(req.Delay.D())(j)
 	}
@@ -204,7 +204,7 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request, _ principal) e
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	jobs, next, err := s.client(r.PathValue("ns")).List(r.Context(), runnel.Query{Queue: q.Get("queue"), Kind: q.Get("kind"),
-		Tenant: q.Get("tenant"), State: runnel.State(q.Get("state")), Cursor: q.Get("cursor"), Limit: limit})
+		Group: q.Get("group"), State: runnel.State(q.Get("state")), Cursor: q.Get("cursor"), Limit: limit})
 	if err != nil {
 		return err
 	}

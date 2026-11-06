@@ -32,7 +32,7 @@ func TestDefaults(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Store != "sqlite:runnel.db" || cfg.Server.Addr != ":8700" || !cfg.Maintainer.Enabled || !cfg.Webhooks.Enabled {
+	if cfg.Store != "sqlite:runnel.db" || cfg.Server.Addr != ":8700" || !cfg.Maintainer.Enabled || !cfg.Callbacks.Enabled {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 	if runnel.Limits(cfg.Limits) != runnel.DefaultLimits || runnel.Retention(cfg.Maintainer.Retention) != runnel.DefaultRetention {
@@ -72,7 +72,7 @@ func TestEnvOverridesYAML(t *testing.T) {
 		"RUNNEL_STORE":                     "redis://localhost:6379/0",
 		"RUNNEL_ADDR":                      ":9100",
 		"RUNNEL_SERVER_MAX_BODY":           "1024",
-		"RUNNEL_WEBHOOKS_ENABLED":          "false",
+		"RUNNEL_CALLBACKS_ENABLED":         "false",
 		"RUNNEL_MAINTAINER_RETENTION_DEAD": "1h",
 	}))
 	if err != nil {
@@ -81,7 +81,7 @@ func TestEnvOverridesYAML(t *testing.T) {
 	if cfg.Store != "redis://localhost:6379/0" || cfg.Server.Addr != ":9100" || cfg.Server.MaxBody != 1024 {
 		t.Fatalf("env not applied: %+v", cfg.Server)
 	}
-	if cfg.Webhooks.Enabled || cfg.Maintainer.Retention.Dead != time.Hour {
+	if cfg.Callbacks.Enabled || cfg.Maintainer.Retention.Dead != time.Hour {
 		t.Fatal("nested env not applied")
 	}
 }
@@ -94,11 +94,11 @@ func TestRejects(t *testing.T) {
 	}{
 		"unknown key":    {yaml: "sever:\n  addr: x\n", want: "sever"},
 		"bad env number": {env: map[string]string{"RUNNEL_SERVER_MAX_BODY": "big"}, want: "RUNNEL_SERVER_MAX_BODY"},
-		"bad env bool":   {env: map[string]string{"RUNNEL_WEBHOOKS_ENABLED": "maybe"}, want: "RUNNEL_WEBHOOKS_ENABLED"},
+		"bad env bool":   {env: map[string]string{"RUNNEL_CALLBACKS_ENABLED": "maybe"}, want: "RUNNEL_CALLBACKS_ENABLED"},
 		"short token":    {env: map[string]string{"RUNNEL_ADMIN_TOKEN": "short"}, want: "admin token"},
 		"bad log format": {yaml: "log:\n  format: xml\n", want: "log.format"},
 		"bad log level":  {yaml: "log:\n  level: loud\n", want: "log.level"},
-		"negative value": {yaml: "webhooks:\n  concurrency: -1\n", want: "webhooks.concurrency"},
+		"negative value": {yaml: "callbacks:\n  concurrency: -1\n", want: "callbacks.concurrency"},
 		"empty store":    {yaml: "store: \"\"\n", want: "store is required"},
 	}
 	for name, tc := range cases {

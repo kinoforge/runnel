@@ -16,8 +16,8 @@ func enqueue(ctx context.Context, args []string) error {
 	payload := c.fs.String("payload", "", "JSON payload")
 	priority := c.fs.Int("priority", 0, "priority, -1000 to 1000")
 	delay := c.fs.Duration("delay", 0, "run after this delay")
-	tenant := c.fs.String("tenant", "", "tenant")
-	resource := c.fs.String("resource", "", "resource")
+	group := c.fs.String("group", "", "group")
+	pool := c.fs.String("pool", "", "pool")
 	attempts := c.fs.Int("max-attempts", 0, "max attempts")
 	pos, s, err := c.start(ctx, args, 3)
 	if err != nil {
@@ -31,7 +31,7 @@ func enqueue(ctx context.Context, args []string) error {
 		}
 		body = json.RawMessage(*payload)
 	}
-	opts := []runnel.Option{runnel.Priority(*priority), runnel.Tenant(*tenant), runnel.Resource(*resource), runnel.MaxAttempts(*attempts)}
+	opts := []runnel.Option{runnel.Priority(*priority), runnel.Group(*group), runnel.Pool(*pool), runnel.MaxAttempts(*attempts)}
 	if *delay > 0 {
 		opts = append(opts, runnel.In(*delay))
 	}

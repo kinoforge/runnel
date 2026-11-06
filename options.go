@@ -12,11 +12,11 @@ type Option func(*Job)
 // Priority orders jobs within a queue, from -1000 to 1000; higher runs first.
 func Priority(p int) Option { return func(j *Job) { j.Priority = p } }
 
-// Tenant names who the job is for, so tenant limits apply to it.
-func Tenant(t string) Option { return func(j *Job) { j.Tenant = t } }
+// Group names who the job is for, so group limits apply to it.
+func Group(t string) Option { return func(j *Job) { j.Group = t } }
 
-// Resource makes the job count against a shared resource.
-func Resource(r string) Option { return func(j *Job) { j.Resource = r } }
+// Pool makes the job count against a shared pool.
+func Pool(r string) Option { return func(j *Job) { j.Pool = r } }
 
 // At delays the job until t.
 func At(t time.Time) Option { return func(j *Job) { j.RunAt = t } }
@@ -30,9 +30,9 @@ func MaxAttempts(n int) Option { return func(j *Job) { j.MaxAttempts = n } }
 // Timeout ends an attempt that runs longer than d.
 func Timeout(d time.Duration) Option { return func(j *Job) { j.Timeout = Duration(d) } }
 
-// StartWithin moves the job to its next fallback when it waits longer than d to
+// StartTimeout moves the job to its next fallback when it waits longer than d to
 // start.
-func StartWithin(d time.Duration) Option { return func(j *Job) { j.StartWithin = Duration(d) } }
+func StartTimeout(d time.Duration) Option { return func(j *Job) { j.StartTimeout = Duration(d) } }
 
 // WithBackoff spaces the job's retries.
 func WithBackoff(b Backoff) Option { return func(j *Job) { j.Backoff = b } }
@@ -50,8 +50,8 @@ func Fallbacks(t ...Target) Option { return func(j *Job) { j.Fallbacks = append(
 // After makes the job wait until the jobs with these ids complete.
 func After(ids ...string) Option { return func(j *Job) { j.DependsOn = append(j.DependsOn, ids...) } }
 
-// Webhook posts the job's summary to url when it finishes.
-func Webhook(url string) Option { return func(j *Job) { j.Webhook = url } }
+// Callback posts the job's summary to url when it finishes.
+func Callback(url string) Option { return func(j *Job) { j.CallbackURL = url } }
 
 // Meta adds string labels to the job.
 func Meta(kv map[string]string) Option {

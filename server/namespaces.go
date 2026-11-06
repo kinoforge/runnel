@@ -15,7 +15,7 @@ const maxKeysPerNamespace = 100
 
 type namespaceView struct {
 	Name      string              `json:"name"`
-	HasSecret bool                `json:"has_webhook_secret"`
+	HasSecret bool                `json:"has_callback_secret"`
 	Keys      []keyView           `json:"keys"`
 	CreatedAt time.Time           `json:"created_at"`
 	Stats     []runnel.QueueStats `json:"stats,omitempty"`
@@ -30,7 +30,7 @@ type keyView struct {
 }
 
 func viewNamespace(n runnel.Namespace, keys []runnel.APIKey) namespaceView {
-	v := namespaceView{Name: n.Name, HasSecret: n.WebhookSecret != "", CreatedAt: n.CreatedAt, Keys: []keyView{}}
+	v := namespaceView{Name: n.Name, HasSecret: n.CallbackSecret != "", CreatedAt: n.CreatedAt, Keys: []keyView{}}
 	for _, k := range keys {
 		v.Keys = append(v.Keys, keyView{ID: k.ID, Name: k.Name, Roles: k.Roles, CreatedAt: k.CreatedAt, ExpiresAt: k.ExpiresAt})
 	}
@@ -86,7 +86,7 @@ func (s *Server) listNamespaces(w http.ResponseWriter, r *http.Request, _ princi
 
 func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request, _ principal) error {
 	var body struct {
-		WebhookSecret *string `json:"webhook_secret"`
+		CallbackSecret *string `json:"callback_secret"`
 	}
 	if r.ContentLength != 0 {
 		if err := decode(r, &body); err != nil {
@@ -101,8 +101,8 @@ func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request, _ principa
 	} else if err != nil {
 		return err
 	}
-	if body.WebhookSecret != nil {
-		n.WebhookSecret = *body.WebhookSecret
+	if body.CallbackSecret != nil {
+		n.CallbackSecret = *body.CallbackSecret
 	}
 	if err := runnel.PutNamespace(r.Context(), s.store, n); err != nil {
 		return err

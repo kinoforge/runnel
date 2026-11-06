@@ -44,20 +44,20 @@ func (h *hookReceiver) answer(status int, retryAfter string) {
 	h.status, h.retryAfter = status, retryAfter
 }
 
-func TestWebhookDelivery(t *testing.T) {
+func TestCallbackDelivery(t *testing.T) {
 	spec.Rule(t, "H02", "H03")
 	rcv := &hookReceiver{status: http.StatusOK}
 	srv := httptest.NewServer(rcv)
 	defer srv.Close()
-	done := &Job{ID: NewID(), Namespace: "app", Queue: "q", Kind: "k", State: StateCompleted, Webhook: srv.URL + "/hook", Result: json.RawMessage(`{"ok":true}`)}
-	hook, err := NewWebhookJob(done, "job.completed", 42, "")
+	done := &Job{ID: NewID(), Namespace: "app", Queue: "q", Kind: "k", State: StateCompleted, CallbackURL: srv.URL + "/hook", Result: json.RawMessage(`{"ok":true}`)}
+	hook, err := NewCallbackJob(done, "job.completed", 42, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hook.Queue != WebhookQueue || hook.Kind != WebhookKind || hook.MaxAttempts != 10 {
+	if hook.Queue != CallbackQueue || hook.Kind != CallbackKind || hook.MaxAttempts != 10 {
 		t.Fatalf("delivery job %+v", hook)
 	}
-	sender := NewWebhookSender(func(context.Context, string) (string, error) { return "s3cret", nil }, WebhookConfig{AllowPrivate: true})
+	sender := NewCallbackSender(func(context.Context, string) (string, error) { return "s3cret", nil }, CallbackConfig{AllowPrivate: true})
 	deliver := func() Outcome { return OutcomeOf(sender.Work(context.Background(), hook), nil) }
 	if o := deliver(); o.Kind != OutcomeDone {
 		t.Fatalf("2xx became %+v", o)

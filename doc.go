@@ -4,22 +4,22 @@
 // Producers enqueue jobs through a Client. Workers claim them under a lease,
 // run the handler registered for the job's kind, heartbeat while it runs and
 // report an outcome. A Maintainer returns the jobs of workers that died, fires
-// schedules, delivers webhooks and prunes old jobs.
+// schedules, delivers callbacks and prunes old jobs.
 //
 // A queue's settings limit how many of its jobs run at once (MaxRunning), how
-// many per tenant (TenantMaxRunning) and how fast they start (Rate). A Resource is
+// many per group (GroupMaxRunning) and how fast they start (Rate). A Pool is
 // a limit several queues share, such as one partner account. When a handler
 // cannot finish a job, its error says what happens next: retry later, Fail,
-// Fallback to the next target, Busy (the resource is full: try later without
+// Fallback to the next target, Busy (the pool is full: try later without
 // using an attempt) or Pending (an outside task is running: poll it later).
 //
 // A caller chooses how to wait for the result: come back later (Get), wait
-// (Client.Wait, EnqueueAndWait), or be called (a webhook).
+// (Client.Wait, EnqueueAndWait), or be called (a callback).
 //
 // docs/SPEC.md lists every rule Runnel follows and docs/DESIGN.md explains why.
 //
 //	c := runnel.NewClient(store, "billing")
-//	c.Enqueue(ctx, "invoices", "invoice.render", Invoice{ID: 42}, runnel.Tenant("acme"))
+//	c.Enqueue(ctx, "invoices", "invoice.render", Invoice{ID: 42}, runnel.Group("acme"))
 //
 //	w := runnel.NewWorker(store, "billing", runnel.WorkerConfig{Queues: []string{"invoices"}})
 //	w.HandleFunc("invoice.render", func(ctx context.Context, j *runnel.Job) error {

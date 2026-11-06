@@ -38,9 +38,9 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusBadRequest, "invalid", err.Error())
 	case errors.Is(err, runnel.ErrNotFound):
 		s.problem(w, http.StatusNotFound, "not found", "")
-	case errors.Is(err, runnel.ErrTenantFull):
+	case errors.Is(err, runnel.ErrGroupFull):
 		w.Header().Set("Retry-After", s.retryAfter())
-		s.problem(w, http.StatusTooManyRequests, "tenant full", err.Error())
+		s.problem(w, http.StatusTooManyRequests, "group full", err.Error())
 	case errors.Is(err, runnel.ErrQueueFull):
 		w.Header().Set("Retry-After", s.retryAfter())
 		s.problem(w, http.StatusTooManyRequests, "queue full", err.Error())
@@ -105,12 +105,12 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-func (s *Server) checkWebhook(u string) error {
-	if err := runnel.ValidWebhookURL(u, s.cfg.Limits.MaxWebhookURL); err != nil {
+func (s *Server) checkCallback(u string) error {
+	if err := runnel.ValidCallbackURL(u, s.cfg.Limits.MaxCallbackURL); err != nil {
 		return err
 	}
-	if !s.cfg.AllowHTTPWebhooks && !strings.HasPrefix(u, "https://") {
-		return fmt.Errorf("%w: webhook must use https", runnel.ErrInvalid)
+	if !s.cfg.AllowHTTPCallbacks && !strings.HasPrefix(u, "https://") {
+		return fmt.Errorf("%w: callback must use https", runnel.ErrInvalid)
 	}
 	return nil
 }

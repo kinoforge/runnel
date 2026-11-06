@@ -36,14 +36,14 @@ type Store struct {
 }
 
 type nsConfig struct {
-	queues    map[string]runnel.QueueConfig
-	resources map[string]runnel.ResourceConfig
-	at        time.Time
+	queues map[string]runnel.QueueConfig
+	pools  map[string]runnel.PoolConfig
+	at     time.Time
 }
 
-func (c *nsConfig) resourceLimits() bool {
-	for _, p := range c.resources {
-		if p.MaxRunning > 0 || p.TenantMaxRunning > 0 {
+func (c *nsConfig) poolLimits() bool {
+	for _, p := range c.pools {
+		if p.Slots > 0 || p.GroupSlots > 0 {
 			return true
 		}
 	}
@@ -51,7 +51,7 @@ func (c *nsConfig) resourceLimits() bool {
 }
 
 func limited(q runnel.QueueConfig) bool {
-	return q.MaxRunning > 0 || q.TenantMaxRunning > 0 || q.Rate > 0 || q.TenantRate > 0
+	return q.MaxRunning > 0 || q.GroupMaxRunning > 0 || q.Rate > 0 || q.GroupRate > 0
 }
 
 func New(db *sql.DB, d Dialect) *Store {
@@ -69,11 +69,11 @@ func (s *Store) configs(ctx context.Context, q querier, ns string) (*nsConfig, e
 	if err != nil {
 		return nil, err
 	}
-	resources, err := s.resourceConfigs(ctx, q, ns)
+	pools, err := s.poolConfigs(ctx, q, ns)
 	if err != nil {
 		return nil, err
 	}
-	c = &nsConfig{queues: queues, resources: resources, at: time.Now()}
+	c = &nsConfig{queues: queues, pools: pools, at: time.Now()}
 	s.mu.Lock()
 	s.cfgs[ns] = c
 	s.mu.Unlock()

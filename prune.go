@@ -47,8 +47,8 @@ func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error 
 
 func (m *Maintainer) pruneEvents(ctx context.Context, ns string, now time.Time) error {
 	keep := EventPruneRequest{Before: now.Add(-m.cfg.Retention.Events), Limit: m.cfg.Batch}
-	if m.cfg.Webhooks.Enabled {
-		cur, err := m.store.Cursor(ctx, ns, "webhooks")
+	if m.cfg.Callbacks.Enabled {
+		cur, err := m.store.Cursor(ctx, ns, "callbacks")
 		if err != nil {
 			return err
 		}
@@ -60,12 +60,12 @@ func (m *Maintainer) pruneEvents(ctx context.Context, ns string, now time.Time) 
 	if _, err := m.drainEvents(ctx, ns, keep); err != nil {
 		return err
 	}
-	if !m.cfg.Webhooks.Enabled {
+	if !m.cfg.Callbacks.Enabled {
 		return nil
 	}
 	lost, err := m.drainEvents(ctx, ns, EventPruneRequest{Before: now.Add(-m.cfg.Retention.Undelivered), Limit: m.cfg.Batch})
 	if lost > 0 {
-		m.log.Warn("runnel: dropped undelivered webhook events past retention", "namespace", ns, "events", lost,
+		m.log.Warn("runnel: dropped undelivered callback events past retention", "namespace", ns, "events", lost,
 			"retention", m.cfg.Retention.Undelivered)
 	}
 	return err

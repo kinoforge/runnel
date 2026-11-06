@@ -14,14 +14,14 @@ import (
 func testRoundTrip(t *testing.T, open Opener) {
 	spec.Rule(t, "J01", "J03")
 	e := setup(t, open)
-	res := e.add("q", runnel.Priority(3), runnel.Tenant("acme"), runnel.Resource("p1"), runnel.MaxAttempts(7),
-		runnel.Meta(map[string]string{"a": "b"}), runnel.Fallbacks(runnel.Target{Queue: "q2"}), runnel.StartWithin(time.Minute),
-		runnel.Webhook("https://example.com/h"), runnel.Timeout(time.Second))
+	res := e.add("q", runnel.Priority(3), runnel.Group("acme"), runnel.Pool("p1"), runnel.MaxAttempts(7),
+		runnel.Meta(map[string]string{"a": "b"}), runnel.Fallbacks(runnel.Target{Queue: "q2"}), runnel.StartTimeout(time.Minute),
+		runnel.Callback("https://example.com/h"), runnel.Timeout(time.Second))
 	j := e.get(res.ID)
-	if j.State != runnel.StateWaiting || j.Priority != 3 || j.Tenant != "acme" || j.Resource != "p1" || j.MaxAttempts != 7 {
+	if j.State != runnel.StateWaiting || j.Priority != 3 || j.Group != "acme" || j.Pool != "p1" || j.MaxAttempts != 7 {
 		t.Fatalf("bad job %+v", j)
 	}
-	if j.Meta["a"] != "b" || len(j.Fallbacks) != 1 || j.Webhook == "" || j.Timeout.D() != time.Second {
+	if j.Meta["a"] != "b" || len(j.Fallbacks) != 1 || j.CallbackURL == "" || j.Timeout.D() != time.Second {
 		t.Fatalf("data lost %+v", j)
 	}
 	if j.StartBy.IsZero() || j.StartBy.Sub(j.WaitingSince) != time.Minute {
@@ -184,7 +184,7 @@ func testNamespaces(t *testing.T, open Opener) {
 	spec.Rule(t, "X01")
 	e := setup(t, open)
 	other := runnel.NewClient(e.s, e.ns+"x")
-	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "p", MaxRunning: 1}); err != nil {
+	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "p", Slots: 1}); err != nil {
 		t.Fatal(err)
 	}
 	res := e.add("q")
@@ -200,15 +200,15 @@ func testNamespaces(t *testing.T, open Opener) {
 	}
 	jobs, _, err1 := other.List(e.ctx, runnel.Query{})
 	stats, err2 := other.Stats(e.ctx)
-	resources, err3 := other.Resources(e.ctx)
+	pools, err3 := other.Pools(e.ctx)
 	evs, err4 := other.Events(e.ctx, 0, 10)
 	cur, err5 := e.s.Cursor(e.ctx, other.Namespace(), "c")
 	claimed, err6 := e.s.Claim(e.ctx, other.Namespace(), runnel.ClaimRequest{Queues: []string{"q"}, Worker: "w2", Limit: 5, Lease: time.Minute, Now: e.now()})
 	if err := errors.Join(err1, err2, err3, err4, err5, err6); err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs)+len(stats)+len(resources)+len(evs)+len(claimed) != 0 || cur != 0 {
-		t.Fatalf("namespace leak: jobs %d, stats %d, resources %d, events %d, claimed %d, cursor %d", len(jobs), len(stats), len(resources), len(evs), len(claimed), cur)
+	if len(jobs)+len(stats)+len(pools)+len(evs)+len(claimed) != 0 || cur != 0 {
+		t.Fatalf("namespace leak: jobs %d, stats %d, pools %d, events %d, claimed %d, cursor %d", len(jobs), len(stats), len(pools), len(evs), len(claimed), cur)
 	}
 }
 

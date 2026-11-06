@@ -28,12 +28,12 @@ func (sp *space) setConfig(kind runnel.ConfigKind, name string, val []byte) {
 		sp.configs[kind] = m
 	}
 	m[name] = val
-	sp.queueCfg, sp.resourceCfg = nil, nil
+	sp.queueCfg, sp.poolCfg = nil, nil
 }
 
 func (sp *space) delConfig(kind runnel.ConfigKind, name string) {
 	delete(sp.configs[kind], name)
-	sp.queueCfg, sp.resourceCfg = nil, nil
+	sp.queueCfg, sp.poolCfg = nil, nil
 }
 
 func (sp *space) queueConfig(q string) runnel.QueueConfig {
@@ -43,11 +43,11 @@ func (sp *space) queueConfig(q string) runnel.QueueConfig {
 	return sp.queueCfg[q]
 }
 
-func (sp *space) resourceConfig(r string) runnel.ResourceConfig {
-	if sp.resourceCfg == nil {
-		sp.resourceCfg = decodeAll[runnel.ResourceConfig](sp.configs[runnel.ConfigResource])
+func (sp *space) poolConfig(r string) runnel.PoolConfig {
+	if sp.poolCfg == nil {
+		sp.poolCfg = decodeAll[runnel.PoolConfig](sp.configs[runnel.ConfigPool])
 	}
-	return sp.resourceCfg[r]
+	return sp.poolCfg[r]
 }
 
 // decodeAll skips values that do not decode; the client validates configs

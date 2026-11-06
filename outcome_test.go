@@ -40,10 +40,10 @@ func TestDecide(t *testing.T) {
 	t.Run("fallback walks targets in order", func(t *testing.T) {
 		spec.Rule(t, "O04", "O05")
 		j := running(1, 1)
-		j.Fallbacks = []Target{{Queue: "b", Resource: "p2"}, {Kind: "k3"}}
-		j.StartWithin = Duration(time.Minute)
+		j.Fallbacks = []Target{{Queue: "b", Pool: "p2"}, {Kind: "k3"}}
+		j.StartTimeout = Duration(time.Minute)
 		a := Decide(j, Outcome{Kind: OutcomeFail, Error: "x"}, now)
-		if a.Queue != "b" || a.Resource != "p2" || a.Fallback != 1 || a.Attempt != 0 || a.State != StateWaiting || a.StartBy != now.Add(time.Minute) {
+		if a.Queue != "b" || a.Pool != "p2" || a.Fallback != 1 || a.Attempt != 0 || a.State != StateWaiting || a.StartBy != now.Add(time.Minute) {
 			t.Fatalf("first fallback %+v", a)
 		}
 		a.State, a.Attempt = StateRunning, 1
@@ -133,11 +133,11 @@ func TestValidation(t *testing.T) {
 		"kind":     func(j *Job) { j.Kind = "" },
 		"priority": func(j *Job) { j.Priority = 1001 },
 		"payload":  func(j *Job) { j.Payload = json.RawMessage("{") },
-		"tenant":   func(j *Job) { j.Tenant = "bad|tenant" },
+		"group":    func(j *Job) { j.Group = "bad|group" },
 		"unique":   func(j *Job) { j.UniqueKey = "a|b" },
 		"dep":      func(j *Job) { j.DependsOn = []string{"nope"} },
-		"webhook":  func(j *Job) { j.Webhook = "ftp://x" },
-		"webauth":  func(j *Job) { j.Webhook = "https://user:pw@x.com" },
+		"callback": func(j *Job) { j.CallbackURL = "ftp://x" },
+		"webauth":  func(j *Job) { j.CallbackURL = "https://user:pw@x.com" },
 		"target":   func(j *Job) { j.Fallbacks = []Target{{}} },
 		"attempts": func(j *Job) { j.MaxAttempts = 0 },
 		"big":      func(j *Job) { j.Payload = json.RawMessage(`"` + strings.Repeat("x", 1<<20) + `"`) },

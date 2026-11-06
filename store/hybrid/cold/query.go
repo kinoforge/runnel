@@ -8,10 +8,10 @@ import (
 )
 
 // Filter limits a listing to jobs with these names; an empty name matches any.
-type Filter struct{ Queue, Kind, Tenant string }
+type Filter struct{ Queue, Kind, Group string }
 
 func (f Filter) match(q, k, t string) bool {
-	return (f.Queue == "" || f.Queue == q) && (f.Kind == "" || f.Kind == k) && (f.Tenant == "" || f.Tenant == t)
+	return (f.Queue == "" || f.Queue == q) && (f.Kind == "" || f.Kind == k) && (f.Group == "" || f.Group == t)
 }
 
 // List returns the ids of up to limit jobs in state that match f, newest

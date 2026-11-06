@@ -139,8 +139,8 @@ func testCascadeFail(t *testing.T, open Opener) {
 func testDueStart(t *testing.T, open Opener) {
 	spec.Rule(t, "T01", "L02")
 	e := setup(t, open)
-	a := e.add("q", runnel.StartWithin(100*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "q2"}))
-	e.add("q", runnel.StartWithin(100*time.Millisecond))
+	a := e.add("q", runnel.StartTimeout(100*time.Millisecond), runnel.Fallbacks(runnel.Target{Queue: "q2"}))
+	e.add("q", runnel.StartTimeout(100*time.Millisecond))
 	time.Sleep(150 * time.Millisecond)
 	due, err := e.s.Due(e.ctx, e.ns, runnel.DueStart, e.now(), 10)
 	if err != nil {
@@ -161,30 +161,30 @@ func testDueStart(t *testing.T, open Opener) {
 func testConfigs(t *testing.T, open Opener) {
 	spec.Rule(t, "X03")
 	e := setup(t, open)
-	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "p", MaxRunning: 3}); err != nil {
+	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "p", Slots: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.c.SetResource(e.ctx, runnel.ResourceConfig{Name: "p", MaxRunning: 4}); err != nil {
+	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "p", Slots: 4}); err != nil {
 		t.Fatal(err)
 	}
-	resources, err := e.c.Resources(e.ctx)
-	if err != nil || resources["p"].MaxRunning != 4 || len(resources) != 1 {
-		t.Fatalf("resources %+v %v", resources, err)
+	pools, err := e.c.Pools(e.ctx)
+	if err != nil || pools["p"].Slots != 4 || len(pools) != 1 {
+		t.Fatalf("pools %+v %v", pools, err)
 	}
-	if err := e.c.DeleteResource(e.ctx, "p"); err != nil {
+	if err := e.c.DeletePool(e.ctx, "p"); err != nil {
 		t.Fatal(err)
 	}
-	if resources, _ := e.c.Resources(e.ctx); len(resources) != 0 {
-		t.Fatalf("resource not deleted")
+	if pools, _ := e.c.Pools(e.ctx); len(pools) != 0 {
+		t.Fatalf("pool not deleted")
 	}
 	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "bad name"}); !errors.Is(err, runnel.ErrInvalid) {
 		t.Fatalf("bad queue name accepted")
 	}
-	if err := runnel.PutNamespace(e.ctx, e.s, runnel.Namespace{Name: e.ns, WebhookSecret: "s"}); err != nil {
+	if err := runnel.PutNamespace(e.ctx, e.s, runnel.Namespace{Name: e.ns, CallbackSecret: "s"}); err != nil {
 		t.Fatal(err)
 	}
 	all, err := runnel.Namespaces(e.ctx, e.s)
-	if err != nil || all[e.ns].WebhookSecret != "s" {
+	if err != nil || all[e.ns].CallbackSecret != "s" {
 		t.Fatalf("namespace %+v %v", all[e.ns], err)
 	}
 	_ = runnel.DeleteNamespace(e.ctx, e.s, e.ns)
@@ -199,7 +199,7 @@ func testStatsList(t *testing.T, open Opener) {
 		if i%2 == 1 {
 			q = "b"
 		}
-		all = append(all, e.add(q, runnel.Tenant("t")).ID)
+		all = append(all, e.add(q, runnel.Group("t")).ID)
 	}
 	jobs, next, err := e.c.List(e.ctx, runnel.Query{Limit: 3})
 	if err != nil || len(jobs) != 3 || next == "" {

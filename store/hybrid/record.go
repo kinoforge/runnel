@@ -46,7 +46,7 @@ func unhex(c byte) (byte, bool) {
 
 func (u uid) String() string { return uuid.UUID(u).String() }
 
-// sym stands for a string the namespace has seen, such as a queue or tenant
+// sym stands for a string the namespace has seen, such as a queue or group
 // name. Zero is the empty string.
 type sym uint32
 
@@ -130,14 +130,14 @@ type ref struct {
 // indexes read, with no pointers, so the garbage collector never scans it. The
 // rest of the job, its body, sits in the cache or on disk.
 type job struct {
-	id                                    uid
-	queue, kind, tenant, resource, worker sym
-	prio, attempt, maxAttempts, pending   int32
-	state, flags                          uint8
-	runAt, waitingSince, startBy, lease   int64
-	created, updated, started, finished   int64
-	version, window                       int64
-	body                                  ref
+	id                                  uid
+	queue, kind, group, pool, worker    sym
+	prio, attempt, maxAttempts, pending int32
+	state, flags                        uint8
+	runAt, waitingSince, startBy, lease int64
+	created, updated, started, finished int64
+	version, window                     int64
+	body                                ref
 }
 
 func ms(t time.Time) int64             { return runnel.Millis(t) }
@@ -153,8 +153,8 @@ func (t *syms) hot(j *runnel.Job, like *job) job {
 	if like != nil {
 		l = *like
 	}
-	h := job{queue: t.reuse(l.queue, j.Queue), kind: t.reuse(l.kind, j.Kind), tenant: t.reuse(l.tenant, j.Tenant),
-		resource: t.reuse(l.resource, j.Resource), worker: t.reuse(l.worker, j.Worker),
+	h := job{queue: t.reuse(l.queue, j.Queue), kind: t.reuse(l.kind, j.Kind), group: t.reuse(l.group, j.Group),
+		pool: t.reuse(l.pool, j.Pool), worker: t.reuse(l.worker, j.Worker),
 		prio: int32(j.Priority), attempt: int32(j.Attempt), maxAttempts: int32(j.MaxAttempts), pending: int32(j.Pending),
 		runAt: ms(j.RunAt), waitingSince: ms(j.WaitingSince), startBy: ms(j.StartBy), lease: ms(j.LeaseUntil),
 		created: ms(j.CreatedAt), updated: ms(j.UpdatedAt), started: ms(j.StartedAt), finished: ms(j.FinishedAt),
@@ -186,15 +186,15 @@ type draft struct {
 
 func (t *syms) draft(h *job) draft { return draft{h: *h, names: t.names5(h)} }
 
-// names5 returns the queue, kind, tenant, resource and worker of h.
+// names5 returns the queue, kind, group, pool and worker of h.
 func (t *syms) names5(h *job) [5]string {
-	return [5]string{t.name(h.queue), t.name(h.kind), t.name(h.tenant), t.name(h.resource), t.name(h.worker)}
+	return [5]string{t.name(h.queue), t.name(h.kind), t.name(h.group), t.name(h.pool), t.name(h.worker)}
 }
 
 func (d *draft) job(ns string) (*runnel.Job, error) {
 	h := &d.h
-	j := &runnel.Job{ID: h.id.String(), Namespace: ns, Queue: d.names[0], Kind: d.names[1], Tenant: d.names[2],
-		Resource: d.names[3], Worker: d.names[4], State: h.stateName(),
+	j := &runnel.Job{ID: h.id.String(), Namespace: ns, Queue: d.names[0], Kind: d.names[1], Group: d.names[2],
+		Pool: d.names[3], Worker: d.names[4], State: h.stateName(),
 		Priority: int(h.prio), Attempt: int(h.attempt), MaxAttempts: int(h.maxAttempts), Pending: int(h.pending),
 		RunAt: fromMs(h.runAt), WaitingSince: fromMs(h.waitingSince), StartBy: fromMs(h.startBy), LeaseUntil: fromMs(h.lease),
 		CreatedAt: fromMs(h.created), UpdatedAt: fromMs(h.updated), StartedAt: fromMs(h.started), FinishedAt: fromMs(h.finished),

@@ -129,11 +129,11 @@ func (b Backoff) Delay(attempt int) time.Duration {
 }
 
 // Target is where a job goes when it falls back. Empty fields keep the job's
-// current queue, kind or resource.
+// current queue, kind or pool.
 type Target struct {
-	Queue    string `json:"queue,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-	Resource string `json:"resource,omitempty"`
+	Queue string `json:"queue,omitempty"`
+	Kind  string `json:"kind,omitempty"`
+	Pool  string `json:"pool,omitempty"`
 }
 
 // AttemptError records why an attempt did not complete.
@@ -156,14 +156,14 @@ type Job struct {
 	Kind         string            `json:"kind"`
 	Payload      json.RawMessage   `json:"payload,omitempty"`
 	Priority     int               `json:"priority"`
-	Tenant       string            `json:"tenant,omitempty"`
-	Resource     string            `json:"resource,omitempty"`
+	Group        string            `json:"group,omitempty"`
+	Pool         string            `json:"pool,omitempty"`
 	State        State             `json:"state"`
 	Attempt      int               `json:"attempt"`
 	MaxAttempts  int               `json:"max_attempts"`
 	RunAt        time.Time         `json:"run_at"`
 	WaitingSince time.Time         `json:"waiting_since"`
-	StartWithin  Duration          `json:"start_within,omitempty"`
+	StartTimeout Duration          `json:"start_timeout,omitempty"`
 	StartBy      time.Time         `json:"start_by,omitzero"`
 	Timeout      Duration          `json:"timeout,omitempty"`
 	Backoff      Backoff           `json:"backoff,omitzero"`
@@ -177,7 +177,7 @@ type Job struct {
 	UniqueFor    Duration          `json:"unique_for,omitempty"`
 	DependsOn    []string          `json:"depends_on,omitempty"`
 	Pending      int               `json:"pending,omitempty"`
-	Webhook      string            `json:"webhook,omitempty"`
+	CallbackURL  string            `json:"callback_url,omitempty"`
 	Meta         map[string]string `json:"meta,omitempty"`
 	Result       json.RawMessage   `json:"result,omitempty"`
 	Errors       []AttemptError    `json:"errors,omitempty"`
@@ -190,27 +190,27 @@ type Job struct {
 }
 
 type jobData struct {
-	Payload     json.RawMessage   `json:"p,omitempty"`
-	StartWithin Duration          `json:"sw,omitempty"`
-	Timeout     Duration          `json:"to,omitempty"`
-	Backoff     Backoff           `json:"bo,omitzero"`
-	Handle      string            `json:"h,omitempty"`
-	Fallbacks   []Target          `json:"fb,omitempty"`
-	Fallback    int               `json:"fi,omitempty"`
-	UniqueFor   Duration          `json:"uf,omitempty"`
-	DependsOn   []string          `json:"d,omitempty"`
-	Webhook     string            `json:"w,omitempty"`
-	Meta        map[string]string `json:"m,omitempty"`
-	Result      json.RawMessage   `json:"r,omitempty"`
-	Errors      []AttemptError    `json:"e,omitempty"`
+	Payload      json.RawMessage   `json:"p,omitempty"`
+	StartTimeout Duration          `json:"sw,omitempty"`
+	Timeout      Duration          `json:"to,omitempty"`
+	Backoff      Backoff           `json:"bo,omitzero"`
+	Handle       string            `json:"h,omitempty"`
+	Fallbacks    []Target          `json:"fb,omitempty"`
+	Fallback     int               `json:"fi,omitempty"`
+	UniqueFor    Duration          `json:"uf,omitempty"`
+	DependsOn    []string          `json:"d,omitempty"`
+	CallbackURL  string            `json:"w,omitempty"`
+	Meta         map[string]string `json:"m,omitempty"`
+	Result       json.RawMessage   `json:"r,omitempty"`
+	Errors       []AttemptError    `json:"e,omitempty"`
 }
 
 // EncodeData packs the fields stores keep in one blob.
 func (j *Job) EncodeData() ([]byte, error) {
 	return json.Marshal(jobData{
-		Payload: j.Payload, StartWithin: j.StartWithin, Timeout: j.Timeout, Backoff: j.Backoff,
+		Payload: j.Payload, StartTimeout: j.StartTimeout, Timeout: j.Timeout, Backoff: j.Backoff,
 		Handle: j.Handle, Fallbacks: j.Fallbacks, Fallback: j.Fallback, UniqueFor: j.UniqueFor,
-		DependsOn: j.DependsOn, Webhook: j.Webhook, Meta: j.Meta, Result: j.Result, Errors: j.Errors,
+		DependsOn: j.DependsOn, CallbackURL: j.CallbackURL, Meta: j.Meta, Result: j.Result, Errors: j.Errors,
 	})
 }
 
@@ -222,17 +222,17 @@ func (j *Job) DecodeData(b []byte) error {
 			return fmt.Errorf("job %s data: %w", j.ID, err)
 		}
 	}
-	j.Payload, j.StartWithin, j.Timeout, j.Backoff = d.Payload, d.StartWithin, d.Timeout, d.Backoff
+	j.Payload, j.StartTimeout, j.Timeout, j.Backoff = d.Payload, d.StartTimeout, d.Timeout, d.Backoff
 	j.Handle, j.Fallbacks, j.Fallback, j.UniqueFor = d.Handle, d.Fallbacks, d.Fallback, d.UniqueFor
-	j.DependsOn, j.Webhook, j.Meta, j.Result, j.Errors = d.DependsOn, d.Webhook, d.Meta, d.Result, d.Errors
+	j.DependsOn, j.CallbackURL, j.Meta, j.Result, j.Errors = d.DependsOn, d.CallbackURL, d.Meta, d.Result, d.Errors
 	return nil
 }
 
 // StartWindow is how long the job may wait before it moves to its next fallback,
 // or zero when it has none left.
 func (j *Job) StartWindow() time.Duration {
-	if j.StartWithin > 0 && j.Fallback < len(j.Fallbacks) {
-		return j.StartWithin.D()
+	if j.StartTimeout > 0 && j.Fallback < len(j.Fallbacks) {
+		return j.StartTimeout.D()
 	}
 	return 0
 }

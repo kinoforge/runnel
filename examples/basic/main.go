@@ -38,10 +38,10 @@ func run() error {
 	}
 
 	client := runnel.NewClient(store, "mailer")
-	if err := client.SetQueue(ctx, runnel.QueueConfig{Name: "emails", MaxRunning: 5, TenantMaxRunning: 1, Rate: 20}); err != nil {
+	if err := client.SetQueue(ctx, runnel.QueueConfig{Name: "emails", MaxRunning: 5, GroupMaxRunning: 1, Rate: 20}); err != nil {
 		return err
 	}
-	if err := client.SetResource(ctx, runnel.ResourceConfig{Name: "smtp-primary", MaxRunning: 3}); err != nil {
+	if err := client.SetPool(ctx, runnel.PoolConfig{Name: "smtp-primary", Slots: 3}); err != nil {
 		return err
 	}
 
@@ -54,7 +54,7 @@ func run() error {
 		if m.To == "" {
 			return runnel.Fail(errors.New("no recipient"))
 		}
-		fmt.Printf("sending %q to %s via %s (attempt %d)\n", m.Subject, m.To, j.Resource, j.Attempt)
+		fmt.Printf("sending %q to %s via %s (attempt %d)\n", m.Subject, m.To, j.Pool, j.Attempt)
 		return j.SetResult(map[string]string{"message_id": runnel.NewID()})
 	})
 	go func() {
@@ -67,9 +67,9 @@ func run() error {
 	}()
 
 	res, err := client.Enqueue(ctx, "emails", "email.send", email{To: "ada@example.com", Subject: "Welcome"},
-		runnel.Tenant("acme"), runnel.Resource("smtp-primary"), runnel.MaxAttempts(3),
+		runnel.Group("acme"), runnel.Pool("smtp-primary"), runnel.MaxAttempts(3),
 		runnel.Unique("welcome:ada@example.com", 24*time.Hour),
-		runnel.StartWithin(30*time.Second), runnel.Fallbacks(runnel.Target{Queue: "emails-backup", Resource: "smtp-backup"}))
+		runnel.StartTimeout(30*time.Second), runnel.Fallbacks(runnel.Target{Queue: "emails-backup", Pool: "smtp-backup"}))
 	if err != nil {
 		return err
 	}
