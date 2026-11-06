@@ -12,8 +12,9 @@ import (
 // MaxRunning caps running jobs across all workers; GroupMaxRunning caps them
 // per group. MaxQueued and GroupMaxQueued refuse new jobs past that many queued.
 // Rate and GroupRate limit starts per second with token buckets of Burst and
-// GroupBurst. MaxAttempts, Backoff, Timeout and StartTimeout are defaults for
-// jobs that do not set them. Retention and DeadRetention keep finished jobs that
+// GroupBurst. MaxAttempts, Backoff, Timeout, StartTimeout and TTL are defaults
+// for jobs that do not set them. Wait is how long an HTTP enqueue waits for the
+// result when the caller sends no Prefer header. Retention and DeadRetention keep finished jobs that
 // long before they are pruned.
 type QueueConfig struct {
 	Name            string   `json:"name"`
@@ -30,6 +31,8 @@ type QueueConfig struct {
 	Backoff         Backoff  `json:"backoff,omitzero"`
 	Timeout         Duration `json:"timeout,omitempty"`
 	StartTimeout    Duration `json:"start_timeout,omitempty"`
+	TTL             Duration `json:"ttl,omitempty"`
+	Wait            Duration `json:"wait,omitempty"`
 	Retention       Duration `json:"retention,omitempty"`
 	DeadRetention   Duration `json:"dead_retention,omitempty"`
 }
@@ -56,7 +59,7 @@ func (q QueueConfig) Validate() error {
 	if q.MaxAttempts < 0 || q.MaxAttempts > maxAttemptsLimit {
 		return invalid("max_attempts must be between 0 and %d", maxAttemptsLimit)
 	}
-	if q.Timeout < 0 || q.StartTimeout < 0 || q.Retention < 0 || q.DeadRetention < 0 {
+	if q.Timeout < 0 || q.StartTimeout < 0 || q.TTL < 0 || q.Wait < 0 || q.Retention < 0 || q.DeadRetention < 0 {
 		return invalid("durations must not be negative")
 	}
 	return nil

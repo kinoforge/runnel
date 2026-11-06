@@ -135,11 +135,14 @@ func (sp *space) spillable(n, jobBytes, maxBytes int) []draft {
 	return out
 }
 
-// spilt notes that h left memory for the cold store: its start deadline stays
-// indexed, and its queue's head moves to it when it comes first.
+// spilt notes that h left memory for the cold store: its start deadline and
+// deadline stay indexed, and its queue's head moves to it when it comes first.
 func (sp *space) spilt(h *job, now int64) {
 	if h.startBy != 0 {
 		sp.startBy.ReplaceOrInsert(timeKey{h.startBy, h.id})
+	}
+	if h.deadline != 0 {
+		sp.ends.ReplaceOrInsert(timeKey{h.deadline, h.id})
 	}
 	hd := sp.heads[h.queue]
 	if h.runAt <= now {
@@ -240,12 +243,16 @@ func (s *Store) bring(sp *space, jobs []cold.Job, q string, head *cold.Head) err
 }
 
 // loadWaiting reads the heads of the queues with waiting jobs in the cold
-// store and indexes their start deadlines.
+// store and indexes their start deadlines and deadlines.
 func (s *Store) loadWaiting() error {
-	err := s.cold.Deadlines(func(ns string, at int64, id cold.ID) {
-		sp := s.space(ns)
-		sp.startBy.ReplaceOrInsert(timeKey{at, uid(id)})
+	err := s.cold.Starts(func(ns string, at int64, id cold.ID) {
+		s.space(ns).startBy.ReplaceOrInsert(timeKey{at, uid(id)})
 	})
+	if err == nil {
+		err = s.cold.Deadlines(func(ns string, at int64, id cold.ID) {
+			s.space(ns).ends.ReplaceOrInsert(timeKey{at, uid(id)})
+		})
+	}
 	if err != nil {
 		return err
 	}

@@ -10,7 +10,8 @@ import (
 // namespace names never contain.
 const (
 	kCount    byte = 'c'
-	kDeadline byte = 'd'
+	kStart    byte = 'd'
+	kDeadline byte = 'x'
 	kFuture   byte = 'f'
 	kJob      byte = 'j'
 	kGroup    byte = 'q'
@@ -80,9 +81,9 @@ func idOf(k []byte) ID {
 // A record holds the state, finish time, the order of a waiting job and the
 // names, then the caller's data.
 func encodeJob(j *Job) []byte {
-	b := make([]byte, 0, 2+4*binary.MaxVarintLen64+len(j.Queue)+len(j.Kind)+len(j.Group)+3+len(j.Data))
+	b := make([]byte, 0, 2+5*binary.MaxVarintLen64+len(j.Queue)+len(j.Kind)+len(j.Group)+3+len(j.Data))
 	b = append(b, j.State)
-	for _, v := range []int64{j.Finished, int64(j.Prio), j.RunAt, j.StartBy} {
+	for _, v := range []int64{j.Finished, int64(j.Prio), j.RunAt, j.StartBy, j.Deadline} {
 		b = binary.AppendVarint(b, v)
 	}
 	ready := byte(0)
@@ -102,7 +103,7 @@ func decodeJob(ns string, id ID, v []byte, data bool) (Job, error) {
 	j.State = v[0]
 	v = v[1:]
 	var prio int64
-	for _, p := range []*int64{&j.Finished, &prio, &j.RunAt, &j.StartBy} {
+	for _, p := range []*int64{&j.Finished, &prio, &j.RunAt, &j.StartBy, &j.Deadline} {
 		at, n := binary.Varint(v)
 		if n <= 0 {
 			return j, errBadKey

@@ -118,6 +118,7 @@ What a handler returns decides what happens to the job next.
 - **T03** The maintainer deletes completed and cancelled jobs after 24h and dead jobs after 7 days, unless the queue sets its own retention, and can archive them first. Only final jobs can be pruned.
 - **T04** Events outlive the jobs they describe and are deleted after their own retention, 24h by default.
 - **T05** With callbacks on, an event is not deleted before its delivery job is made, unless it has waited longer than the undelivered retention (7 days). Those are deleted and logged.
+- **T06** A job with a deadline, set as a time or as a `ttl` after enqueue, ends `expired` once the deadline passes without it completing, whether blocked, waiting, running or polling. A running job's lease is taken, so its worker's next heartbeat fails, and the attempt's context ends with `ErrDeadline`. A retry or poll that would come after the deadline expires the job at once. A job's `start_timeout` and `timeout` must fit before its deadline; a queue default that does not fit is left out. A retried expired job keeps a deadline that has not passed.
 
 ## Callbacks (H)
 
@@ -153,7 +154,7 @@ What a handler returns decides what happens to the job next.
 - **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a failed dependency 422; a full queue or group 429. The remote client turns them back into the same Go errors.
 - **S03** Over the API a callback must use https unless the server allows http, and the reserved `runnel.callbacks` queue and `runnel.callback` kind are refused.
 - **S04** Enqueueing one job answers 201 with `Location: /v1/ns/{ns}/jobs/{id}`, or 200 for a duplicate. A batch, `{"jobs": [...]}`, answers 200 with one result per job.
-- **S05** `Prefer: wait=N` on an enqueue holds the answer for up to N seconds: 200 with the finished job, or 202 with `Location` and `Retry-After` while it is still going. `Preference-Applied` echoes the wait used. N is capped at 60 by default; a bad or non-positive N means no wait.
+- **S05** `Prefer: wait=N` on an enqueue holds the answer for up to N seconds: 200 with the finished job, or 202 with `Location` and `Retry-After` while it is still going. `Preference-Applied` echoes the wait used. N is capped at 60 by default; a bad or non-positive N means no wait. Without a Prefer header the queue's `wait` is used.
 - **S06** A `GET` of a job with `Prefer: wait=N` answers when the job is final or N seconds pass, with its latest state.
 - **S07** A full queue or group answers 429 with `Retry-After` and the title `queue full` or `group full`.
 - **S08** A remote worker's name is scoped to its key, so two keys never share leases. A finish from another worker, or for an older version of the job, is 409.

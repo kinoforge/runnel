@@ -135,10 +135,13 @@ type jobRequest struct {
 	Group        string            `json:"group,omitempty"`
 	Pool         string            `json:"pool,omitempty"`
 	RunAt        time.Time         `json:"run_at,omitzero"`
+	Delay        runnel.Duration   `json:"delay,omitempty"`
 	MaxAttempts  int               `json:"max_attempts,omitempty"`
 	UniqueKey    string            `json:"unique_key,omitempty"`
 	UniqueFor    runnel.Duration   `json:"unique_for,omitempty"`
 	StartTimeout runnel.Duration   `json:"start_timeout,omitempty"`
+	Deadline     time.Time         `json:"deadline,omitzero"`
+	TTL          runnel.Duration   `json:"ttl,omitempty"`
 	Timeout      runnel.Duration   `json:"timeout,omitempty"`
 	Backoff      runnel.Backoff    `json:"backoff,omitzero"`
 	DependsOn    []string          `json:"depends_on,omitempty"`
@@ -147,8 +150,10 @@ type jobRequest struct {
 }
 
 func request(j *runnel.Job) jobRequest {
+	delay, ttl := j.Offsets()
 	return jobRequest{Queue: j.Queue, Kind: j.Kind, Payload: j.Payload, Priority: j.Priority, Group: j.Group, Pool: j.Pool,
-		RunAt: j.RunAt, MaxAttempts: j.MaxAttempts, UniqueKey: j.UniqueKey, UniqueFor: j.UniqueFor, StartTimeout: j.StartTimeout,
+		RunAt: j.RunAt, Delay: runnel.Duration(delay), MaxAttempts: j.MaxAttempts, UniqueKey: j.UniqueKey, UniqueFor: j.UniqueFor,
+		StartTimeout: j.StartTimeout, Deadline: j.Deadline, TTL: runnel.Duration(ttl),
 		Timeout: j.Timeout, Backoff: j.Backoff, DependsOn: j.DependsOn, CallbackURL: j.CallbackURL, Meta: j.Meta}
 }
 

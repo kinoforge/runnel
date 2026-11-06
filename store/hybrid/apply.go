@@ -71,6 +71,9 @@ func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, 
 		if old.is(stWaiting) && old.startBy != 0 {
 			sp.startBy.Delete(timeKey{old.startBy, id})
 		}
+		if old.is(stWaiting) && old.deadline != 0 {
+			sp.ends.Delete(timeKey{old.deadline, id})
+		}
 	}
 	if key != c.Job.UniqueKey || !slices.Equal(deps, c.Job.DependsOn) {
 		j := *c.Job

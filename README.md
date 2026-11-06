@@ -117,8 +117,9 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 | Queued caps | `max_queued` and `group_max_queued` refuse new jobs with `429` and `Retry-After` instead of letting a queue grow without end. |
 | Retries | Exponential backoff with jitter, per job or per queue. Every attempt's error is kept. |
 | Start timeouts | `StartTimeout(d)`: a job that waited `d` without starting ends `expired`, with an event and its callback, so the caller decides what next. Busy requeues keep the time already waited. |
+| Deadlines | `Deadline(t)` or `TTL(d)`, or a queue's `ttl`: a job not completed by then ends `expired`, whatever its state. A running job's handler context ends with `ErrDeadline` and its lease is taken. |
 | Leases | Workers heartbeat their jobs. A crashed worker's jobs return to the queue. Cancelling a running job stops its handler. |
-| Waiting for results | `Prefer: wait=N` on enqueue and on read, `Client.Wait`, `EnqueueAndWait`. Postgres and Redis wake waiters the moment a job ends. |
+| Waiting for results | `Prefer: wait=N` on enqueue and on read, or a queue's default `wait`; `Client.Wait`, `EnqueueAndWait`. Postgres and Redis wake waiters the moment a job ends. |
 | Direct start | `Worker.Do` runs a job on the calling goroutine when a slot is free. It is still a real job, with retries. |
 | Transactional enqueue | `Client.EnqueueTx` on SQL stores: the job exists only if your own transaction commits. |
 | Unique jobs | By key, while the job runs or for a time window. |
@@ -177,7 +178,7 @@ curl -i localhost:8700/v1/ns/collector/jobs \
   -d '{"queue":"collect","kind":"sales.collect","payload":{"shop":42},"group":"shop-42"}'
 ```
 
-The answer is `200` with the finished job, or `202` with a `Location` and `Retry-After` if it is still running. `GET` the location with `Prefer: wait=30` to wait again. Without `Prefer` the answer is `201` at once.
+The answer is `200` with the finished job, or `202` with a `Location` and `Retry-After` if it is still running. `GET` the location with `Prefer: wait=30` to wait again. Without `Prefer` the answer is `201` at once, unless the queue sets a default `wait`.
 
 A worker in any language repeats three calls:
 

@@ -11,7 +11,7 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-const jobCols = "id, ns, queue, kind, state, priority, grp, pool, attempt, max_attempts, run_at, waiting_since, start_by, start_timeout, worker, lease_until, version, pending, unique_key, created_at, updated_at, started_at, finished_at, data"
+const jobCols = "id, ns, queue, kind, state, priority, grp, pool, attempt, max_attempts, run_at, waiting_since, start_by, start_timeout, deadline, worker, lease_until, version, pending, unique_key, created_at, updated_at, started_at, finished_at, data"
 
 var jobColCount = strings.Count(jobCols, ",") + 1
 
@@ -20,16 +20,17 @@ type scanner interface{ Scan(dest ...any) error }
 func scanJob(sc scanner) (*runnel.Job, error) {
 	var j runnel.Job
 	var state string
-	var runAt, waiting, startBy, startTimeout, lease, created, updated, started, finished int64
+	var runAt, waiting, startBy, startTimeout, deadline, lease, created, updated, started, finished int64
 	var data []byte
 	err := sc.Scan(&j.ID, &j.Namespace, &j.Queue, &j.Kind, &state, &j.Priority, &j.Group, &j.Pool, &j.Attempt, &j.MaxAttempts,
-		&runAt, &waiting, &startBy, &startTimeout, &j.Worker, &lease, &j.Version, &j.Pending, &j.UniqueKey,
+		&runAt, &waiting, &startBy, &startTimeout, &deadline, &j.Worker, &lease, &j.Version, &j.Pending, &j.UniqueKey,
 		&created, &updated, &started, &finished, &data)
 	if err != nil {
 		return nil, err
 	}
 	j.State = runnel.State(state)
 	j.RunAt, j.WaitingSince, j.StartBy, j.LeaseUntil = runnel.FromMillis(runAt), runnel.FromMillis(waiting), runnel.FromMillis(startBy), runnel.FromMillis(lease)
+	j.Deadline = runnel.FromMillis(deadline)
 	j.CreatedAt, j.UpdatedAt, j.StartedAt, j.FinishedAt = runnel.FromMillis(created), runnel.FromMillis(updated), runnel.FromMillis(started), runnel.FromMillis(finished)
 	if err := j.DecodeData(data); err != nil {
 		return nil, err
@@ -120,6 +121,9 @@ func (s *Store) Due(ctx context.Context, ns string, kind runnel.DueKind, now tim
 	case runnel.DueStart:
 		return collect(s.db.QueryContext(ctx, s.q("SELECT "+jobCols+" FROM rn_jobs WHERE ns=? AND state=? AND start_by>0 AND start_by<=? ORDER BY start_by LIMIT ?"),
 			ns, string(runnel.StateWaiting), runnel.Millis(now), limit))
+	case runnel.DueDeadline:
+		return collect(s.db.QueryContext(ctx, s.q("SELECT "+jobCols+" FROM rn_jobs WHERE ns=? AND state IN (?,?,?,?) AND deadline>0 AND deadline<=? ORDER BY deadline LIMIT ?"),
+			ns, string(runnel.StateBlocked), string(runnel.StateWaiting), string(runnel.StateRunning), string(runnel.StatePolling), runnel.Millis(now), limit))
 	}
 	return nil, fmt.Errorf("runnel: unknown due kind %d", kind)
 }

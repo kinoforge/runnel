@@ -103,7 +103,7 @@ func (s *Store) coldJobs(ns string, ds []draft, now int64) ([]cold.Job, error) {
 		e.bytes(d.body)
 		h := &d.h
 		out[i] = cold.Job{NS: ns, ID: cold.ID(h.id), State: h.state, Finished: h.finished,
-			Prio: h.prio, RunAt: h.runAt, StartBy: h.startBy, Ready: h.runAt <= now,
+			Prio: h.prio, RunAt: h.runAt, StartBy: h.startBy, Deadline: h.deadline, Ready: h.runAt <= now,
 			Queue: d.names[0], Kind: d.names[1], Group: d.names[2], Data: e.b}
 	}
 	return out, nil

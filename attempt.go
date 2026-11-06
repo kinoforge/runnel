@@ -15,16 +15,21 @@ var (
 	// ErrLost is the cause of a job's context when the worker lost the lease, for
 	// example because the job was cancelled.
 	ErrLost = errors.New("runnel: lease lost")
+	// ErrDeadline is the cause of a job's context when the job's deadline passes.
+	ErrDeadline = errors.New("runnel: deadline passed")
 )
 
-// Attempt returns the context an attempt of j runs in: with the job's timeout,
-// and carrying the job for JobFrom and Dependencies.
+// Attempt returns the context an attempt of j runs in: with the job's timeout
+// and deadline, and carrying the job for JobFrom and Dependencies.
 func Attempt(ctx context.Context, j *Job, src Source) (context.Context, context.CancelFunc) {
-	stop := func() {}
+	stopTimeout, stopDeadline := func() {}, func() {}
 	if j.Timeout > 0 {
-		ctx, stop = context.WithTimeoutCause(ctx, j.Timeout.D(), ErrTimeout)
+		ctx, stopTimeout = context.WithTimeoutCause(ctx, j.Timeout.D(), ErrTimeout)
 	}
-	return withJob(ctx, j, src), stop
+	if !j.Deadline.IsZero() {
+		ctx, stopDeadline = context.WithDeadlineCause(ctx, j.Deadline, ErrDeadline)
+	}
+	return withJob(ctx, j, src), func() { stopDeadline(); stopTimeout() }
 }
 
 // Classify turns the result of an attempt into an outcome, telling shutdowns and
@@ -36,6 +41,8 @@ func Classify(ctx context.Context, j *Job, err error) Outcome {
 		return Outcome{Kind: OutcomeRelease}
 	case err != nil && errors.Is(cause, ErrTimeout):
 		return Outcome{Kind: OutcomeRetry, Error: "timed out after " + j.Timeout.String()}
+	case err != nil && errors.Is(cause, ErrDeadline):
+		return Outcome{Kind: OutcomeFail, Error: deadlinePassed}
 	}
 	return OutcomeOf(err, j.Result)
 }

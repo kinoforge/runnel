@@ -142,6 +142,7 @@ type space struct {
 	poll    map[sym]*timeTree
 	leases  *timeTree
 	startBy *timeTree
+	ends    *timeTree
 	fin     *timeTree
 	counts  map[sym]*[stCount]int64
 	active  map[countKey]int
@@ -158,7 +159,7 @@ func newSpace(ns string) *space {
 		uniques: map[string]unique{}, expiry: btree.NewG(degree, lessUnique), kids: map[uid][]uid{},
 		cursors: map[string]int64{}, configs: map[runnel.ConfigKind]map[string][]byte{}, buckets: map[string]bucket{},
 		ready: map[sym]*readyTree{}, sched: map[sym]*timeTree{}, poll: map[sym]*timeTree{},
-		leases: btree.NewG(degree, lessTime), startBy: btree.NewG(degree, lessTime), fin: btree.NewG(degree, lessTime),
+		leases: btree.NewG(degree, lessTime), startBy: btree.NewG(degree, lessTime), ends: btree.NewG(degree, lessTime), fin: btree.NewG(degree, lessTime),
 		counts: map[sym]*[stCount]int64{}, active: map[countKey]int{}, queued: map[[2]sym]int{},
 	}
 	for i := range sp.byState {
@@ -292,6 +293,9 @@ func readyOf(h *job) readyKey { return readyKey{prio: h.prio, at: h.runAt, id: h
 // ones to the ready tree.
 func (sp *space) index(h *job) {
 	sp.count(h, 1)
+	if h.deadline != 0 && !h.final() {
+		sp.ends.ReplaceOrInsert(timeKey{h.deadline, h.id})
+	}
 	switch h.state {
 	case stWaiting:
 		treeOf(sp.sched, h.queue, lessTime).ReplaceOrInsert(timeKey{h.runAt, h.id})
@@ -309,6 +313,9 @@ func (sp *space) index(h *job) {
 
 func (sp *space) unindex(h *job) {
 	sp.count(h, -1)
+	if h.deadline != 0 && !h.final() {
+		sp.ends.Delete(timeKey{h.deadline, h.id})
+	}
 	switch h.state {
 	case stWaiting:
 		if !sp.unready(h) {

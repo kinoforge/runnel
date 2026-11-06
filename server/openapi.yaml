@@ -190,7 +190,7 @@ paths:
         One job answers 201 with its id, or 200 when a unique key matched a job
         already held. With `Prefer: wait=N` a single job answers 200 with the
         finished job, or 202 with its id when N passed first; `Location` names
-        the job either way. A batch (`{"jobs": [...]}`, up to 1000) answers 200
+        the job either way. Without a Prefer header the queue's `wait` applies. A batch (`{"jobs": [...]}`, up to 1000) answers 200
         with one result per job and ignores `Prefer`.
       parameters:
         - $ref: "#/components/parameters/Prefer"
@@ -751,6 +751,8 @@ components:
         unique_key: {type: string, maxLength: 255}
         unique_for: {$ref: "#/components/schemas/Duration"}
         start_timeout: {$ref: "#/components/schemas/Duration"}
+        deadline: {type: string, format: date-time, description: "The job ends expired if it has not completed by then, whatever its state."}
+        ttl: {$ref: "#/components/schemas/Duration", description: "Sets the deadline this long after enqueue. Not with deadline."}
         timeout: {$ref: "#/components/schemas/Duration"}
         backoff: {$ref: "#/components/schemas/Backoff"}
         depends_on:
@@ -794,6 +796,7 @@ components:
         waiting_since: {type: string, format: date-time}
         start_timeout: {$ref: "#/components/schemas/Duration"}
         start_by: {type: string, format: date-time}
+        deadline: {type: string, format: date-time}
         timeout: {$ref: "#/components/schemas/Duration"}
         backoff: {$ref: "#/components/schemas/Backoff"}
         worker: {type: string}
@@ -854,6 +857,8 @@ components:
         backoff: {$ref: "#/components/schemas/Backoff"}
         timeout: {$ref: "#/components/schemas/Duration"}
         start_timeout: {$ref: "#/components/schemas/Duration"}
+        ttl: {$ref: "#/components/schemas/Duration", description: "Default time to live of jobs that set no deadline."}
+        wait: {$ref: "#/components/schemas/Duration", description: "How long an enqueue without a Prefer header waits for the result."}
         retention: {$ref: "#/components/schemas/Duration"}
         dead_retention: {$ref: "#/components/schemas/Duration"}
     PoolConfig:

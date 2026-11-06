@@ -46,6 +46,13 @@ func TestClassify(t *testing.T) {
 	if o := Classify(ctx, j, ctx.Err()); !errors.Is(context.Cause(ctx), ErrTimeout) || o.Kind != OutcomeRetry || !strings.Contains(o.Error, "timed out") {
 		t.Fatalf("timeout became %+v", o)
 	}
+	d := &Job{Timeout: Duration(time.Minute), Deadline: time.Now().Add(10 * time.Millisecond)}
+	dctx, dstop := Attempt(context.Background(), d, nil)
+	defer dstop()
+	<-dctx.Done()
+	if o := Classify(dctx, d, dctx.Err()); o.Kind != OutcomeFail || o.Error != deadlinePassed {
+		t.Fatalf("deadline became %+v", o)
+	}
 	base, cancel := context.WithCancelCause(context.Background())
 	cancel(ErrShutdown)
 	if o := Classify(base, j, base.Err()); o.Kind != OutcomeRelease {

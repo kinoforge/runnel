@@ -34,6 +34,7 @@ running    --error, Busy-->               waiting, later
 running    --Pending-->                   polling --poll due--> running
 running    --Fail, no attempts left-->    dead
 waiting    --start timeout passed-->      expired
+not final  --deadline passed-->           expired
 not final  --Cancel-->                    cancelled
 ```
 

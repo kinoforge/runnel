@@ -101,6 +101,7 @@ func Run(t *testing.T, open Opener) {
 		"DependencyRejects":          testDependencyRejects,
 		"PollingBypassesLimits":      testPolling,
 		"DueStart":                   testDueStart,
+		"Deadline":                   testDeadline,
 		"PruneArchive":               testPrune,
 		"EventsCursors":              testEvents,
 		"ConfigsCRUD":                testConfigs,

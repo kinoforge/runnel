@@ -160,6 +160,7 @@ type Job struct {
 	WaitingSince time.Time         `json:"waiting_since"`
 	StartTimeout Duration          `json:"start_timeout,omitempty"`
 	StartBy      time.Time         `json:"start_by,omitzero"`
+	Deadline     time.Time         `json:"deadline,omitzero"`
 	Timeout      Duration          `json:"timeout,omitempty"`
 	Backoff      Backoff           `json:"backoff,omitzero"`
 	Worker       string            `json:"worker,omitempty"`
@@ -179,7 +180,7 @@ type Job struct {
 	StartedAt    time.Time         `json:"started_at,omitzero"`
 	FinishedAt   time.Time         `json:"finished_at,omitzero"`
 
-	delay time.Duration
+	delay, ttl time.Duration
 }
 
 type jobData struct {
@@ -227,6 +228,35 @@ func (j *Job) computeStartBy() {
 	j.StartBy = time.Time{}
 }
 
+// settle turns the relative delay and time to live into times measured from now.
+func (j *Job) settle(now time.Time) {
+	if j.delay > 0 {
+		j.RunAt, j.delay = now.Add(j.delay), 0
+	}
+	if j.ttl > 0 {
+		j.Deadline, j.ttl = now.Add(j.ttl), 0
+	}
+}
+
+// Offsets returns the delay and time to live set by In and TTL that are still to
+// be measured on the store's clock.
+func (j *Job) Offsets() (delay, ttl time.Duration) { return j.delay, j.ttl }
+
+// fit returns a queue default d, or zero when it would reach past the deadline.
+func (j *Job) fit(d Duration, now time.Time) Duration {
+	start := j.RunAt
+	if start.Before(now) {
+		start = now
+	}
+	if !j.Deadline.IsZero() && start.Add(d.D()).After(j.Deadline) {
+		return 0
+	}
+	return d
+}
+
+// late reports whether the job's deadline has passed at t.
+func (j *Job) late(t time.Time) bool { return !j.Deadline.IsZero() && !t.Before(j.Deadline) }
+
 // Prepare fills defaults, resets the fields stores own and validates the job
 // against l. Clients call it before Store.Insert.
 func (j *Job) Prepare(now time.Time, l Limits) error {
@@ -236,13 +266,14 @@ func (j *Job) Prepare(now time.Time, l Limits) error {
 	if j.MaxAttempts == 0 {
 		j.MaxAttempts = DefaultMaxAttempts
 	}
-	if j.delay > 0 {
-		j.RunAt, j.delay = now.Add(j.delay), 0
-	}
+	j.settle(now)
 	if j.RunAt.IsZero() || j.RunAt.Before(now) {
 		j.RunAt = now
 	}
 	j.RunAt = j.RunAt.UTC().Truncate(time.Millisecond)
+	if !j.Deadline.IsZero() {
+		j.Deadline = j.Deadline.UTC().Truncate(time.Millisecond)
+	}
 	j.State, j.Attempt, j.Version, j.Worker, j.LeaseUntil = StateWaiting, 0, 0, "", time.Time{}
 	j.Handle, j.Pending, j.Result, j.Errors = "", 0, nil, nil
 	j.WaitingSince, j.CreatedAt, j.UpdatedAt = j.RunAt, now, now

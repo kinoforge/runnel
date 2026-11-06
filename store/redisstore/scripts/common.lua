@@ -2,7 +2,7 @@
 local unpack = unpack or table.unpack
 local P = KEYS[1]
 local function k(s) return P .. s end
-local F = {"id","queue","kind","state","priority","group","pool","attempt","max_attempts","run_at","waiting_since","start_by","start_timeout","worker","lease_until","version","pending","unique_key","created_at","updated_at","started_at","finished_at","data","deps"}
+local F = {"id","queue","kind","state","priority","group","pool","attempt","max_attempts","run_at","waiting_since","start_by","start_timeout","deadline","worker","lease_until","version","pending","unique_key","created_at","updated_at","started_at","finished_at","data","deps"}
 local function s(n) return string.format("%d", n) end
 local function num(j, f) return tonumber(j[f]) or 0 end
 local function load(id)
@@ -38,6 +38,7 @@ end
 local function index(j, now)
   local st = j.state
   redis.call("ZADD", k("st:" .. st), 0, j.id)
+  if not final(st) and num(j, "deadline") > 0 then redis.call("ZADD", k("deadlines"), s(num(j, "deadline")), j.id) end
   redis.call("HINCRBY", k("cnt"), j.queue .. "|" .. st, 1)
   if st == "waiting" then
     if num(j, "run_at") > now then
@@ -62,6 +63,7 @@ end
 local function unindex(j)
   local st = j.state
   redis.call("ZREM", k("st:" .. st), j.id)
+  redis.call("ZREM", k("deadlines"), j.id)
   redis.call("HINCRBY", k("cnt"), j.queue .. "|" .. st, -1)
   if st == "waiting" then
     redis.call("ZREM", k("sched:" .. j.queue), j.id)

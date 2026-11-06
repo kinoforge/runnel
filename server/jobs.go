@@ -32,6 +32,8 @@ type JobRequest struct {
 	UniqueKey    string            `json:"unique_key,omitempty"`
 	UniqueFor    runnel.Duration   `json:"unique_for,omitempty"`
 	StartTimeout runnel.Duration   `json:"start_timeout,omitempty"`
+	Deadline     time.Time         `json:"deadline,omitzero"`
+	TTL          runnel.Duration   `json:"ttl,omitempty"`
 	Timeout      runnel.Duration   `json:"timeout,omitempty"`
 	Backoff      runnel.Backoff    `json:"backoff,omitzero"`
 	DependsOn    []string          `json:"depends_on,omitempty"`
@@ -45,18 +47,24 @@ func (s *Server) toJob(req JobRequest) (*runnel.Job, error) {
 			return nil, err
 		}
 	}
-	if req.Delay < 0 || req.Delay.D() > maxDelayDays*24*time.Hour {
-		return nil, fmt.Errorf("%w: delay must be between 0 and %d days", runnel.ErrInvalid, maxDelayDays)
+	if req.Delay < 0 || req.Delay.D() > maxDelayDays*24*time.Hour || req.TTL < 0 || req.TTL.D() > maxDelayDays*24*time.Hour {
+		return nil, fmt.Errorf("%w: delay and ttl must be between 0 and %d days", runnel.ErrInvalid, maxDelayDays)
+	}
+	if req.TTL > 0 && !req.Deadline.IsZero() {
+		return nil, fmt.Errorf("%w: set deadline or ttl, not both", runnel.ErrInvalid)
 	}
 	if req.Queue == runnel.CallbackQueue || req.Kind == runnel.CallbackKind {
 		return nil, fmt.Errorf("%w: %s is reserved", runnel.ErrInvalid, runnel.CallbackQueue)
 	}
 	j := &runnel.Job{Queue: req.Queue, Kind: req.Kind, Payload: req.Payload, Priority: req.Priority, Group: req.Group,
 		Pool: req.Pool, RunAt: req.RunAt, MaxAttempts: req.MaxAttempts, UniqueKey: req.UniqueKey, UniqueFor: req.UniqueFor,
-		StartTimeout: req.StartTimeout, Timeout: req.Timeout, Backoff: req.Backoff,
+		StartTimeout: req.StartTimeout, Deadline: req.Deadline, Timeout: req.Timeout, Backoff: req.Backoff,
 		DependsOn: req.DependsOn, CallbackURL: req.CallbackURL, Meta: req.Meta}
 	if req.Delay > 0 {
 		runnel.In(req.Delay.D())(j)
+	}
+	if req.TTL > 0 {
+		runnel.TTL(req.TTL.D())(j)
 	}
 	return j, nil
 }
@@ -119,7 +127,7 @@ func (s *Server) enqueue(w http.ResponseWriter, r *http.Request, _ principal) er
 			return res[0].Err
 		}
 		w.Header().Set("Location", jobPath(ns, res[0].ID))
-		if wait := s.preferWait(r); wait > 0 {
+		if wait := s.enqueueWait(r, ns, jobs[0].Queue); wait > 0 {
 			return s.answerWhenDone(w, r, ns, res[0], wait)
 		}
 		status := http.StatusCreated
@@ -220,7 +228,7 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request, _ principal) err
 	if err != nil {
 		return err
 	}
-	if wait := s.preferWait(r); wait > 0 && !j.State.Final() {
+	if wait, _ := s.preferWait(r); wait > 0 && !j.State.Final() {
 		ctx, cancel := context.WithTimeout(r.Context(), wait)
 		defer cancel()
 		latest, err := c.Wait(ctx, j.ID)

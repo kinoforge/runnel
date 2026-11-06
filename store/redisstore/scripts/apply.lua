@@ -1,6 +1,6 @@
 local now = tonumber(ARGV[1])
 local changes = cjson.decode(ARGV[2])
-local MUT = {"queue","kind","state","priority","group","pool","attempt","max_attempts","run_at","waiting_since","start_by","start_timeout","worker","lease_until","updated_at","started_at","finished_at","data"}
+local MUT = {"queue","kind","state","priority","group","pool","attempt","max_attempts","run_at","waiting_since","start_by","start_timeout","deadline","worker","lease_until","updated_at","started_at","finished_at","data"}
 local out = {}
 for i, c in ipairs(changes) do
   local old = load(c.id)

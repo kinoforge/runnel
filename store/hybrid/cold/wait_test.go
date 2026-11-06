@@ -42,7 +42,7 @@ func TestWaitingOrder(t *testing.T) {
 		t.Fatalf("head after take %+v", h)
 	}
 	var deadlines int
-	if err := s.Deadlines(func(ns string, at int64, _ cold.ID) {
+	if err := s.Starts(func(ns string, at int64, _ cold.ID) {
 		if ns == "acme" && at > 0 {
 			deadlines++
 		}

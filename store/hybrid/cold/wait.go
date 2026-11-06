@@ -67,8 +67,10 @@ func futureKey(ns, queue string, at int64, id ID) []byte {
 	return append(b, id[:]...)
 }
 
-func deadlineKey(ns string, at int64, id ID) []byte {
-	return append(binary.BigEndian.AppendUint64(prefix(kDeadline, ns, 24), uint64(at)), id[:]...)
+// whenKey orders the jobs of ns by the time at, for the start and deadline
+// indexes.
+func whenKey(kind byte, ns string, at int64, id ID) []byte {
+	return append(binary.BigEndian.AppendUint64(prefix(kind, ns, 24), uint64(at)), id[:]...)
 }
 
 func orderKey(j *Job) []byte {
@@ -169,9 +171,14 @@ func (s *Store) Wake(ns, queue string, now int64, limit int) (int, error) {
 	return len(due), b.Commit(pebble.NoSync)
 }
 
-// Deadlines calls fn with the start deadline of every waiting job that has one.
-func (s *Store) Deadlines(fn func(ns string, at int64, id ID)) error {
-	it, err := s.db.NewIter(&pebble.IterOptions{LowerBound: []byte{kDeadline}, UpperBound: []byte{kDeadline + 1}})
+// Starts calls fn with the start deadline of every waiting job that has one.
+func (s *Store) Starts(fn func(ns string, at int64, id ID)) error { return s.times(kStart, fn) }
+
+// Deadlines calls fn with the deadline of every waiting job that has one.
+func (s *Store) Deadlines(fn func(ns string, at int64, id ID)) error { return s.times(kDeadline, fn) }
+
+func (s *Store) times(kind byte, fn func(ns string, at int64, id ID)) error {
+	it, err := s.db.NewIter(&pebble.IterOptions{LowerBound: []byte{kind}, UpperBound: []byte{kind + 1}})
 	if err != nil {
 		return err
 	}

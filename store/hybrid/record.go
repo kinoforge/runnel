@@ -137,7 +137,7 @@ type job struct {
 	state, flags                        uint8
 	runAt, waitingSince, startBy, lease int64
 	created, updated, started, finished int64
-	version, window                     int64
+	version, window, deadline           int64
 	body                                ref
 }
 
@@ -159,7 +159,7 @@ func (t *syms) hot(j *runnel.Job, like *job) job {
 		prio: int32(j.Priority), attempt: int32(j.Attempt), maxAttempts: int32(j.MaxAttempts), pending: int32(j.Pending),
 		runAt: ms(j.RunAt), waitingSince: ms(j.WaitingSince), startBy: ms(j.StartBy), lease: ms(j.LeaseUntil),
 		created: ms(j.CreatedAt), updated: ms(j.UpdatedAt), started: ms(j.StartedAt), finished: ms(j.FinishedAt),
-		version: j.Version, window: j.StartTimeout.D().Milliseconds(), state: stateCode(j.State)}
+		version: j.Version, window: j.StartTimeout.D().Milliseconds(), deadline: ms(j.Deadline), state: stateCode(j.State)}
 	h.id, _ = parseID(j.ID)
 	if j.UniqueKey != "" {
 		h.flags |= flagUnique
@@ -197,7 +197,7 @@ func (d *draft) job(ns string) (*runnel.Job, error) {
 	j := &runnel.Job{ID: h.id.String(), Namespace: ns, Queue: d.names[0], Kind: d.names[1], Group: d.names[2],
 		Pool: d.names[3], Worker: d.names[4], State: h.stateName(),
 		Priority: int(h.prio), Attempt: int(h.attempt), MaxAttempts: int(h.maxAttempts), Pending: int(h.pending),
-		RunAt: fromMs(h.runAt), WaitingSince: fromMs(h.waitingSince), StartBy: fromMs(h.startBy), LeaseUntil: fromMs(h.lease),
+		RunAt: fromMs(h.runAt), WaitingSince: fromMs(h.waitingSince), StartBy: fromMs(h.startBy), Deadline: fromMs(h.deadline), LeaseUntil: fromMs(h.lease),
 		CreatedAt: fromMs(h.created), UpdatedAt: fromMs(h.updated), StartedAt: fromMs(h.started), FinishedAt: fromMs(h.finished),
 		Version: h.version}
 	return j, decodeBody(d.body, j)

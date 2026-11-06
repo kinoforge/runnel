@@ -33,6 +33,14 @@ func Timeout(d time.Duration) Option { return func(j *Job) { j.Timeout = Duratio
 // StartTimeout ends the job as expired when it waits longer than d to start.
 func StartTimeout(d time.Duration) Option { return func(j *Job) { j.StartTimeout = Duration(d) } }
 
+// Deadline ends the job as expired when it has not completed by t, whatever its
+// state.
+func Deadline(t time.Time) Option { return func(j *Job) { j.Deadline, j.ttl = t, 0 } }
+
+// TTL sets the deadline d after the job is enqueued, measured on the store's
+// clock.
+func TTL(d time.Duration) Option { return func(j *Job) { j.Deadline, j.ttl = time.Time{}, d } }
+
 // WithBackoff spaces the job's retries.
 func WithBackoff(b Backoff) Option { return func(j *Job) { j.Backoff = b } }
 

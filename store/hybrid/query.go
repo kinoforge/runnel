@@ -223,15 +223,13 @@ func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.
 	var ds []draft
 	var want []timeKey
 	err := s.read(ns, func(sp *space) error {
-		var t *timeTree
-		var due func(int64) bool
-		switch kind {
-		case runnel.DueLease:
-			t, due = sp.leases, func(v int64) bool { return v < at }
-		case runnel.DueStart:
-			t, due = sp.startBy, func(v int64) bool { return v <= at }
-		default:
+		t := dueTree(sp, kind)
+		if t == nil {
 			return fmt.Errorf("runnel: unknown due kind %d", kind)
+		}
+		due := func(v int64) bool { return v <= at }
+		if kind == runnel.DueLease {
+			due = func(v int64) bool { return v < at }
 		}
 		t.Ascend(func(k timeKey) bool {
 			if !due(k.at) || len(want) >= limit {
@@ -256,27 +254,44 @@ func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.
 	if err != nil {
 		return nil, err
 	}
-	return s.dropGone(ns, want, jobs)
+	keep := func(st runnel.State) bool { return st == runnel.StateWaiting }
+	if kind == runnel.DueDeadline {
+		keep = func(st runnel.State) bool { return !st.Final() }
+	}
+	return s.dropGone(ns, kind, want, jobs, keep)
 }
 
-// dropGone drops from the start deadline index the entries of want whose job
-// no longer waits, in memory or in the cold store, which a job leaving the
-// cold store while Due read it may leave behind; it returns the jobs that
-// still wait.
-func (s *Store) dropGone(ns string, want []timeKey, jobs []*runnel.Job) ([]*runnel.Job, error) {
-	waiting := make(map[uid]bool, len(jobs))
+// dueTree returns the index Due reads for kind.
+func dueTree(sp *space, kind runnel.DueKind) *timeTree {
+	switch kind {
+	case runnel.DueLease:
+		return sp.leases
+	case runnel.DueStart:
+		return sp.startBy
+	case runnel.DueDeadline:
+		return sp.ends
+	}
+	return nil
+}
+
+// dropGone drops from the index of kind the entries of want whose job is no
+// longer in memory nor kept in the cold store, which a job leaving the cold
+// store while Due read it may leave behind; it returns the jobs keep accepts.
+func (s *Store) dropGone(ns string, kind runnel.DueKind, want []timeKey, jobs []*runnel.Job, keep func(runnel.State) bool) ([]*runnel.Job, error) {
+	kept := make(map[uid]bool, len(jobs))
 	out := jobs[:0]
 	for _, j := range jobs {
-		if j.State == runnel.StateWaiting {
+		if keep(j.State) {
 			id, _ := parseID(j.ID)
-			waiting[id] = true
+			kept[id] = true
 			out = append(out, j)
 		}
 	}
 	return out, s.read(ns, func(sp *space) error {
+		t := dueTree(sp, kind)
 		for _, k := range want {
-			if _, ok := sp.get(k.id); !ok && !waiting[k.id] {
-				sp.startBy.Delete(k)
+			if _, ok := sp.get(k.id); !ok && !kept[k.id] {
+				t.Delete(k)
 			}
 		}
 		return nil

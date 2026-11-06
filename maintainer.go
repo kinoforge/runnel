@@ -175,7 +175,7 @@ func (m *Maintainer) stopHooks() {
 // Tick does one round of housekeeping for one namespace.
 func (m *Maintainer) Tick(ctx context.Context, ns string) error {
 	now := m.clock.Now()
-	steps := []func(context.Context, string, time.Time) error{m.reap, m.startWaits, m.schedules}
+	steps := []func(context.Context, string, time.Time) error{m.reap, m.startWaits, m.deadlines, m.schedules}
 	if m.cfg.Callbacks.Enabled {
 		steps = append(steps, m.callbacks)
 	}
@@ -231,6 +231,29 @@ func (m *Maintainer) startWaits(ctx context.Context, ns string, now time.Time) e
 		n.UpdatedAt = now
 		end(n, StateExpired, now)
 		changes = append(changes, Change{Job: n, From: StateWaiting})
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	_, err = m.store.Apply(ctx, ns, changes, now)
+	return err
+}
+
+func (m *Maintainer) deadlines(ctx context.Context, ns string, now time.Time) error {
+	jobs, err := m.store.Due(ctx, ns, DueDeadline, now, m.cfg.Batch)
+	if err != nil || len(jobs) == 0 {
+		return err
+	}
+	changes := make([]Change, 0, len(jobs))
+	for _, j := range jobs {
+		if j.State.Final() || !j.late(now) {
+			continue
+		}
+		n := j.Clone()
+		n.addError(deadlinePassed, now)
+		n.Worker, n.LeaseUntil, n.UpdatedAt = "", time.Time{}, now
+		end(n, StateExpired, now)
+		changes = append(changes, Change{Job: n, From: j.State})
 	}
 	if len(changes) == 0 {
 		return nil

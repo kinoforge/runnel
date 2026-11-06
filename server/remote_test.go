@@ -119,7 +119,7 @@ func send(t *testing.T, srv *httptest.Server, token, method, path, prefer string
 }
 
 func TestWaitModes(t *testing.T) {
-	spec.Rule(t, "S05", "S06", "S07", "S02", "W03")
+	spec.Rule(t, "S05", "S06", "S07", "S02", "W03", "T06")
 	srv, _ := setup(t)
 	call(t, srv, admin, "PUT", "/v1/namespaces/door", nil)
 	prodKey := key(t, srv, "door", "producer", "reader", "admin")
@@ -160,6 +160,20 @@ func TestWaitModes(t *testing.T) {
 	j, err := remote.New(srv.URL, prodKey, "door").EnqueueAndWait(ctx, "fast", "echo", "hi")
 	if err != nil || j.State != runnel.StateCompleted || string(j.Result) != `"hi"` {
 		t.Fatalf("remote enqueue and wait: %+v %v", j, err)
+	}
+	if code, body := call(t, srv, prodKey, "PUT", "/v1/ns/door/queues/fast", map[string]any{"name": "fast", "wait": "5s"}); code >= 300 {
+		t.Fatalf("set queue %d %v", code, body)
+	}
+	resp, out = send(t, srv, prodKey, "POST", "/v1/ns/door/jobs", "", map[string]any{"queue": "fast", "kind": "echo", "ttl": "1m"})
+	if resp.StatusCode != 200 || out["state"] != "completed" || resp.Header.Get("Preference-Applied") != "wait=5" || out["deadline"] == nil {
+		t.Fatalf("queue default wait: %d %v", resp.StatusCode, out)
+	}
+	in, err := remote.New(srv.URL, prodKey, "door").Enqueue(ctx, "slow", "k", nil, runnel.TTL(2*time.Hour), runnel.In(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := remote.New(srv.URL, prodKey, "door").Get(ctx, in.ID); err != nil || got.Deadline.Sub(got.RunAt).Round(time.Minute) != time.Hour {
+		t.Fatalf("remote ttl and delay: %+v %v", got, err)
 	}
 
 	call(t, srv, prodKey, "PUT", "/v1/ns/door/queues/capped", map[string]any{"name": "capped", "max_queued": 1})

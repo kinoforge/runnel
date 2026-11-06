@@ -66,8 +66,10 @@ type DueKind int
 const (
 	// DueLease selects running jobs whose lease has ended.
 	DueLease DueKind = iota + 1
-	// DueStart selects waiting jobs past their start-within deadline.
+	// DueStart selects waiting jobs past their start timeout.
 	DueStart
+	// DueDeadline selects unfinished jobs past their deadline.
+	DueDeadline
 )
 
 // Query filters a job listing. Results are newest first; Cursor continues after

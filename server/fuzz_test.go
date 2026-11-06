@@ -16,7 +16,7 @@ func FuzzPreferWait(f *testing.F) {
 	s := &Server{cfg: Config{MaxResultWait: time.Minute}}
 	f.Fuzz(func(t *testing.T, h string) {
 		r := &http.Request{Header: http.Header{"Prefer": {h}}}
-		if d := s.preferWait(r); d < 0 || d > time.Minute {
+		if d, _ := s.preferWait(r); d < 0 || d > time.Minute {
 			t.Fatalf("Prefer %q gave wait %v", h, d)
 		}
 	})

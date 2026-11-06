@@ -54,7 +54,7 @@ type ID = [16]byte
 const Waiting uint8 = 2
 
 // Job is a job as the cold store keeps it: the fields its indexes use, and
-// the job itself, encoded by the caller. Prio, RunAt, StartBy and Ready only
+// the job itself, encoded by the caller. Prio, RunAt, StartBy, Deadline and Ready only
 // matter for a waiting job; Ready puts it in claim order rather than in run
 // time order.
 type Job struct {
@@ -64,6 +64,7 @@ type Job struct {
 	Finished           int64
 	Prio               int32
 	RunAt, StartBy     int64
+	Deadline           int64
 	Ready              bool
 	Queue, Kind, Group string
 	Data               []byte
@@ -273,7 +274,10 @@ func index(b *pebble.Batch, j *Job, rec []byte) error {
 	}
 	err := b.Set(orderKey(j), rec, nil)
 	if j.StartBy != 0 {
-		err = errors.Join(err, b.Set(deadlineKey(j.NS, j.StartBy, j.ID), nil, nil))
+		err = errors.Join(err, b.Set(whenKey(kStart, j.NS, j.StartBy, j.ID), nil, nil))
+	}
+	if j.Deadline != 0 {
+		err = errors.Join(err, b.Set(whenKey(kDeadline, j.NS, j.Deadline, j.ID), nil, nil))
 	}
 	return err
 }
@@ -284,7 +288,10 @@ func unindex(b *pebble.Batch, j *Job) error {
 	}
 	err := b.Delete(orderKey(j), nil)
 	if j.StartBy != 0 {
-		err = errors.Join(err, b.Delete(deadlineKey(j.NS, j.StartBy, j.ID), nil))
+		err = errors.Join(err, b.Delete(whenKey(kStart, j.NS, j.StartBy, j.ID), nil))
+	}
+	if j.Deadline != 0 {
+		err = errors.Join(err, b.Delete(whenKey(kDeadline, j.NS, j.Deadline, j.ID), nil))
 	}
 	return err
 }

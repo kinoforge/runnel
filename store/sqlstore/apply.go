@@ -57,11 +57,11 @@ func (s *Store) applyOne(ctx context.Context, tx *txn, ns string, c runnel.Chang
 		return false, err
 	}
 	query := `UPDATE rn_jobs SET queue=?, kind=?, state=?, priority=?, grp=?, pool=?, attempt=?, max_attempts=?,
-		run_at=?, waiting_since=?, start_by=?, start_timeout=?, worker=?, lease_until=?, version=version+1, updated_at=?, started_at=?,
+		run_at=?, waiting_since=?, start_by=?, start_timeout=?, deadline=?, worker=?, lease_until=?, version=version+1, updated_at=?, started_at=?,
 		finished_at=?, data=? WHERE ns=? AND id=? AND version=?`
 	args := []any{j.Queue, j.Kind, string(j.State), j.Priority, j.Group, j.Pool, j.Attempt, j.MaxAttempts,
 		runnel.Millis(j.RunAt), runnel.Millis(j.WaitingSince), runnel.Millis(j.StartBy), j.StartTimeout.D().Milliseconds(),
-		j.Worker, runnel.Millis(j.LeaseUntil), runnel.Millis(j.UpdatedAt), runnel.Millis(j.StartedAt), runnel.Millis(j.FinishedAt),
+		runnel.Millis(j.Deadline), j.Worker, runnel.Millis(j.LeaseUntil), runnel.Millis(j.UpdatedAt), runnel.Millis(j.StartedAt), runnel.Millis(j.FinishedAt),
 		data, ns, j.ID, j.Version}
 	if c.From != "" {
 		query += " AND state=?"

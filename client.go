@@ -75,6 +75,10 @@ func (c *Client) queueConfigFrom(name string, load func() (map[string][]byte, er
 	return c.queues[name], nil
 }
 
+// Refresh drops the cached queue settings, so the next call reads them again.
+// Call it after changing settings through the store directly.
+func (c *Client) Refresh() { c.forget() }
+
 func (c *Client) forget() {
 	c.mu.Lock()
 	c.queues = nil
@@ -90,6 +94,10 @@ func (c *Client) prepare(ctx context.Context, j *Job, now time.Time) error {
 		return err
 	}
 	j.Namespace = c.ns
+	if j.Deadline.IsZero() && j.ttl == 0 {
+		j.ttl = cfg.TTL.D()
+	}
+	j.settle(now)
 	if j.MaxAttempts == 0 {
 		j.MaxAttempts = cfg.MaxAttempts
 	}
@@ -97,12 +105,17 @@ func (c *Client) prepare(ctx context.Context, j *Job, now time.Time) error {
 		j.Backoff = cfg.Backoff
 	}
 	if j.Timeout == 0 {
-		j.Timeout = cfg.Timeout
+		j.Timeout = j.fit(cfg.Timeout, now)
 	}
 	if j.StartTimeout == 0 {
-		j.StartTimeout = cfg.StartTimeout
+		j.StartTimeout = j.fit(cfg.StartTimeout, now)
 	}
 	return j.Prepare(now, c.limits)
+}
+
+// Queue returns the settings of a queue, read at most once a few seconds.
+func (c *Client) Queue(ctx context.Context, name string) (QueueConfig, error) {
+	return c.queueConfig(ctx, name)
 }
 
 // Enqueue adds one job and returns its id. The queue's settings fill the options
@@ -246,6 +259,9 @@ func (c *Client) Retry(ctx context.Context, id string) (*Job, error) {
 		n := j.Clone()
 		n.State, n.Attempt, n.RunAt, n.WaitingSince, n.UpdatedAt = StateWaiting, 0, now, now, now
 		n.FinishedAt, n.Result, n.Handle = time.Time{}, nil, ""
+		if n.late(now) {
+			n.Deadline = time.Time{}
+		}
 		n.computeStartBy()
 		return n, nil
 	})

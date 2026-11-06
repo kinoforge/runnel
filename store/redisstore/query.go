@@ -90,14 +90,20 @@ func (s *Store) List(ctx context.Context, ns string, q runnel.Query) ([]*runnel.
 	return out, "", nil
 }
 
+func is(want runnel.State) func(runnel.State) bool {
+	return func(st runnel.State) bool { return st == want }
+}
+
 func (s *Store) Due(ctx context.Context, ns string, kind runnel.DueKind, now time.Time, limit int) ([]*runnel.Job, error) {
 	var key, maxScore string
-	var want runnel.State
+	var want func(runnel.State) bool
 	switch kind {
 	case runnel.DueLease:
-		key, maxScore, want = "leases", "("+ms(now), runnel.StateRunning
+		key, maxScore, want = "leases", "("+ms(now), is(runnel.StateRunning)
 	case runnel.DueStart:
-		key, maxScore, want = "startby", ms(now), runnel.StateWaiting
+		key, maxScore, want = "startby", ms(now), is(runnel.StateWaiting)
+	case runnel.DueDeadline:
+		key, maxScore, want = "deadlines", ms(now), func(st runnel.State) bool { return !st.Final() }
 	default:
 		return nil, fmt.Errorf("runnel: unknown due kind %d", kind)
 	}
@@ -111,7 +117,7 @@ func (s *Store) Due(ctx context.Context, ns string, kind runnel.DueKind, now tim
 	}
 	out := jobs[:0]
 	for _, j := range jobs {
-		if j.State == want {
+		if want(j.State) {
 			out = append(out, j)
 		}
 	}

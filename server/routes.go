@@ -98,6 +98,7 @@ func configRoutes[T any](s *Server, path string, kind runnel.ConfigKind, check f
 		if err := runnel.PutTyped(r.Context(), s.store, r.PathValue("ns"), kind, name, v); err != nil {
 			return err
 		}
+		s.client(r.PathValue("ns")).Refresh()
 		writeJSON(w, http.StatusOK, v)
 		return nil
 	})
@@ -105,6 +106,7 @@ func configRoutes[T any](s *Server, path string, kind runnel.ConfigKind, check f
 		if err := s.store.DeleteConfig(r.Context(), r.PathValue("ns"), kind, r.PathValue("name")); err != nil {
 			return err
 		}
+		s.client(r.PathValue("ns")).Refresh()
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	})

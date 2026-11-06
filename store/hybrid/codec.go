@@ -125,7 +125,7 @@ func (e *enc) named(h *job, names [5]string) {
 	e.byte(h.state)
 	e.byte(h.flags)
 	for _, v := range []int64{int64(h.prio), int64(h.attempt), int64(h.maxAttempts), int64(h.pending), h.runAt, h.waitingSince,
-		h.startBy, h.lease, h.created, h.updated, h.started, h.finished, h.version, h.window} {
+		h.startBy, h.lease, h.created, h.updated, h.started, h.finished, h.version, h.window, h.deadline} {
 		e.int(v)
 	}
 }
@@ -141,7 +141,7 @@ func decodeHot(d *dec, t *syms) job {
 		*p = int32(d.int())
 	}
 	for _, p := range []*int64{&h.runAt, &h.waitingSince, &h.startBy, &h.lease, &h.created, &h.updated, &h.started,
-		&h.finished, &h.version, &h.window} {
+		&h.finished, &h.version, &h.window, &h.deadline} {
 		*p = d.int()
 	}
 	if d.err == nil && (h.state == 0 || h.state >= stCount) {

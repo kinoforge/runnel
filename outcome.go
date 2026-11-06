@@ -124,9 +124,24 @@ func (o Outcome) Validate() error {
 	return nil
 }
 
+const deadlinePassed = "deadline passed"
+
 // Decide returns the job as it should be stored after outcome o at now. It
-// changes nothing in place and does no I/O.
+// changes nothing in place and does no I/O. A job that has not completed by its
+// deadline, or would run again only after it, ends as expired.
 func Decide(j *Job, o Outcome, now time.Time) *Job {
+	n := decide(j, o, now)
+	if o.Kind == OutcomeDone || (!j.late(now) && !j.late(n.RunAt)) {
+		return n
+	}
+	if !n.State.Final() {
+		n.addError(deadlinePassed, now)
+	}
+	end(n, StateExpired, now)
+	return n
+}
+
+func decide(j *Job, o Outcome, now time.Time) *Job {
 	n := j.Clone()
 	polling := j.Polling()
 	n.Worker, n.LeaseUntil, n.UpdatedAt = "", time.Time{}, now

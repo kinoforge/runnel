@@ -86,6 +86,20 @@ func (j *Job) validateSettings(l Limits) error {
 	if j.Timeout < 0 || j.StartTimeout < 0 || j.UniqueFor < 0 {
 		return invalid("durations must not be negative")
 	}
+	return j.validateDeadline()
+}
+
+func (j *Job) validateDeadline() error {
+	if j.Deadline.IsZero() {
+		return nil
+	}
+	left := j.Deadline.Sub(j.RunAt)
+	if left <= 0 {
+		return invalid("deadline must be after run_at")
+	}
+	if j.StartTimeout.D() > left || j.Timeout.D() > left {
+		return invalid("start_timeout and timeout must not reach past the deadline")
+	}
 	return nil
 }
 
