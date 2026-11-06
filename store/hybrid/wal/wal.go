@@ -39,6 +39,17 @@ const (
 	SyncOff
 )
 
+var syncModes = map[string]SyncMode{"": SyncEach, "each": SyncEach, "periodic": SyncPeriodic, "off": SyncOff}
+
+// ParseSync reads a sync mode by name: each, periodic or off; empty is each.
+func ParseSync(name string) (SyncMode, error) {
+	m, ok := syncModes[name]
+	if !ok {
+		return 0, fmt.Errorf("wal: sync %q must be each, periodic or off", name)
+	}
+	return m, nil
+}
+
 var (
 	// ErrLocked means another process has the directory open.
 	ErrLocked = errors.New("wal: directory is in use by another process")

@@ -31,7 +31,7 @@ func TestConformanceDiskRetiring(t *testing.T) {
 // store.
 func TestConformanceDiskSpilling(t *testing.T) {
 	opt := hybrid.Options{Dir: t.TempDir(), SnapshotBytes: 1 << 14}
-	conformWith(t, func() (*hybrid.Store, error) { return hybrid.OpenSpilling(opt, 0, 5*time.Millisecond) })
+	conformWith(t, func() (*hybrid.Store, error) { return hybrid.OpenSpilling(opt, 1, 5*time.Millisecond) })
 }
 
 func conformOnDisk(t *testing.T, opt hybrid.Options, retire ...time.Duration) {

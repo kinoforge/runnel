@@ -2,8 +2,6 @@ package hybrid
 
 import (
 	"cmp"
-	"math"
-	"runtime/debug"
 	"slices"
 	"time"
 
@@ -14,39 +12,11 @@ import (
 // cold store, in claim order, so a backlog is bounded by disk, not memory.
 // A claim takes from memory the jobs ahead of a queue's first job in the
 // cold store, its head; past it, the claim brings the next ones back first.
-const (
-	spillEvery  = 100 * time.Millisecond
-	spillBatch  = slabSize
-	refillBatch = 2 * slabSize
-	// refillAhead is how many waiting jobs per queue memory keeps ahead of
-	// the cold store while it has room.
-	refillAhead = 4 * refillBatch
-	// batchBytes bounds the payloads one move to or from the cold store
-	// holds in memory at once.
-	batchBytes = 4 << 20
-	wakeBatch  = 16 * slabSize
-	maxRefills = 8
-	// jobBytes is about what a waiting job takes in memory with its indexes.
-	jobBytes   = 300
-	defaultHot = 1 << 20
-	minHot     = 1 << 14
-)
-
-// hotBudget is how many waiting jobs memory holds: a quarter of the memory
-// limit's worth, or defaultHot with no limit.
-func hotBudget() int64 {
-	limit := debug.SetMemoryLimit(-1)
-	if limit == math.MaxInt64 {
-		return defaultHot
-	}
-	return max(minHot, limit/4/jobBytes)
-}
-
 // spiller keeps the waiting jobs in memory within budget until the store
 // closes.
 func (s *Store) spiller() {
 	defer s.wg.Done()
-	t := time.NewTicker(s.tune.spillEvery)
+	t := time.NewTicker(s.opt.SpillEvery)
 	defer t.Stop()
 	for {
 		select {
@@ -70,18 +40,18 @@ func (s *Store) balance() error {
 	defer s.waitMu.Unlock()
 	spaces := s.allSpaces()
 	total := s.hot.Load()
-	for total > s.tune.hotJobs {
+	for total > s.hotJobs {
 		sp := slices.MaxFunc(spaces, func(a, b *space) int { return cmp.Compare(a.hot.Load(), b.hot.Load()) })
-		n, err := s.spillSome(sp, min(total-s.tune.hotJobs, spillBatch))
+		n, err := s.spillSome(sp, min(total-s.hotJobs, s.opt.SpillBatch))
 		if err != nil || n == 0 {
 			return err
 		}
 		total -= n
 	}
 	for _, sp := range spaces {
-		for _, q := range sp.lowQueues() {
-			for range refillAhead / refillBatch {
-				if total+refillBatch > s.tune.hotJobs {
+		for _, q := range sp.lowQueues(s.opt.RefillAhead) {
+			for range s.opt.RefillAhead / s.opt.RefillBatch {
+				if total+s.opt.RefillBatch > s.hotJobs {
 					return nil
 				}
 				n, err := s.refill(sp, q)
@@ -99,7 +69,7 @@ func (s *Store) balance() error {
 // jobs, moving some to the cold store itself, so producers faster than the
 // spiller slow to its pace instead of filling memory.
 func (s *Store) makeRoom() error {
-	if s.cold == nil || s.hot.Load() <= 2*s.tune.hotJobs+spillBatch {
+	if s.cold == nil || s.hot.Load() <= 2*s.hotJobs+s.opt.SpillBatch {
 		return nil
 	}
 	return s.balance()
@@ -108,7 +78,7 @@ func (s *Store) makeRoom() error {
 // spillSome moves up to n waiting jobs of sp to the cold store.
 func (s *Store) spillSome(sp *space, n int64) (int64, error) {
 	now := ms(time.Now())
-	ds := sp.spillable(int(n))
+	ds := sp.spillable(int(n), int(s.opt.JobBytes), s.opt.BatchBytes)
 	if len(ds) == 0 {
 		return 0, nil
 	}
@@ -129,12 +99,13 @@ func (s *Store) spillSome(sp *space, n int64) (int64, error) {
 	return int64(len(ds) - len(stale)), nil
 }
 
-// spillable drafts up to n waiting jobs from the queues holding the most,
+// spillable drafts up to n waiting jobs, holding at most maxBytes counting
+// jobBytes each besides bodies, from the queues holding the most,
 // last in claim order first: future ones by run time, then ready ones. Jobs
 // others depend on stay, as their dependents are listed in memory, and so do
 // jobs still being deleted from the cold store, so that no job is there
 // twice and the cold store can add the others without looking them up.
-func (sp *space) spillable(n int) []draft {
+func (sp *space) spillable(n, jobBytes, maxBytes int) []draft {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	queues := make([]sym, 0, len(sp.counts))
@@ -151,13 +122,13 @@ func (sp *space) spillable(n int) []draft {
 			out = append(out, sp.draft(&h))
 			size += jobBytes + int(h.body.n) + len(sp.cache.bodies[id])
 		}
-		return len(out) < n && size < batchBytes
+		return len(out) < n && size < maxBytes
 	}
 	for _, q := range queues {
-		if t := sp.sched[q]; t != nil && len(out) < n && size < batchBytes {
+		if t := sp.sched[q]; t != nil && len(out) < n && size < maxBytes {
 			t.Descend(func(k timeKey) bool { return add(k.id) })
 		}
-		if t := sp.ready[q]; t != nil && len(out) < n && size < batchBytes {
+		if t := sp.ready[q]; t != nil && len(out) < n && size < maxBytes {
 			t.Descend(func(k readyKey) bool { return add(k.id) })
 		}
 	}
@@ -202,9 +173,9 @@ func (sp *space) stop(q sym) *readyKey {
 	return nil
 }
 
-// lowQueues names the queues with ready jobs in the cold store and few in
-// memory.
-func (sp *space) lowQueues() []string {
+// lowQueues names the queues with ready jobs in the cold store and fewer
+// than ahead in memory.
+func (sp *space) lowQueues(ahead int64) []string {
 	if !sp.spilled.Load() {
 		return nil
 	}
@@ -212,7 +183,7 @@ func (sp *space) lowQueues() []string {
 	defer sp.mu.Unlock()
 	var out []string
 	for q, h := range sp.heads {
-		if c := sp.counts[q]; h.HasReady && (c == nil || c[stWaiting] < refillAhead) {
+		if c := sp.counts[q]; h.HasReady && (c == nil || c[stWaiting] < ahead) {
 			out = append(out, sp.syms.name(q))
 		}
 	}
@@ -222,7 +193,7 @@ func (sp *space) lowQueues() []string {
 // refill brings the next ready jobs of queue q back from the cold store. The
 // caller holds waitMu.
 func (s *Store) refill(sp *space, q string) (int, error) {
-	jobs, head, err := s.cold.Take(sp.ns, q, refillBatch, batchBytes)
+	jobs, head, err := s.cold.Take(sp.ns, q, int(s.opt.RefillBatch), s.opt.BatchBytes)
 	if err != nil {
 		return 0, err
 	}

@@ -30,6 +30,8 @@ type Config struct {
 	Maintainer Maintainer `yaml:"maintainer"`
 	Webhooks   Webhooks   `yaml:"webhooks"`
 	Limits     Limits     `yaml:"limits"`
+	Memory     Memory     `yaml:"memory"`
+	Hybrid     Hybrid     `yaml:"hybrid"`
 }
 
 type Log struct {
@@ -104,6 +106,8 @@ func Default() Config {
 		Maintainer: Maintainer{Enabled: true, Retention: Retention(runnel.DefaultRetention)},
 		Webhooks:   Webhooks{Enabled: true},
 		Limits:     Limits(runnel.DefaultLimits),
+		Memory:     Memory{HeapPercent: 70},
+		Hybrid:     defaultHybrid(),
 	}
 }
 
@@ -142,6 +146,12 @@ func (c Config) Validate() error {
 	}
 	if _, err := c.Log.level(); err != nil {
 		errs = append(errs, fmt.Errorf("log.level: %w", err))
+	}
+	if c.Memory.HeapPercent > 100 || c.Hybrid.HotPercent > 100 {
+		errs = append(errs, errors.New("memory.heap_percent and hybrid.hot_percent must be at most 100"))
+	}
+	if _, err := c.Hybrid.Options(); err != nil {
+		errs = append(errs, fmt.Errorf("hybrid.sync: %w", err))
 	}
 	errs = append(errs, negatives(reflect.ValueOf(c), "")...)
 	return errors.Join(errs...)

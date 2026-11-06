@@ -11,6 +11,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `store/hybrid/cold`: finished jobs and their events leave memory for an embedded Pebble store on disk, so retention costs disk, not memory.
 - Hybrid store: waiting jobs past a quarter of the memory limit wait in the cold store in claim order and come back in batches, so a backlog is bounded by disk. Inserts slow down while memory holds twice that many.
 - `runnel` keeps Go's heap under 70% of the container's memory limit unless `GOMEMLIMIT` is set.
+- Config sections `memory` and `hybrid` override every size and timing of the hybrid store; `hybrid.Options` and `cold.Options` take them in Go, defaults in `hybrid.DefaultOptions`.
 - `runnel bench -payload` sets the payload size.
 
 ### Changed

@@ -8,31 +8,15 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/kinoforge/runnel"
 	"github.com/kinoforge/runnel/store/hybrid/cold"
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 )
 
-const (
-	defaultSnapshotBytes = 64 << 20
-	checkEvery           = time.Second
-)
-
 // ErrBroken means a write to disk failed. Memory may hold changes the disk does
 // not, so the store refuses further calls; reopen it to recover from disk.
 var ErrBroken = errors.New("hybrid: store stopped after a disk error")
-
-// Options configures a store kept on disk. An empty Dir keeps it in memory only.
-type Options struct {
-	Dir  string
-	Sync wal.SyncMode
-	// SyncInterval is how often SyncPeriodic fsyncs; default 100ms.
-	SyncInterval time.Duration
-	// SnapshotBytes is the log size that triggers a snapshot; default 64 MiB.
-	SnapshotBytes int64
-}
 
 // Store keeps a small record of every job in memory, indexed for claiming, and
 // logs each change before the call returns. Job bodies (payload, result, meta,
@@ -52,7 +36,8 @@ type Store struct {
 	// waitMu keeps moving waiting jobs to and from the cold store apart from
 	// each other and from deleting the jobs a call brought back.
 	waitMu sync.Mutex
-	tune   tune
+	// hotJobs is how many waiting jobs memory holds.
+	hotJobs int64
 	// hot counts the waiting jobs in memory.
 	hot atomic.Int64
 
@@ -73,28 +58,15 @@ func Memory() *Store {
 	return &Store{spaces: map[string]*space{}, done: make(chan struct{})}
 }
 
-// tune holds the timings and sizes of the background work; tests shrink them.
-type tune struct {
-	retireAfter, retireEvery time.Duration
-	spillEvery               time.Duration
-	// hotJobs is how many waiting jobs memory holds.
-	hotJobs int64
-}
-
 // Open loads the store in opt.Dir, replaying its snapshot and log.
 func Open(opt Options) (*Store, error) {
-	return open(opt, tune{retireAfter: retireAfter, retireEvery: retireEvery, spillEvery: spillEvery, hotJobs: hotBudget()})
-}
-
-func open(opt Options, tn tune) (*Store, error) {
 	s := Memory()
 	if opt.Dir == "" {
 		return s, nil
 	}
-	if opt.SnapshotBytes <= 0 {
-		opt.SnapshotBytes = defaultSnapshotBytes
-	}
-	s.opt, s.tune = opt, tn
+	s.opt = opt.withDefaults()
+	s.hotJobs = s.opt.hotBudget()
+	opt = s.opt
 	s.files = &files{path: s.filePath, open: map[uint32]*os.File{}}
 	l, err := wal.Open(opt.Dir, wal.Options{Sync: opt.Sync, Interval: opt.SyncInterval})
 	if err != nil {
@@ -119,7 +91,7 @@ func open(opt Options, tn tune) (*Store, error) {
 // load opens the cold store, replays the snapshot and log into memory, starts
 // the log and moves every finished job to the cold store.
 func (s *Store) load() error {
-	c, err := cold.Open(filepath.Join(s.opt.Dir, coldDir))
+	c, err := cold.Open(filepath.Join(s.opt.Dir, coldDir), s.opt.Cold)
 	if err != nil {
 		return err
 	}

@@ -11,7 +11,7 @@ import (
 // synced the log that holds them.
 func (s *Store) retireEvents(sp *space, cutoff int64) error {
 	for {
-		evs := sp.retirableEvents(cutoff, retireBatch)
+		evs := sp.retirableEvents(cutoff, s.opt.RetireBatch)
 		if len(evs) == 0 {
 			return nil
 		}
@@ -23,7 +23,7 @@ func (s *Store) retireEvents(sp *space, cutoff int64) error {
 		sp.dropEvents(last)
 		sp.coldSeq = last
 		sp.mu.Unlock()
-		if len(evs) < retireBatch {
+		if len(evs) < s.opt.RetireBatch {
 			return nil
 		}
 	}

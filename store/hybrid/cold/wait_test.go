@@ -14,7 +14,7 @@ func waiting(n byte, prio int32, at int64, ready bool) cold.Job {
 // TestWaitingOrder checks ready jobs come back in claim order, negative
 // priorities and run times included, and future ones join them once woken.
 func TestWaitingOrder(t *testing.T) {
-	s, err := cold.Open(t.TempDir())
+	s, err := cold.Open(t.TempDir(), cold.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

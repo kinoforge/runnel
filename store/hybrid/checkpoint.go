@@ -82,7 +82,7 @@ func (s *Store) loadSnapshot(seg uint64, r *replayer) error {
 
 func (s *Store) checkpointer() {
 	defer s.wg.Done()
-	t := time.NewTicker(checkEvery)
+	t := time.NewTicker(s.opt.CheckEvery)
 	defer t.Stop()
 	for {
 		select {

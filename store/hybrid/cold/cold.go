@@ -21,11 +21,30 @@ import (
 	"github.com/cockroachdb/pebble/v2/bloom"
 )
 
-const (
-	cacheBytes    = 16 << 20
-	memTableBytes = 8 << 20
-	bloomBits     = 10
-)
+// Options sizes the store; fields left at zero take their value from
+// DefaultOptions.
+type Options struct {
+	CacheBytes    int64
+	MemTableBytes int64
+	BloomBits     int
+}
+
+// DefaultOptions holds the value of every option left at zero.
+var DefaultOptions = Options{CacheBytes: 16 << 20, MemTableBytes: 8 << 20, BloomBits: 10}
+
+// WithDefaults fills the options left at zero from DefaultOptions.
+func (o Options) WithDefaults() Options {
+	if o.CacheBytes <= 0 {
+		o.CacheBytes = DefaultOptions.CacheBytes
+	}
+	if o.MemTableBytes <= 0 {
+		o.MemTableBytes = DefaultOptions.MemTableBytes
+	}
+	if o.BloomBits <= 0 {
+		o.BloomBits = DefaultOptions.BloomBits
+	}
+	return o
+}
 
 // ID is a job id in its 16 raw bytes.
 type ID = [16]byte
@@ -68,12 +87,13 @@ type Store struct {
 }
 
 // Open opens or creates the store in dir.
-func Open(dir string) (*Store, error) {
-	c := pebble.NewCache(cacheBytes)
+func Open(dir string, o Options) (*Store, error) {
+	o = o.WithDefaults()
+	c := pebble.NewCache(o.CacheBytes)
 	defer c.Unref()
 	opt := &pebble.Options{
 		Cache:              c,
-		MemTableSize:       memTableBytes,
+		MemTableSize:       uint64(o.MemTableBytes),
 		DisableWAL:         true,
 		FormatMajorVersion: pebble.FormatNewest,
 		Logger:             quiet{},
@@ -81,7 +101,7 @@ func Open(dir string) (*Store, error) {
 	// Bloom filters let a lookup of an id that is not stored, as every new
 	// job's is, skip the files without reading them.
 	for i := range opt.Levels {
-		opt.Levels[i].FilterPolicy = bloom.FilterPolicy(bloomBits)
+		opt.Levels[i].FilterPolicy = bloom.FilterPolicy(o.BloomBits)
 	}
 	db, err := pebble.Open(dir, opt)
 	if err != nil {

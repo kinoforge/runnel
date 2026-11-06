@@ -15,7 +15,7 @@ func (s *Store) claimCold(ns string, req runnel.ClaimRequest, out []draft) ([]dr
 	sp := s.space(ns)
 	s.waitMu.Lock()
 	defer s.waitMu.Unlock()
-	for range maxRefills {
+	for range s.opt.MaxRefills {
 		r := req
 		r.Limit -= len(out)
 		more, h, err := s.claim(ns, r)
@@ -101,11 +101,11 @@ func (s *Store) wakeQueue(sp *space, q string, now int64) error {
 	sp.setHead(v, h)
 	sp.mu.Unlock()
 	for {
-		n, err := s.cold.Wake(sp.ns, q, now, wakeBatch)
+		n, err := s.cold.Wake(sp.ns, q, now, s.opt.WakeBatch)
 		if err != nil {
 			return err
 		}
-		if n < wakeBatch {
+		if n < s.opt.WakeBatch {
 			break
 		}
 	}

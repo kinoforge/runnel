@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/store/hybrid"
 )
 
 func env(vars map[string]string) func(string) string {
@@ -124,5 +125,42 @@ func TestEmptyFile(t *testing.T) {
 	}
 	if cfg != Default() {
 		t.Fatal("an empty file must leave the defaults")
+	}
+}
+
+func TestHybridSettings(t *testing.T) {
+	path := writeYAML(t, "memory:\n  heap_percent: 60\nhybrid:\n  sync: periodic\n  hot_jobs: 5000\n  refill_batch: 100\n  cold_cache_bytes: 1024\n")
+	cfg, err := Load(path, env(map[string]string{"RUNNEL_HYBRID_SPILL_BATCH": "77"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	opt, err := cfg.Hybrid.Options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Memory.HeapPercent != 60 || opt.HotJobs != 5000 || opt.RefillBatch != 100 || opt.SpillBatch != 77 ||
+		opt.Cold.CacheBytes != 1024 || opt.WakeBatch != hybrid.DefaultOptions.WakeBatch {
+		t.Fatalf("hybrid settings %+v", opt)
+	}
+	cfg.Hybrid.Sync = "sometimes"
+	if cfg.Validate() == nil {
+		t.Fatal("bad sync mode accepted")
+	}
+}
+
+func TestExampleFile(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "deploy", "runnel.example.yaml"), env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := Default().Hybrid.Options()
+	if got, _ := cfg.Hybrid.Options(); got != want {
+		t.Fatalf("example hybrid settings differ from the defaults:\n got %+v\nwant %+v", got, want)
 	}
 }

@@ -10,13 +10,13 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid"
 )
 
-// TestWaitingJobsLeaveMemory lets every waiting job move to the cold store and
-// checks they keep claim order, survive a restart, and still answer to reads,
-// unique keys, cancels and queue limits.
+// TestWaitingJobsLeaveMemory lets all waiting jobs but one move to the cold
+// store and checks they keep claim order, survive a restart, and still answer
+// to reads, unique keys, cancels and queue limits.
 func TestWaitingJobsLeaveMemory(t *testing.T) {
 	const n = 3000
 	opt := hybrid.Options{Dir: t.TempDir()}
-	s, err := hybrid.OpenSpilling(opt, 0, 2*time.Millisecond)
+	s, err := hybrid.OpenSpilling(opt, 1, 2*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,14 +42,14 @@ func TestWaitingJobsLeaveMemory(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	waitCold(t, s, n)
+	waitCold(t, s, n-1)
 	_ = s.Close()
-	if s, err = hybrid.OpenSpilling(opt, 0, 2*time.Millisecond); err != nil {
+	if s, err = hybrid.OpenSpilling(opt, 1, 2*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
 	c = runnel.NewClient(s, ns)
-	waitCold(t, s, n)
+	waitCold(t, s, n-1)
 	if st, _ := c.Stats(ctx); st[0].Counts[runnel.StateWaiting] != n {
 		t.Fatalf("stats %+v", st)
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func BenchmarkMetaMiss(b *testing.B) {
-	s, err := cold.Open(b.TempDir())
+	s, err := cold.Open(b.TempDir(), cold.Options{})
 	if err != nil {
 		b.Fatal(err)
 	}

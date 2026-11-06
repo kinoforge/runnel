@@ -20,6 +20,12 @@ import (
 // sqlite:path, redis://, rediss://, valkey:// and dragonfly://, hybrid:dir with an
 // optional ?sync=each|periodic|off, or memory: for a store that keeps nothing.
 func Open(ctx context.Context, dsn string) (runnel.Store, error) {
+	return OpenWith(ctx, dsn, hybrid.Options{})
+}
+
+// OpenWith is Open with the options a hybrid store takes; the URL's
+// directory and sync mode win over them.
+func OpenWith(ctx context.Context, dsn string, hy hybrid.Options) (runnel.Store, error) {
 	scheme, rest, ok := strings.Cut(dsn, ":")
 	if !ok {
 		return nil, fmt.Errorf("runnel: store %q needs a scheme like postgres://, mysql://, sqlite:, redis://", redact(dsn))
@@ -43,7 +49,7 @@ func Open(ctx context.Context, dsn string) (runnel.Store, error) {
 		}
 		s, err = redisstore.Open(u)
 	case "hybrid":
-		s, err = openHybrid(strings.TrimPrefix(rest, "//"))
+		s, err = openHybrid(strings.TrimPrefix(rest, "//"), hy)
 	case "memory", "mem":
 		s = hybrid.Memory()
 	default:
@@ -74,9 +80,7 @@ func openMySQL(dsn string) (runnel.Store, error) {
 	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)%s?%s", u.User.Username(), pass, host, u.Path, q.Encode()))
 }
 
-var syncModes = map[string]wal.SyncMode{"": wal.SyncEach, "each": wal.SyncEach, "periodic": wal.SyncPeriodic, "off": wal.SyncOff}
-
-func openHybrid(rest string) (runnel.Store, error) {
+func openHybrid(rest string, opt hybrid.Options) (runnel.Store, error) {
 	dir, query, _ := strings.Cut(rest, "?")
 	if dir == "" {
 		return nil, errors.New("runnel: hybrid store needs a directory, like hybrid:/var/lib/runnel")
@@ -85,11 +89,13 @@ func openHybrid(rest string) (runnel.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runnel: bad hybrid options: %w", err)
 	}
-	mode, ok := syncModes[q.Get("sync")]
-	if !ok {
-		return nil, fmt.Errorf("runnel: hybrid sync %q must be each, periodic or off", q.Get("sync"))
+	if q.Has("sync") {
+		if opt.Sync, err = wal.ParseSync(q.Get("sync")); err != nil {
+			return nil, fmt.Errorf("runnel: hybrid %w", err)
+		}
 	}
-	return hybrid.Open(hybrid.Options{Dir: dir, Sync: mode})
+	opt.Dir = dir
+	return hybrid.Open(opt)
 }
 
 func redact(dsn string) string {

@@ -15,7 +15,7 @@ func job(n byte, state uint8, at int64, queue string) cold.Job {
 
 func TestPutGetListPrune(t *testing.T) {
 	dir := t.TempDir()
-	s, err := cold.Open(dir)
+	s, err := cold.Open(dir, cold.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestPutGetListPrune(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if s, err = cold.Open(dir); err != nil {
+	if s, err = cold.Open(dir, cold.Options{}); err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
@@ -69,7 +69,7 @@ func TestPutGetListPrune(t *testing.T) {
 }
 
 func TestListNewestFirstWithCursor(t *testing.T) {
-	s, err := cold.Open(t.TempDir())
+	s, err := cold.Open(t.TempDir(), cold.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

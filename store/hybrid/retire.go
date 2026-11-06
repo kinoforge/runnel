@@ -8,19 +8,14 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
-const (
-	coldDir = "done"
-	// Finished jobs stay in memory for retireAfter, so callers waiting for a
-	// result find it there, then move to the cold store in batches.
-	retireAfter = time.Second
-	retireEvery = time.Second
-	retireBatch = slabSize
-)
+// coldDir holds the cold store. Finished jobs stay in memory for a moment, so
+// callers waiting for a result find it there, then move to it in batches.
+const coldDir = "done"
 
 // retirer moves finished jobs to the cold store until the store closes.
 func (s *Store) retirer() {
 	defer s.wg.Done()
-	t := time.NewTicker(s.tune.retireEvery)
+	t := time.NewTicker(s.opt.RetireEvery)
 	defer t.Stop()
 	for {
 		select {
@@ -29,7 +24,7 @@ func (s *Store) retirer() {
 		case <-t.C:
 		}
 		if s.broken() == nil {
-			if err := s.retire(ms(time.Now().Add(-s.tune.retireAfter)), false); err != nil {
+			if err := s.retire(ms(time.Now().Add(-s.opt.RetireAfter)), false); err != nil {
 				s.fail(err)
 			}
 		}
@@ -53,7 +48,7 @@ func (s *Store) retire(cutoff int64, replace bool) error {
 			if err != nil {
 				return err
 			}
-			if n < retireBatch {
+			if n < s.opt.RetireBatch {
 				break
 			}
 		}
@@ -64,10 +59,10 @@ func (s *Store) retire(cutoff int64, replace bool) error {
 	return nil
 }
 
-// retireSome copies up to retireBatch finished jobs to the cold store, then
+// retireSome copies up to s.opt.RetireBatch finished jobs to the cold store, then
 // drops from memory those that did not change meanwhile.
 func (s *Store) retireSome(sp *space, cutoff int64, replace bool) (int, error) {
-	ds := sp.retirable(cutoff, retireBatch)
+	ds := sp.retirable(cutoff, s.opt.RetireBatch)
 	if len(ds) == 0 {
 		return 0, nil
 	}

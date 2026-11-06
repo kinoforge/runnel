@@ -39,7 +39,6 @@ the store comes from --store, RUNNEL_STORE or the store key, for example
 `
 
 func main() {
-	fitContainer()
 	if err := runMain(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, errorLine(err))
 		os.Exit(1)
@@ -127,7 +126,12 @@ func open(ctx context.Context, cfg config.Config) (runnel.Store, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	return stores.Open(ctx, cfg.Store)
+	fitContainer(cfg.Memory.HeapPercent)
+	hy, err := cfg.Hybrid.Options()
+	if err != nil {
+		return nil, err
+	}
+	return stores.OpenWith(ctx, cfg.Store, hy)
 }
 
 func (c *cmd) start(ctx context.Context, args []string, positional int) ([]string, runnel.Store, error) {
