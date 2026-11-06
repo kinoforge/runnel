@@ -141,7 +141,7 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 | Claims without limits | `SKIP LOCKED`, no lock | `SKIP LOCKED`, no lock | one writer | one Lua script | in memory, per namespace lock |
 | Good for | production | production | tests, tools, one machine | high throughput | highest throughput on one machine, no database |
 
-The hybrid store (`hybrid:/var/lib/runnel`) keeps a small record of every active job in memory, about 290 bytes whatever the payload, and logs each change to disk. A second after a job finishes, it moves to an embedded store on disk (Pebble, inside the same binary and data directory), so keeping finished jobs for days costs disk, not memory. Payloads, results, meta and errors are written once and read back from disk through the OS page cache, so there is no memory setting. `runnel` keeps Go's heap under 70% of the container's memory limit and leaves the rest to the page cache.
+The hybrid store (`hybrid:/var/lib/runnel`) keeps a small record of each active job in memory, about 290 bytes whatever the payload, and logs each change to disk. A second after a job finishes, it moves to an embedded store on disk (Pebble, inside the same binary and data directory), so keeping finished jobs for days costs disk, not memory. Waiting jobs past a quarter of the memory limit wait there too, in claim order, and come back in batches as workers reach them, so a backlog is bounded by disk, not memory. Payloads, results, meta and errors are written once and read back from disk through the OS page cache, so there is no memory setting. `runnel` keeps Go's heap under 70% of the container's memory limit and leaves the rest to the page cache.
 
 | `?sync=` | Answers after | A crash of the process loses | A crash of the machine loses |
 |---|---|---|---|
@@ -251,7 +251,7 @@ The hybrid store was measured on a different machine, a laptop with a SATA SSD t
 | Hybrid, `sync=off` | 240,000/s | 127,000 to 130,000/s | 0.03 ms |
 | Memory only | 300,000/s | 160,000 to 166,000/s | 0.02 ms |
 
-The store alone (`go test -bench Cycle ./store/hybrid`) claims and finishes 190,000 jobs/s in memory and 115,000 to 135,000 with `sync=periodic`. With `sync=each` every enqueue and result waits for a flush, so throughput grows with the number of jobs in flight, not with CPU. In a Docker container limited to 500 MB, `runnel bench` runs 500,000 jobs at 72,000/s and 1,000,000 at 41,000/s with `sync=periodic`, all enqueued before the first runs. Waiting jobs stay in memory, so a backlog of about 1,000,000 is the most such a container holds.
+The store alone (`go test -bench Cycle ./store/hybrid`) claims and finishes 190,000 jobs/s in memory and 115,000 to 135,000 with `sync=periodic`. With `sync=each` every enqueue and result waits for a flush, so throughput grows with the number of jobs in flight, not with CPU. In a Docker container limited to 500 MB and 4 CPUs, `runnel bench` runs 500,000 jobs at 72,000/s with `sync=periodic`, all enqueued before the first runs. Larger backlogs wait on disk: limited to 500 MB, 2 CPUs and a 7200 rpm hard disk, 2,000,000 jobs enqueue at 22,000/s and run at 9,000/s, and 1,000,000 jobs of 1 KB at 7,500/s and 4,000/s, with memory flat. Jobs brought back from disk run at the pace the disk allows.
 
 ## Development
 

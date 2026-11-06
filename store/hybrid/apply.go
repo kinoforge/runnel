@@ -67,6 +67,10 @@ func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, 
 	}
 	if retired {
 		t.unretired = append(t.unretired, id)
+		sp.unretiring[id]++
+		if old.is(stWaiting) && old.startBy != 0 {
+			sp.startBy.Delete(timeKey{old.startBy, id})
+		}
 	}
 	if key != c.Job.UniqueKey || !slices.Equal(deps, c.Job.DependsOn) {
 		j := *c.Job

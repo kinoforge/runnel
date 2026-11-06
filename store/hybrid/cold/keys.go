@@ -9,10 +9,14 @@ import (
 // Keys start with a kind byte and the namespace, ended by a zero byte, which
 // namespace names never contain.
 const (
-	kCount byte = 'c'
-	kJob   byte = 'j'
-	kState byte = 's'
-	kTime  byte = 't'
+	kCount    byte = 'c'
+	kDeadline byte = 'd'
+	kFuture   byte = 'f'
+	kJob      byte = 'j'
+	kTenant   byte = 'q'
+	kReady    byte = 'r'
+	kState    byte = 's'
+	kTime     byte = 't'
 )
 
 var errBadKey = errors.New("cold: damaged key or value")
@@ -42,7 +46,12 @@ func timeKey(ns string, at int64, id ID) []byte {
 	return append(binary.BigEndian.AppendUint64(prefix(kTime, ns, 8+len(id)), uint64(at)), id[:]...)
 }
 
-func countKey(c Count) []byte {
+// key is where c is stored: a tenant's count names its queue with a length,
+// so the tenant can follow it.
+func (c Count) key() []byte {
+	if c.Tenant != "" {
+		return append(appendStr(prefix(kTenant, c.NS, 1+len(c.Queue)+len(c.Tenant)), c.Queue), c.Tenant...)
+	}
 	return append(append(prefix(kCount, c.NS, 1+len(c.Queue)), c.State), c.Queue...)
 }
 
@@ -51,7 +60,14 @@ func decodeCountKey(k []byte) (Count, bool) {
 	if i < 1 || len(k) < i+2 {
 		return Count{}, false
 	}
-	return Count{NS: string(k[1:i]), State: k[i+1], Queue: string(k[i+2:])}, true
+	c := Count{NS: string(k[1:i])}
+	if k[0] == kTenant {
+		q, rest, ok := readStr(k[i+1:])
+		c.Queue, c.State, c.Tenant = q, Waiting, string(rest)
+		return c, ok && c.Tenant != ""
+	}
+	c.State, c.Queue = k[i+1], string(k[i+2:])
+	return c, true
 }
 
 // idOf reads the id that ends a key.
@@ -61,11 +77,19 @@ func idOf(k []byte) ID {
 	return id
 }
 
-// A record holds the state, finish time and names, then the caller's data.
+// A record holds the state, finish time, the order of a waiting job and the
+// names, then the caller's data.
 func encodeJob(j *Job) []byte {
-	b := make([]byte, 0, 1+binary.MaxVarintLen64+len(j.Queue)+len(j.Kind)+len(j.Tenant)+3+len(j.Data))
+	b := make([]byte, 0, 2+4*binary.MaxVarintLen64+len(j.Queue)+len(j.Kind)+len(j.Tenant)+3+len(j.Data))
 	b = append(b, j.State)
-	b = binary.AppendVarint(b, j.Finished)
+	for _, v := range []int64{j.Finished, int64(j.Prio), j.RunAt, j.StartBy} {
+		b = binary.AppendVarint(b, v)
+	}
+	ready := byte(0)
+	if j.Ready {
+		ready = 1
+	}
+	b = append(b, ready)
 	b = appendStr(appendStr(appendStr(b, j.Queue), j.Kind), j.Tenant)
 	return append(b, j.Data...)
 }
@@ -76,12 +100,20 @@ func decodeJob(ns string, id ID, v []byte, data bool) (Job, error) {
 		return j, errBadKey
 	}
 	j.State = v[0]
-	at, n := binary.Varint(v[1:])
-	if n <= 0 {
+	v = v[1:]
+	var prio int64
+	for _, p := range []*int64{&j.Finished, &prio, &j.RunAt, &j.StartBy} {
+		at, n := binary.Varint(v)
+		if n <= 0 {
+			return j, errBadKey
+		}
+		*p, v = at, v[n:]
+	}
+	if len(v) < 1 {
 		return j, errBadKey
 	}
-	j.Finished = at
-	q, k, t, rest, ok := readNames(v[1+n:])
+	j.Prio, j.Ready = int32(prio), v[0] == 1
+	q, k, t, rest, ok := readNames(v[1:])
 	if !ok {
 		return j, errBadKey
 	}

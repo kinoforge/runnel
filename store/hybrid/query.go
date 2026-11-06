@@ -220,7 +220,8 @@ func (sp *space) newest(trees []*idTree, f filter, cur uid, hasCur bool, limit i
 
 func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.Time, limit int) ([]*runnel.Job, error) {
 	at := ms(now)
-	var out []draft
+	var ds []draft
+	var want []timeKey
 	err := s.read(ns, func(sp *space) error {
 		var t *timeTree
 		var due func(int64) bool
@@ -233,19 +234,53 @@ func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.
 			return fmt.Errorf("runnel: unknown due kind %d", kind)
 		}
 		t.Ascend(func(k timeKey) bool {
-			if !due(k.at) || len(out) >= limit {
+			if !due(k.at) || len(want) >= limit {
 				return false
 			}
-			h, _ := sp.get(k.id)
-			out = append(out, sp.draft(&h))
+			want = append(want, k)
+			if h, ok := sp.get(k.id); ok {
+				ds = append(ds, sp.draft(&h))
+			}
 			return true
 		})
 		return nil
 	})
+	if err != nil || len(want) == len(ds) {
+		return s.rebuild(ns, ds)
+	}
+	ids := make([]uid, len(want))
+	for i, k := range want {
+		ids[i] = k.id
+	}
+	jobs, err := s.gather(ns, ids, ds)
 	if err != nil {
 		return nil, err
 	}
-	return s.rebuild(ns, out)
+	return s.dropGone(ns, want, jobs)
+}
+
+// dropGone drops from the start deadline index the entries of want whose job
+// no longer waits, in memory or in the cold store, which a job leaving the
+// cold store while Due read it may leave behind; it returns the jobs that
+// still wait.
+func (s *Store) dropGone(ns string, want []timeKey, jobs []*runnel.Job) ([]*runnel.Job, error) {
+	waiting := make(map[uid]bool, len(jobs))
+	out := jobs[:0]
+	for _, j := range jobs {
+		if j.State == runnel.StateWaiting {
+			id, _ := parseID(j.ID)
+			waiting[id] = true
+			out = append(out, j)
+		}
+	}
+	return out, s.read(ns, func(sp *space) error {
+		for _, k := range want {
+			if _, ok := sp.get(k.id); !ok && !waiting[k.id] {
+				sp.startBy.Delete(k)
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Store) Events(_ context.Context, ns string, after int64, limit int) ([]runnel.Event, error) {

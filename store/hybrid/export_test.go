@@ -5,7 +5,13 @@ import "time"
 // OpenRetiring opens a store whose finished jobs move to the cold store after
 // age, checked every tick.
 func OpenRetiring(opt Options, age, tick time.Duration) (*Store, error) {
-	return open(opt, age, tick)
+	return open(opt, tune{retireAfter: age, retireEvery: tick, spillEvery: tick, hotJobs: defaultHot})
+}
+
+// OpenSpilling opens a store that holds at most hot waiting jobs in memory,
+// checked every tick, and moves finished jobs to the cold store at once.
+func OpenSpilling(opt Options, hot int64, tick time.Duration) (*Store, error) {
+	return open(opt, tune{retireAfter: time.Nanosecond, retireEvery: tick, spillEvery: tick, hotJobs: hot})
 }
 
 // Cold returns how many jobs of ns the cold store holds.

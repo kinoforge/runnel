@@ -1,0 +1,146 @@
+package hybrid_test
+
+import (
+	"context"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/store/hybrid"
+)
+
+// TestWaitingJobsLeaveMemory lets every waiting job move to the cold store and
+// checks they keep claim order, survive a restart, and still answer to reads,
+// unique keys, cancels and queue limits.
+func TestWaitingJobsLeaveMemory(t *testing.T) {
+	const n = 3000
+	opt := hybrid.Options{Dir: t.TempDir()}
+	s, err := hybrid.OpenSpilling(opt, 0, 2*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	c := runnel.NewClient(s, ns)
+	later := time.Now().Add(time.Hour)
+	var jobs []*runnel.Job
+	for i := range n {
+		opts := []runnel.Option{runnel.Priority(i % 3)}
+		if i%10 == 0 {
+			opts = append(opts, runnel.Priority(5), runnel.At(later))
+		}
+		j, err := runnel.NewJob("q", "k", map[string]int{"n": i}, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jobs = append(jobs, j)
+	}
+	jobs[1].UniqueKey = "only"
+	for part := range slices.Chunk(jobs, 1000) {
+		if _, err := c.EnqueueJobs(ctx, part); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	waitCold(t, s, n)
+	_ = s.Close()
+	if s, err = hybrid.OpenSpilling(opt, 0, 2*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	c = runnel.NewClient(s, ns)
+	waitCold(t, s, n)
+	if st, _ := c.Stats(ctx); st[0].Counts[runnel.StateWaiting] != n {
+		t.Fatalf("stats %+v", st)
+	}
+	if got, err := c.Get(ctx, jobs[7].ID); err != nil || got.State != runnel.StateWaiting {
+		t.Fatalf("get %+v %v", got, err)
+	}
+	if page, _, _ := c.List(ctx, runnel.Query{State: runnel.StateWaiting, Limit: 10}); len(page) != 10 {
+		t.Fatalf("listed %d", len(page))
+	}
+	dup, _ := runnel.NewJob("q", "k", nil)
+	dup.UniqueKey = "only"
+	if res, err := c.EnqueueJobs(ctx, []*runnel.Job{dup}); err != nil || !res[0].Duplicate || res[0].ID != jobs[1].ID {
+		t.Fatalf("unique key held in the cold store: %+v %v", res, err)
+	}
+	if _, err := c.Cancel(ctx, jobs[2].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetQueue(ctx, runnel.QueueConfig{Name: "q", MaxQueued: n - 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Enqueue(ctx, "q", "k", nil); err == nil {
+		t.Fatal("queue full of cold jobs took one more")
+	}
+	claimInOrder(t, s, now, n-n/10-1)
+	claimInOrder(t, s, later, n/10)
+}
+
+// TestClaimOrderAcrossMemoryAndCold keeps part of a backlog in memory while
+// jobs ahead of and behind it in claim order come in, and checks claims still
+// follow claim order.
+func TestClaimOrderAcrossMemoryAndCold(t *testing.T) {
+	s, err := hybrid.OpenSpilling(hybrid.Options{Dir: t.TempDir()}, 500, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+	c := runnel.NewClient(s, ns)
+	add := func(n, prio int) {
+		for range n {
+			if _, err := c.Enqueue(ctx, "q", "k", nil, runnel.Priority(prio)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	add(3000, 0)
+	waitCold(t, s, 2500)
+	add(300, 9)
+	add(300, 0)
+	add(300, 4)
+	claimInOrder(t, s, time.Now(), 3900)
+}
+
+// claimInOrder claims want jobs at now, a few at a time, and checks they come
+// in claim order: higher priority, then earlier run time, then id.
+func claimInOrder(t *testing.T, s *hybrid.Store, now time.Time, want int) {
+	t.Helper()
+	var got []*runnel.Job
+	for {
+		batch, err := s.Claim(context.Background(), ns, runnel.ClaimRequest{Queues: []string{"q"}, Worker: "w", Limit: 97, Lease: time.Hour, Now: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		got = append(got, batch...)
+	}
+	if len(got) != want {
+		t.Fatalf("claimed %d at %v, want %d", len(got), now, want)
+	}
+	sorted := slices.IsSortedFunc(got, func(a, b *runnel.Job) int {
+		if a.Priority != b.Priority {
+			return b.Priority - a.Priority
+		}
+		if c := a.RunAt.Compare(b.RunAt); c != 0 {
+			return c
+		}
+		return compareStr(a.ID, b.ID)
+	})
+	if !sorted {
+		t.Fatal("claims out of order")
+	}
+}
+
+func compareStr(a, b string) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
+}

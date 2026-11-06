@@ -18,19 +18,35 @@ func (s *Store) Claim(_ context.Context, ns string, req runnel.ClaimRequest) ([]
 	if req.Limit <= 0 || len(req.Queues) == 0 {
 		return nil, nil
 	}
+	if sp := s.space(ns); sp.spilled.Load() && s.cold != nil {
+		if err := s.wake(sp, req); err != nil {
+			return nil, err
+		}
+	}
+	out, held, err := s.claim(ns, req)
+	if err == nil && len(held) > 0 && len(out) < req.Limit {
+		out, err = s.claimCold(ns, req, out)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.rebuild(ns, out)
+}
+
+// claim runs one claim and returns, with the jobs it took, the queues whose
+// next job waits in the cold store.
+func (s *Store) claim(ns string, req runnel.ClaimRequest) ([]draft, []string, error) {
 	var out []draft
+	var held []string
 	err := s.lease(ns, func(t *tx) error {
 		c := claimer{s: s, t: t, sp: t.sp, req: req, now: ms(req.Now), buckets: map[string]*token{}, full: map[countKey]bool{}}
 		c.lease = c.now + req.Lease.Milliseconds()
 		c.worker = t.sp.syms.id(req.Worker)
 		c.run()
-		out = c.out
+		out, held = c.out, c.held
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return s.rebuild(ns, out)
+	return out, held, err
 }
 
 type claimer struct {
@@ -42,6 +58,7 @@ type claimer struct {
 	lease   int64
 	worker  sym
 	out     []draft
+	held    []string
 	buckets map[string]*token
 	full    map[countKey]bool
 }
@@ -150,16 +167,22 @@ func (c *claimer) byID(open []sym) {
 func (c *claimer) ready(open []sym) {
 	h := &merge{}
 	for _, q := range open {
-		if t := c.sp.ready[q]; t != nil {
-			if cur := (&cursor{t: t}); cur.fill() {
-				h.items = append(h.items, cur)
-			}
+		t, stop := c.sp.ready[q], c.sp.stop(q)
+		if t == nil && stop == nil {
+			continue
+		}
+		if cur := (&cursor{t: t, stop: stop, q: q}); cur.fill() {
+			h.items = append(h.items, cur)
 		}
 	}
 	heap.Init(h)
 	examined := 0
 	for h.Len() > 0 && len(c.out) < c.req.Limit && examined < maxExamine {
 		cur := h.items[0]
+		if cur.held() {
+			c.held = append(c.held, c.sp.syms.name(cur.q))
+			return
+		}
 		if j, ok := c.sp.get(cur.head().id); ok && j.is(stWaiting) {
 			if c.admit(&j) {
 				c.take(j)
@@ -176,9 +199,12 @@ func (c *claimer) ready(open []sym) {
 }
 
 // cursor walks one ready tree a page at a time, resuming after the last key it
-// returned, so claiming from the tree while walking it is safe.
+// returned, so claiming from the tree while walking it is safe. It stops at
+// stop, the queue's head in the cold store, and is then held there.
 type cursor struct {
 	t    *readyTree
+	stop *readyKey
+	q    sym
 	page []readyKey
 	last *readyKey
 }
@@ -189,18 +215,30 @@ func (c *cursor) fill() bool {
 		if c.last != nil && !lessReady(*c.last, k) {
 			return true
 		}
+		if c.stop != nil && !lessReady(k, *c.stop) {
+			return false
+		}
 		c.page = append(c.page, k)
 		return len(c.page) < pageSize
 	}
-	if c.last == nil {
+	switch {
+	case c.t == nil:
+	case c.last == nil:
 		c.t.Ascend(visit)
-	} else {
+	default:
 		c.t.AscendGreaterOrEqual(*c.last, visit)
 	}
-	return len(c.page) > 0
+	return len(c.page) > 0 || c.stop != nil
 }
 
-func (c *cursor) head() readyKey { return c.page[0] }
+func (c *cursor) held() bool { return len(c.page) == 0 }
+
+func (c *cursor) head() readyKey {
+	if c.held() {
+		return *c.stop
+	}
+	return c.page[0]
+}
 
 func (c *cursor) next() bool {
 	k := c.page[0]

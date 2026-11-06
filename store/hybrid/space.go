@@ -3,12 +3,12 @@ package hybrid
 import (
 	"cmp"
 	"encoding/binary"
-	"encoding/json"
 	"sync"
 	"sync/atomic"
 
 	"github.com/google/btree"
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
 const degree = 32
@@ -106,6 +106,18 @@ type space struct {
 	coldCounts map[string]*[stCount]int64
 	retired    atomic.Uint64
 	coldSeq    int64
+	// coldQueued counts the waiting jobs in the cold store by queue and
+	// tenant; heads holds the front of each queue's jobs there.
+	coldQueued map[[2]string]int64
+	heads      map[sym]cold.Head
+	spilled    atomic.Bool
+	// hot counts the waiting jobs in memory; total, the store's count of
+	// them, too.
+	hot   atomic.Int64
+	total *atomic.Int64
+	// unretiring counts, by id, the calls that brought a job back from the
+	// cold store and have yet to delete it there; such jobs stay in memory.
+	unretiring map[uid]int
 	// coldMax is the largest id put in the cold store. Ids are time-ordered,
 	// so a new job's id is larger and needs no lookup there.
 	coldMax atomic.Pointer[uid]
@@ -142,6 +154,7 @@ type space struct {
 func newSpace(ns string) *space {
 	sp := &space{
 		ns: ns, syms: newSyms(), idx: map[uid]int32{}, cache: cache{bodies: map[uid][]byte{}}, coldCounts: map[string]*[stCount]int64{},
+		coldQueued: map[[2]string]int64{}, heads: map[sym]cold.Head{}, unretiring: map[uid]int{},
 		uniques: map[string]unique{}, expiry: btree.NewG(degree, lessUnique), kids: map[uid][]uid{},
 		cursors: map[string]int64{}, configs: map[runnel.ConfigKind]map[string][]byte{}, buckets: map[string]bucket{},
 		ready: map[sym]*readyTree{}, sched: map[sym]*timeTree{}, poll: map[sym]*timeTree{},
@@ -234,6 +247,10 @@ func (sp *space) body(h *job, fs *files) ([]byte, error) {
 
 func (sp *space) count(h *job, d int) {
 	key := [2]sym{h.queue, h.tenant}
+	if h.state == stWaiting {
+		sp.hot.Add(int64(d))
+		sp.total.Add(int64(d))
+	}
 	switch h.state {
 	case stWaiting, stBlocked:
 		if h.tenant != 0 {
@@ -340,61 +357,4 @@ func (sp *space) promote(q sym, now int64) {
 			treeOf(sp.ready, q, lessReady).ReplaceOrInsert(readyOf(&h))
 		}
 	}
-}
-
-func (sp *space) setUnique(key string, u unique) {
-	sp.dropUnique(key)
-	sp.uniques[key] = u
-	if u.until > 0 {
-		sp.expiry.ReplaceOrInsert(uniqueKey{u.until, key})
-	}
-}
-
-func (sp *space) dropUnique(key string) {
-	if old, ok := sp.uniques[key]; ok {
-		sp.expiry.Delete(uniqueKey{old.until, key})
-		delete(sp.uniques, key)
-	}
-}
-
-func (sp *space) setConfig(kind runnel.ConfigKind, name string, val []byte) {
-	m := sp.configs[kind]
-	if m == nil {
-		m = map[string][]byte{}
-		sp.configs[kind] = m
-	}
-	m[name] = val
-	sp.queueCfg, sp.resourceCfg = nil, nil
-}
-
-func (sp *space) delConfig(kind runnel.ConfigKind, name string) {
-	delete(sp.configs[kind], name)
-	sp.queueCfg, sp.resourceCfg = nil, nil
-}
-
-func (sp *space) queueConfig(q string) runnel.QueueConfig {
-	if sp.queueCfg == nil {
-		sp.queueCfg = decodeAll[runnel.QueueConfig](sp.configs[runnel.ConfigQueue])
-	}
-	return sp.queueCfg[q]
-}
-
-func (sp *space) resourceConfig(r string) runnel.ResourceConfig {
-	if sp.resourceCfg == nil {
-		sp.resourceCfg = decodeAll[runnel.ResourceConfig](sp.configs[runnel.ConfigResource])
-	}
-	return sp.resourceCfg[r]
-}
-
-// decodeAll skips values that do not decode; the client validates configs
-// before it stores them.
-func decodeAll[T any](raw map[string][]byte) map[string]T {
-	out := make(map[string]T, len(raw))
-	for name, b := range raw {
-		var v T
-		if json.Unmarshal(b, &v) == nil {
-			out[name] = v
-		}
-	}
-	return out
 }

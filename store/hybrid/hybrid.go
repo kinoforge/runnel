@@ -47,10 +47,14 @@ type Store struct {
 	snapBytes atomic.Int64
 	// cold holds finished jobs once they leave memory; coldMu keeps moving
 	// them there apart from pruning them.
-	cold        *cold.Store
-	coldMu      sync.Mutex
-	retireAfter time.Duration
-	retireEvery time.Duration
+	cold   *cold.Store
+	coldMu sync.Mutex
+	// waitMu keeps moving waiting jobs to and from the cold store apart from
+	// each other and from deleting the jobs a call brought back.
+	waitMu sync.Mutex
+	tune   tune
+	// hot counts the waiting jobs in memory.
+	hot atomic.Int64
 
 	mu     sync.RWMutex
 	spaces map[string]*space
@@ -69,10 +73,20 @@ func Memory() *Store {
 	return &Store{spaces: map[string]*space{}, done: make(chan struct{})}
 }
 
-// Open loads the store in opt.Dir, replaying its snapshot and log.
-func Open(opt Options) (*Store, error) { return open(opt, retireAfter, retireEvery) }
+// tune holds the timings and sizes of the background work; tests shrink them.
+type tune struct {
+	retireAfter, retireEvery time.Duration
+	spillEvery               time.Duration
+	// hotJobs is how many waiting jobs memory holds.
+	hotJobs int64
+}
 
-func open(opt Options, after, every time.Duration) (*Store, error) {
+// Open loads the store in opt.Dir, replaying its snapshot and log.
+func Open(opt Options) (*Store, error) {
+	return open(opt, tune{retireAfter: retireAfter, retireEvery: retireEvery, spillEvery: spillEvery, hotJobs: hotBudget()})
+}
+
+func open(opt Options, tn tune) (*Store, error) {
 	s := Memory()
 	if opt.Dir == "" {
 		return s, nil
@@ -80,7 +94,7 @@ func open(opt Options, after, every time.Duration) (*Store, error) {
 	if opt.SnapshotBytes <= 0 {
 		opt.SnapshotBytes = defaultSnapshotBytes
 	}
-	s.opt, s.retireAfter, s.retireEvery = opt, after, every
+	s.opt, s.tune = opt, tn
 	s.files = &files{path: s.filePath, open: map[uint32]*os.File{}}
 	l, err := wal.Open(opt.Dir, wal.Options{Sync: opt.Sync, Interval: opt.SyncInterval})
 	if err != nil {
@@ -95,9 +109,10 @@ func open(opt Options, after, every time.Duration) (*Store, error) {
 		}
 		return nil, err
 	}
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.checkpointer()
 	go s.retirer()
+	go s.spiller()
 	return s, nil
 }
 
@@ -137,10 +152,13 @@ func (s *Store) load() error {
 	if err := s.recover(); err != nil {
 		return err
 	}
+	if err := s.loadWaiting(); err != nil {
+		return err
+	}
 	if err := s.log.Start(); err != nil {
 		return err
 	}
-	return s.retire(math.MaxInt64)
+	return s.retire(math.MaxInt64, true)
 }
 
 func (s *Store) space(ns string) *space {
@@ -155,6 +173,7 @@ func (s *Store) space(ns string) *space {
 	sp = s.spaces[ns]
 	if sp == nil {
 		sp = newSpace(ns)
+		sp.total = &s.hot
 		s.spaces[ns] = sp
 	}
 	return sp
@@ -200,7 +219,11 @@ func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
 		c.logErr = s.log.Wait(c.pos.LSN)
 	}
 	if c.logErr == nil && len(c.t.unretired) > 0 {
+		s.coldMu.Lock()
+		s.waitMu.Lock()
 		c.logErr = s.unretire(sp, c.t.unretired)
+		s.waitMu.Unlock()
+		s.coldMu.Unlock()
 	}
 	if c.logErr != nil {
 		s.fail(c.logErr)

@@ -26,19 +26,31 @@ func TestConformanceDiskRetiring(t *testing.T) {
 	conformOnDisk(t, hybrid.Options{SnapshotBytes: 1 << 14}, time.Nanosecond, 5*time.Millisecond)
 }
 
+// TestConformanceDiskSpilling holds no waiting job in memory longer than a
+// few milliseconds, so every rule also runs against jobs waiting in the cold
+// store.
+func TestConformanceDiskSpilling(t *testing.T) {
+	opt := hybrid.Options{Dir: t.TempDir(), SnapshotBytes: 1 << 14}
+	conformWith(t, func() (*hybrid.Store, error) { return hybrid.OpenSpilling(opt, 0, 5*time.Millisecond) })
+}
+
 func conformOnDisk(t *testing.T, opt hybrid.Options, retire ...time.Duration) {
 	opt.Dir = t.TempDir()
+	conformWith(t, func() (*hybrid.Store, error) {
+		if len(retire) == 2 {
+			return hybrid.OpenRetiring(opt, retire[0], retire[1])
+		}
+		return hybrid.Open(opt)
+	})
+}
+
+func conformWith(t *testing.T, open func() (*hybrid.Store, error)) {
 	var once sync.Once
 	var s *hybrid.Store
 	storetest.Run(t, func(t *testing.T) runnel.Store {
 		once.Do(func() {
 			var err error
-			if len(retire) == 2 {
-				s, err = hybrid.OpenRetiring(opt, retire[0], retire[1])
-			} else {
-				s, err = hybrid.Open(opt)
-			}
-			if err != nil {
+			if s, err = open(); err != nil {
 				t.Fatal(err)
 			}
 		})

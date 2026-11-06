@@ -17,6 +17,9 @@ func (s *Store) Insert(_ context.Context, ns string, jobs []*runnel.Job, now tim
 			bodies[i] = encodeBody(j)
 		}
 	}
+	if err := s.makeRoom(); err != nil {
+		return nil, err
+	}
 	known, gen, err := s.coldKnown(ns, jobs)
 	if err != nil {
 		return nil, err
@@ -92,7 +95,15 @@ func (in *inserter) coldState(id uid) (uint8, bool) {
 		st, ok := in.known[id]
 		return st, ok
 	}
-	j, ok, err := in.s.cold.Meta(sp.ns, cold.ID(id))
+	return in.lookup(id)
+}
+
+// lookup reads the state of id from the cold store.
+func (in *inserter) lookup(id uid) (uint8, bool) {
+	if in.s.cold == nil || !in.t.sp.mayBeCold(id) {
+		return 0, false
+	}
+	j, ok, err := in.s.cold.Meta(in.t.sp.ns, cold.ID(id))
 	if err != nil && in.err == nil {
 		in.err = err
 	}
@@ -204,6 +215,9 @@ func (in *inserter) held(id uid, key string) string {
 	if h, ok := sp.get(u.id); ok && !h.final() {
 		return u.id.String()
 	}
+	if st, ok := in.lookup(u.id); ok && !final(st) {
+		return u.id.String()
+	}
 	return ""
 }
 
@@ -214,11 +228,24 @@ func (in *inserter) full(j *runnel.Job) error {
 	if !known {
 		return nil
 	}
-	if c := sp.counts[qs]; q.MaxQueued > 0 && c != nil && c[stWaiting]+c[stBlocked] >= int64(q.MaxQueued) {
-		return runnel.ErrQueueFull
+	if q.MaxQueued > 0 {
+		n := int64(0)
+		if c := sp.counts[qs]; c != nil {
+			n += c[stWaiting] + c[stBlocked]
+		}
+		if c := sp.coldCounts[j.Queue]; c != nil {
+			n += c[stWaiting]
+		}
+		if n >= int64(q.MaxQueued) {
+			return runnel.ErrQueueFull
+		}
 	}
 	if j.Tenant != "" && q.TenantMaxQueued > 0 {
-		if ts, ok := sp.syms.find(j.Tenant); ok && sp.queued[[2]sym{qs, ts}] >= q.TenantMaxQueued {
+		n := sp.coldQueued[[2]string{j.Queue, j.Tenant}]
+		if ts, ok := sp.syms.find(j.Tenant); ok {
+			n += int64(sp.queued[[2]sym{qs, ts}])
+		}
+		if n >= int64(q.TenantMaxQueued) {
 			return runnel.ErrTenantFull
 		}
 	}
