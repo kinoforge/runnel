@@ -265,6 +265,16 @@ func (c *Client) Retry(ctx context.Context, id string) (*runnel.Job, error) {
 	return &j, c.do(ctx, http.MethodPost, c.path("/jobs/"+url.PathEscape(id)+"/retry"), struct{}{}, &j)
 }
 
+// SetQueue creates or replaces a queue's settings; the key needs the admin role.
+func (c *Client) SetQueue(ctx context.Context, q runnel.QueueConfig) error {
+	return c.do(ctx, http.MethodPut, c.path("/queues/"+url.PathEscape(q.Name)), q, nil)
+}
+
+// SetPool creates or replaces a pool's settings; the key needs the admin role.
+func (c *Client) SetPool(ctx context.Context, p runnel.PoolConfig) error {
+	return c.do(ctx, http.MethodPut, c.path("/pools/"+url.PathEscape(p.Name)), p, nil)
+}
+
 func (c *Client) Stats(ctx context.Context) ([]runnel.QueueStats, error) {
 	var out struct {
 		Queues []runnel.QueueStats `json:"queues"`

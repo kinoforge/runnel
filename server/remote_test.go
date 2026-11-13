@@ -186,3 +186,25 @@ func TestWaitModes(t *testing.T) {
 		t.Fatalf("remote full queue: %v", err)
 	}
 }
+
+func TestRemoteSettings(t *testing.T) {
+	spec.Rule(t, "S12")
+	srv, _ := setup(t)
+	call(t, srv, admin, "PUT", "/v1/namespaces/gate", nil)
+	ctx := context.Background()
+	owner := remote.New(srv.URL, key(t, srv, "gate", "admin"), "gate")
+	if err := owner.SetQueue(ctx, runnel.QueueConfig{Name: "image", MaxQueued: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.SetPool(ctx, runnel.PoolConfig{Name: "m.flux", Slots: 2, GroupSlots: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := call(t, srv, admin, "GET", "/v1/ns/gate/pools/m.flux", nil); code != 200 || body["slots"] != float64(2) || body["group_slots"] != float64(1) {
+		t.Fatalf("pool read back: %d %v", code, body)
+	}
+	producer := remote.New(srv.URL, key(t, srv, "gate", "producer"), "gate")
+	var apiErr *remote.APIError
+	if err := producer.SetPool(ctx, runnel.PoolConfig{Name: "m.flux", Slots: 9}); !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden {
+		t.Fatalf("producer set a pool: %v", err)
+	}
+}

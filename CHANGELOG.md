@@ -13,6 +13,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `runnel` keeps Go's heap under 70% of the container's memory limit unless `GOMEMLIMIT` is set.
 - Config sections `memory` and `hybrid` override every size and timing of the hybrid store; `hybrid.Options` and `cold.Options` take them in Go, defaults in `hybrid.DefaultOptions`.
 - `runnel bench -payload` sets the payload size.
+- `remote.Client.SetQueue` and `SetPool` change settings over HTTP with an admin key.
 - Deadlines: `deadline` or `ttl` on a job (`runnel.Deadline`, `runnel.TTL`), or `ttl` on a queue. A job not completed by then ends `expired` from any state; a running handler's context ends with `ErrDeadline`. `start_timeout` and `timeout` must fit before it.
 - A queue's `wait` is the default `Prefer: wait` of an HTTP enqueue.
 - `Client.Queue` reads a queue's settings; `Client.Refresh` drops the cached ones.

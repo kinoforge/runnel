@@ -161,3 +161,4 @@ What a handler returns decides what happens to the job next.
 - **S09** Setting a queue, pool or schedule needs the name in the body to match the path.
 - **S10** `/openapi.yaml` documents exactly the routes the server serves.
 - **S11** `/healthz` answers 200 while the store answers and 503 when it does not. `/metrics` serves Prometheus metrics.
+- **S12** The remote client sets a queue or a pool (`SetQueue`, `SetPool`) with an admin key; a key without the admin role is 403.
