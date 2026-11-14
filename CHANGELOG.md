@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.0.2-alpha] - 2026-11-14
+
 ### Added
 
 - Settings for what was fixed before. Server: `max_batch`, `max_delay`, `max_claim_queues`, `max_claim`, `default_lease`, `min_lease`, `max_lease`, `max_extend`, `key_cache_ttl`, `health_timeout`. Callbacks: `max_attempts`, `backoff_base`, `backoff_max`, `max_retry_after`, `unique_for`, `secret_ttl`. Limits: `max_meta_key`, `max_meta_value`. Tracing: `flush_timeout`.
@@ -16,11 +18,13 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - `runnel.CallbackReader` replaces `ReadCallback`, with a settable body limit.
 - `NewCallbackJob` takes a `CallbackConfig` instead of a queue name.
+- Go 1.27.4 and the latest modules, tools and GitHub Actions.
+- Releases are signed as cosign bundles. Verify with `cosign verify-blob --bundle checksums.txt.sigstore.json`.
 - A heartbeat may extend 10,000 jobs by default instead of 1,000, so remote workers with more than 1,000 slots keep their leases.
 
 ### Fixed
 
-- The Docker image is built with Go 1.26.11, which fixes the `net/http` crash (GO-2026-6859). The 0.0.1-alpha image was built with 1.26.10.
+- The Docker image is built with Go 1.27.4, which fixes the `net/http` crash (GO-2026-6859). The 0.0.1-alpha image was built with 1.26.10.
 
 ## [0.0.1-alpha] - 2026-11-14
 
@@ -50,5 +54,6 @@ First release, for trying Runnel out. The model is settled; the API may still ch
 - Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
 - SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.1-alpha...HEAD
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.2-alpha...HEAD
+[0.0.2-alpha]: https://github.com/kinoforge/runnel/compare/v0.0.1-alpha...v0.0.2-alpha
 [0.0.1-alpha]: https://github.com/kinoforge/runnel/releases/tag/v0.0.1-alpha
