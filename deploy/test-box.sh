@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-image=${BOX_IMAGE:-golang:1.26.11-alpine}
+image=${BOX_IMAGE:-golang:1.27.4-alpine}
 cpus=${BOX_CPUS:-1}
 memory=${BOX_MEMORY:-2g}
 iops=${BOX_IOPS:-150}
