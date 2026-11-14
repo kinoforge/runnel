@@ -94,10 +94,13 @@ func serve(ctx context.Context, args []string) error {
 		}()
 		handler = tracing.Handler(api, tp)
 	}
-	hs := httpServer(cfg.Server, handler)
+	hs, err := httpServer(cfg.Server, handler)
+	if err != nil {
+		return err
+	}
 	errc := make(chan error, 1)
-	go func() { errc <- hs.ListenAndServe() }()
-	log.Info("runnel listening", "addr", cfg.Server.Addr, "admin", cfg.Server.AdminToken != "")
+	go func() { errc <- listen(hs) }()
+	logListening(log, cfg.Server)
 	select {
 	case err := <-errc:
 		return err
@@ -116,6 +119,10 @@ func serve(ctx context.Context, args []string) error {
 func serverConfig(cfg config.Config, log *slog.Logger) server.Config {
 	return server.Config{
 		AdminToken:         cfg.Server.AdminToken,
+		AdminUser:          cfg.Server.AdminUser,
+		NoAuth:             cfg.Server.Auth == config.AuthNone,
+		CertAdmin:          cfg.Server.TLS.ClientCA != "",
+		CertNames:          cfg.Server.TLS.ClientNames,
 		Version:            buildVersion(),
 		MaxBody:            cfg.Server.MaxBody,
 		Limits:             runnel.Limits(cfg.Limits),
@@ -137,8 +144,8 @@ func serverConfig(cfg config.Config, log *slog.Logger) server.Config {
 	}
 }
 
-func httpServer(cfg config.Server, h http.Handler) *http.Server {
-	return &http.Server{
+func httpServer(cfg config.Server, h http.Handler) (*http.Server, error) {
+	hs := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           h,
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
@@ -146,6 +153,30 @@ func httpServer(cfg config.Server, h http.Handler) *http.Server {
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
 		MaxHeaderBytes:    cfg.MaxHeaderBytes,
+	}
+	if !cfg.TLS.Enabled() {
+		return hs, nil
+	}
+	tc, err := cfg.TLS.Build()
+	if err != nil {
+		return nil, err
+	}
+	hs.TLSConfig = tc
+	return hs, nil
+}
+
+func listen(hs *http.Server) error {
+	if hs.TLSConfig != nil {
+		return hs.ListenAndServeTLS("", "")
+	}
+	return hs.ListenAndServe()
+}
+
+func logListening(log *slog.Logger, cfg config.Server) {
+	log.Info("runnel listening", "addr", cfg.Addr, "tls", cfg.TLS.Enabled(), "auth", cfg.Auth,
+		"admin", cfg.AdminToken != "", "client_certs", cfg.TLS.ClientCA != "")
+	if cfg.Auth == config.AuthNone {
+		log.Warn("auth is off: every request acts as admin; keep this server on a private network")
 	}
 }
 

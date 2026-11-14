@@ -46,25 +46,58 @@ func (p principal) can(ns, role string) bool {
 }
 
 func (s *Server) authenticate(r *http.Request) (principal, bool) {
+	if s.cfg.NoAuth || s.certAdmin(r) {
+		return principal{admin: true}, true
+	}
+	if user, pass, ok := r.BasicAuth(); ok {
+		if user == s.cfg.AdminUser {
+			return s.adminSecret(pass)
+		}
+		return s.apiKey(r.Context(), runnel.APIKeyToken(user, pass))
+	}
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || token == "" || len(token) > maxTokenLen {
+	if !ok {
 		return principal{}, false
 	}
-	if s.hasRoot {
-		sum := sha256.Sum256([]byte(token))
-		if subtle.ConstantTimeCompare(sum[:], s.admin[:]) == 1 {
-			return principal{admin: true}, true
-		}
+	if p, ok := s.adminSecret(token); ok {
+		return p, true
 	}
+	return s.apiKey(r.Context(), token)
+}
+
+func (s *Server) adminSecret(secret string) (principal, bool) {
+	if !s.hasRoot || secret == "" || len(secret) > maxTokenLen {
+		return principal{}, false
+	}
+	sum := sha256.Sum256([]byte(secret))
+	if subtle.ConstantTimeCompare(sum[:], s.admin[:]) != 1 {
+		return principal{}, false
+	}
+	return principal{admin: true}, true
+}
+
+func (s *Server) apiKey(ctx context.Context, token string) (principal, bool) {
 	id, secret, ok := runnel.ParseAPIKey(token)
 	if !ok {
 		return principal{}, false
 	}
-	e, ok := s.lookupKey(r.Context(), id)
+	e, ok := s.lookupKey(ctx, id)
 	if !ok || !e.key.Matches(secret, time.Now()) {
 		return principal{}, false
 	}
 	return principal{ns: e.ns, key: e.key}, true
+}
+
+func (s *Server) certAdmin(r *http.Request) bool {
+	if !s.cfg.CertAdmin || r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.VerifiedChains[0]) == 0 {
+		return false
+	}
+	if len(s.cfg.CertNames) == 0 {
+		return true
+	}
+	leaf := r.TLS.VerifiedChains[0][0]
+	named := func(n string) bool { return slices.Contains(s.cfg.CertNames, n) }
+	return named(leaf.Subject.CommonName) || slices.ContainsFunc(leaf.DNSNames, named)
 }
 
 func (s *Server) lookupKey(ctx context.Context, id string) (keyEntry, bool) {

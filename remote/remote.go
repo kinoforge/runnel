@@ -28,7 +28,7 @@ const (
 // Client talks to a Runnel server for one namespace.
 type Client struct {
 	base       string
-	key        string
+	auth       func(*http.Request)
 	ns         string
 	http       *http.Client
 	resultWait time.Duration
@@ -38,8 +38,27 @@ type Client struct {
 // New returns a client for the server at baseURL, authenticating with an API
 // key.
 func New(baseURL, key, namespace string) *Client {
-	return &Client{base: strings.TrimRight(baseURL, "/"), key: key, ns: namespace, http: &http.Client{Timeout: httpTimeout},
+	return &Client{base: strings.TrimRight(baseURL, "/"), auth: bearer(key), ns: namespace, http: &http.Client{Timeout: httpTimeout},
 		resultWait: resultWait, claimWait: workerClaimWait}
+}
+
+func Open(rawURL, namespace string) (*Client, error) {
+	e, err := ParseURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	c := New(e.Base, "", namespace)
+	c.auth = e.Authorize
+	c.http = e.HTTPClient(httpTimeout)
+	return c, nil
+}
+
+func bearer(key string) func(*http.Request) {
+	return func(r *http.Request) {
+		if key != "" {
+			r.Header.Set("Authorization", "Bearer "+key)
+		}
+	}
 }
 
 func (c *Client) WithWaits(result, claim time.Duration) *Client {
@@ -110,7 +129,7 @@ func (c *Client) send(ctx context.Context, method, path string, in, out any, hea
 		return 0, err
 	}
 	maps.Copy(req.Header, header)
-	req.Header.Set("Authorization", "Bearer "+c.key)
+	c.auth(req)
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

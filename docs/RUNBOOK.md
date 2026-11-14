@@ -19,6 +19,9 @@ Settings for production:
 ```yaml
 server:
   admin_token: ""          # set RUNNEL_ADMIN_TOKEN, 24 characters or more
+  tls:
+    cert: /etc/runnel/tls.crt
+    key: /etc/runnel/tls.key
   shutdown_timeout: 15s
   drain_delay: 5s          # longer than your load balancer's probe interval
 log:
@@ -88,7 +91,7 @@ Hybrid store, while it runs:
 runnel backup --server http://runnel:8700 -o /backups/runnel-$(date +%F-%H%M).tar
 ```
 
-The admin token comes from `RUNNEL_ADMIN_TOKEN`. The copy is consistent: it holds every change acknowledged before the backup began, taken while calls go on. A copy cut short leaves no file (the CLI writes `FILE.part` and renames it at the end). With the server stopped, `runnel backup --store hybrid:/var/lib/runnel -o FILE` reads the directory directly.
+The server comes from `--server` or `RUNNEL_URL`, such as `https://admin:PASSWORD@runnel.internal:8700`, where the password is the admin token. Without a password in the URL the CLI sends `RUNNEL_ADMIN_TOKEN`. The copy is consistent: it holds every change acknowledged before the backup began, taken while calls go on. A copy cut short leaves no file (the CLI writes `FILE.part` and renames it at the end). With the server stopped, `runnel backup --store hybrid:/var/lib/runnel -o FILE` reads the directory directly.
 
 Restore into an empty directory, with the server stopped:
 

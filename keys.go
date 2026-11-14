@@ -31,8 +31,10 @@ func NewAPIKey(ns, name string, roles []string, expires time.Time) (string, APIK
 	if err := k.Validate(); err != nil {
 		return "", APIKey{}, err
 	}
-	return keyPrefix + id + "_" + secret, k, nil
+	return APIKeyToken(id, secret), k, nil
 }
+
+func APIKeyToken(id, secret string) string { return keyPrefix + id + "_" + secret }
 
 // ParseAPIKey splits a token of the form rnk_<id>_<secret>.
 func ParseAPIKey(token string) (id, secret string, ok bool) {

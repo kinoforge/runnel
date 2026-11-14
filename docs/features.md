@@ -161,6 +161,25 @@ POST /v1/ns/collector/extend            {"worker":"py-1","ids":["..."],"lease":"
 POST /v1/ns/collector/jobs/{id}/finish  {"worker":"py-1","version":3,"outcome":{"kind":"done","result":{"rows":120}}}
 ```
 
+### Connecting and logging in
+
+A client reaches Runnel with one URL, like a Redis or Postgres URL:
+
+```
+http://localhost:8700                                         auth off (server.auth: none)
+https://admin:PASSWORD@runnel.internal:8700                   admin, the password is the admin token
+https://KEY_ID:KEY_SECRET@runnel.internal:8700                one namespace key
+https://runnel.internal:8700?ca=ca.pem                        your own CA
+https://runnel.internal:8700?ca=ca.pem&cert=me.pem&key=me.key  a client certificate, no password
+```
+
+User and password go out as Basic auth, so `curl https://admin:PASSWORD@host:8700/v1/system` works as is. A bearer token works too. `remote.Open(os.Getenv("RUNNEL_URL"), "collector")` makes a Go client from such a URL, and `runnel backup` reads `RUNNEL_URL`.
+
+- **Passwords and keys.** The admin password is `server.admin_token`. A key `rnk_<id>_<secret>` is the user `<id>` with the password `<secret>`.
+- **TLS.** Set `server.tls.cert` and `key` and Runnel serves https itself. Use it, or a TLS proxy, whenever the server is reachable beyond localhost: Basic auth over plain http sends the password in clear text. Restart the server to load a renewed certificate.
+- **Client certificates.** With `server.tls.client_ca`, a certificate signed by that CA acts as admin, so there is no secret to hand out or rotate. Use a CA made only for Runnel clients, and list the allowed names in `client_names`. `require_client_cert` refuses clients without one.
+- **No auth.** `server.auth: none` lets every request in as admin. Use it only on localhost or a private network.
+
 `claim` waits for work, so idle workers cost nothing. Go services can use `remote.NewWorker` and `remote.New(...).EnqueueAndWait` instead of the raw calls. The whole API is in the OpenAPI 3.1 document at [`server/openapi.yaml`](../server/openapi.yaml), also served at `/openapi.yaml`.
 
 Errors are RFC 9457 problem documents. Request bodies have a size cap and are parsed strictly. API keys are shown once and stored only as SHA-256 hashes. A worker key can only finish jobs it claimed itself.

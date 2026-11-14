@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -92,14 +93,21 @@ func TestRejects(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		"unknown key":    {yaml: "sever:\n  addr: x\n", want: "sever"},
-		"bad env number": {env: map[string]string{"RUNNEL_SERVER_MAX_BODY": "big"}, want: "RUNNEL_SERVER_MAX_BODY"},
-		"bad env bool":   {env: map[string]string{"RUNNEL_CALLBACKS_ENABLED": "maybe"}, want: "RUNNEL_CALLBACKS_ENABLED"},
-		"short token":    {env: map[string]string{"RUNNEL_ADMIN_TOKEN": "short"}, want: "admin token"},
-		"bad log format": {yaml: "log:\n  format: xml\n", want: "log.format"},
-		"bad log level":  {yaml: "log:\n  level: loud\n", want: "log.level"},
-		"negative value": {yaml: "callbacks:\n  concurrency: -1\n", want: "callbacks.concurrency"},
-		"empty store":    {yaml: "store: \"\"\n", want: "store is required"},
+		"unknown key":      {yaml: "sever:\n  addr: x\n", want: "sever"},
+		"bad env number":   {env: map[string]string{"RUNNEL_SERVER_MAX_BODY": "big"}, want: "RUNNEL_SERVER_MAX_BODY"},
+		"bad env bool":     {env: map[string]string{"RUNNEL_CALLBACKS_ENABLED": "maybe"}, want: "RUNNEL_CALLBACKS_ENABLED"},
+		"short token":      {env: map[string]string{"RUNNEL_ADMIN_TOKEN": "short"}, want: "admin token"},
+		"bad log format":   {yaml: "log:\n  format: xml\n", want: "log.format"},
+		"bad log level":    {yaml: "log:\n  level: loud\n", want: "log.level"},
+		"negative value":   {yaml: "callbacks:\n  concurrency: -1\n", want: "callbacks.concurrency"},
+		"empty store":      {yaml: "store: \"\"\n", want: "store is required"},
+		"bad auth":         {yaml: "server:\n  auth: maybe\n", want: "server.auth"},
+		"auth none, token": {env: map[string]string{"RUNNEL_SERVER_AUTH": "none", "RUNNEL_ADMIN_TOKEN": "0123456789abcdef01234567"}, want: "auth none"},
+		"bad admin user":   {yaml: "server:\n  admin_user: \"a:b\"\n", want: "admin_user"},
+		"cert, no key":     {yaml: "server:\n  tls:\n    cert: a.pem\n", want: "go together"},
+		"ca, no cert":      {yaml: "server:\n  tls:\n    client_ca: ca.pem\n", want: "client_ca needs"},
+		"names, no ca":     {env: map[string]string{"RUNNEL_SERVER_TLS_CLIENT_NAMES": "dash"}, want: "need server.tls.client_ca"},
+		"old tls":          {yaml: "server:\n  tls:\n    min_version: \"1.1\"\n", want: "min_version"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -123,7 +131,7 @@ func TestEmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg != Default() {
+	if !reflect.DeepEqual(cfg, Default()) {
 		t.Fatal("an empty file must leave the defaults")
 	}
 }

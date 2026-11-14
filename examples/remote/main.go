@@ -21,7 +21,10 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	c := remote.New(os.Getenv("RUNNEL_URL"), os.Getenv("RUNNEL_KEY"), os.Getenv("RUNNEL_NAMESPACE"))
+	c, err := remote.Open(os.Getenv("RUNNEL_URL"), os.Getenv("RUNNEL_NAMESPACE"))
+	if err != nil {
+		return err
+	}
 	w := remote.NewWorker(c, runnel.WorkerConfig{Queues: []string{"thumbnails"}, Concurrency: 4})
 	w.HandleFunc("image.resize", func(ctx context.Context, j *runnel.Job) error {
 		var in struct {

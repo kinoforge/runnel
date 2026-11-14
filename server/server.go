@@ -21,6 +21,10 @@ var openAPI []byte
 
 type Config struct {
 	AdminToken         string
+	AdminUser          string
+	NoAuth             bool
+	CertAdmin          bool
+	CertNames          []string
 	Version            string
 	MaxBody            int64
 	Limits             runnel.Limits
@@ -43,7 +47,7 @@ type Config struct {
 }
 
 var DefaultConfig = Config{
-	MaxBody: 4 << 20, Limits: runnel.DefaultLimits, MaxClaimWait: 30 * time.Second, MaxResultWait: 60 * time.Second,
+	AdminUser: "admin", MaxBody: 4 << 20, Limits: runnel.DefaultLimits, MaxClaimWait: 30 * time.Second, MaxResultWait: 60 * time.Second,
 	RetryAfter: time.Second, MaxBatch: 1000, MaxDelay: 365 * 24 * time.Hour, MaxClaimQueues: 64, MaxClaim: 100,
 	DefaultLease: 30 * time.Second, MinLease: 5 * time.Second, MaxLease: 10 * time.Minute, MaxExtend: 10000,
 	KeyCacheTTL: 5 * time.Second, HealthTimeout: 2 * time.Second,
@@ -51,6 +55,9 @@ var DefaultConfig = Config{
 
 func (c Config) withDefaults() Config {
 	d := DefaultConfig
+	if c.AdminUser == "" {
+		c.AdminUser = d.AdminUser
+	}
 	c.MaxBody = or(c.MaxBody, d.MaxBody)
 	if c.Limits == (runnel.Limits{}) {
 		c.Limits = d.Limits
@@ -143,7 +150,8 @@ func (s *Server) handle(pattern, role string, h handler) {
 		defer func() { s.reqs.WithLabelValues(route, strconv.Itoa(rw.code)).Inc() }()
 		p, ok := s.authenticate(r)
 		if !ok {
-			s.problem(rw, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+			rw.Header().Set("WWW-Authenticate", `Basic realm="runnel", Bearer realm="runnel"`)
+			s.problem(rw, http.StatusUnauthorized, "unauthorized", "missing or invalid credentials")
 			return
 		}
 		ns := r.PathValue("ns")

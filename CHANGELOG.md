@@ -7,6 +7,14 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Added
 
 - `GET /v1/system` (admin token) reports the version, start time, Go memory and the store's storage: bytes on disk for the hybrid store, the database size for Postgres, MySQL and SQLite, and used memory for Redis.
+- Basic auth next to bearer tokens: user `admin` (`server.admin_user`) with the admin token as password, or a key's id and secret.
+- `server.auth: none` turns auth off for private networks, with a warning at start.
+- Built-in TLS: `server.tls.cert` and `key`, and client certificates with `client_ca`, `require_client_cert` and `client_names`.
+- `remote.Open` and `remote.ParseURL` connect with one URL, such as `https://admin:PASSWORD@host:8700?ca=ca.pem`, with optional `ca`, `cert` and `key`.
+
+### Changed
+
+- `runnel backup --server` reads `RUNNEL_URL` instead of `RUNNEL_SERVER`, and takes credentials and TLS files from the URL.
 
 ## [0.0.2-alpha] - 2026-11-14
 

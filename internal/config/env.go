@@ -53,6 +53,14 @@ func set(v reflect.Value, raw string) error {
 		v.SetInt(int64(d))
 	case v.Kind() == reflect.String:
 		v.SetString(raw)
+	case v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.String:
+		var items []string
+		for item := range strings.SplitSeq(raw, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				items = append(items, item)
+			}
+		}
+		v.Set(reflect.ValueOf(items))
 	case v.Kind() == reflect.Bool:
 		b, err := strconv.ParseBool(raw)
 		if err != nil {

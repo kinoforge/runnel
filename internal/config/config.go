@@ -42,6 +42,9 @@ type Log struct {
 type Server struct {
 	Addr               string        `yaml:"addr" env:"RUNNEL_ADDR"`
 	AdminToken         string        `yaml:"admin_token" env:"RUNNEL_ADMIN_TOKEN"`
+	AdminUser          string        `yaml:"admin_user"`
+	Auth               string        `yaml:"auth"`
+	TLS                TLS           `yaml:"tls"`
 	MaxBody            int64         `yaml:"max_body"`
 	MaxClaimWait       time.Duration `yaml:"max_claim_wait"`
 	MaxResultWait      time.Duration `yaml:"max_result_wait"`
@@ -112,6 +115,9 @@ func Default() Config {
 		Log:   Log{Format: "text", Level: "info"},
 		Server: Server{
 			Addr:              ":8700",
+			AdminUser:         "admin",
+			Auth:              AuthRequired,
+			TLS:               TLS{MinVersion: "1.2"},
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       time.Minute,
 			WriteTimeout:      2 * time.Minute,
@@ -155,6 +161,8 @@ func (c Config) Validate() error {
 	if c.Server.AdminToken != "" && len(c.Server.AdminToken) < minAdminToken {
 		errs = append(errs, fmt.Errorf("admin token must be at least %d characters", minAdminToken))
 	}
+	errs = append(errs, c.Server.checkAuth()...)
+	errs = append(errs, c.Server.TLS.check()...)
 	if c.Log.Format != "text" && c.Log.Format != "json" {
 		errs = append(errs, fmt.Errorf("log.format must be text or json, not %q", c.Log.Format))
 	}

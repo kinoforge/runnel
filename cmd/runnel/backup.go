@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/remote"
 	"github.com/kinoforge/runnel/store/hybrid"
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 	"github.com/kinoforge/runnel/stores"
@@ -18,7 +19,7 @@ import (
 func backupCommand(ctx context.Context, args []string) error {
 	c := newCmd("backup")
 	out := c.fs.String("o", "", "file to write, - for stdout (required)")
-	srv := c.fs.String("server", os.Getenv("RUNNEL_SERVER"), "server url, such as http://localhost:8700 (default RUNNEL_SERVER)")
+	srv := c.fs.String("server", os.Getenv("RUNNEL_URL"), "server url, such as https://admin:PASSWORD@host:8700 (default RUNNEL_URL)")
 	token := c.fs.String("admin-token", "", "admin token (default RUNNEL_ADMIN_TOKEN)")
 	if _, err := c.parse(args, 0); err != nil {
 		return err
@@ -57,13 +58,20 @@ func backupCommand(ctx context.Context, args []string) error {
 	return writeAtomic(*out, write)
 }
 
-func fetchBackup(ctx context.Context, base, token string, w io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/v1/backup", nil)
+func fetchBackup(ctx context.Context, raw, token string, w io.Writer) error {
+	e, err := remote.ParseURL(raw)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.Base+"/v1/backup", nil)
+	if err != nil {
+		return err
+	}
+	e.Authorize(req)
+	if !e.HasCredentials() && token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := e.HTTPClient(0).Do(req)
 	if err != nil {
 		return err
 	}

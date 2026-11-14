@@ -13,6 +13,15 @@ log:
 server:
   addr: ":8700"
   admin_token: "" # at least 24 characters; prefer RUNNEL_ADMIN_TOKEN
+  admin_user: admin # Basic auth user that goes with admin_token as password
+  auth: required    # none lets every request in as admin; private networks only
+  tls:
+    cert: ""                   # PEM certificate; with key, serve https
+    key: ""
+    client_ca: ""              # client certificates signed by this CA act as admin
+    require_client_cert: false # refuse clients without a certificate
+    client_names: []           # only these common or DNS names; empty means any
+    min_version: "1.2"         # 1.2 or 1.3
   max_body: 0           # 4 MiB
   max_claim_wait: 0s    # 30s
   max_result_wait: 0s   # 60s

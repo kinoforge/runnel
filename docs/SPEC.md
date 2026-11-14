@@ -149,12 +149,15 @@ What a handler returns decides what happens to the job next.
 
 ## Access (A)
 
-- **A01** Every `/v1` route needs `Authorization: Bearer <token>`; a missing or unknown token is 401. `/healthz`, `/readyz`, `/metrics` and `/openapi.yaml` need none.
-- **A02** Only the admin token reaches the `/v1/namespaces` and `/v1/backup` routes; a key there is 403. A server started without an admin token closes them.
+- **A01** Every `/v1` route needs credentials: `Authorization: Bearer <token>`, Basic auth (A07) or a client certificate (A09). Missing or unknown credentials are 401 with a `WWW-Authenticate` header naming Basic and Bearer. `/healthz`, `/readyz`, `/metrics` and `/openapi.yaml` need none.
+- **A02** Only the admin token reaches the `/v1/namespaces`, `/v1/backup` and `/v1/system` routes; a key there is 403. A server started without an admin token closes them, unless auth is off (A08) or a client certificate gets in (A09).
 - **A03** A key acts in its own namespace only (403 elsewhere) and only with its roles. `reader` reads jobs, events, stats and settings. `producer` enqueues and cancels. `worker` claims, heartbeats, finishes and reads dependencies. `admin` does all of it, changes settings and retries jobs.
 - **A04** A key is `rnk_<12 hex id>_<64 hex secret>` and is shown once, when it is made. Only the SHA-256 of the secret is stored, and it is compared in constant time. An expired key is 401. A namespace holds at most 100 keys.
 - **A05** Keys made at the same time are all kept. Deleting a key or its namespace revokes it at once on the server that did it, and making the namespace again does not bring old keys back.
 - **A06** No answer contains a callback secret or a key hash.
+- **A07** Basic auth works like a bearer token. The admin user (`admin` unless `server.admin_user` names another) with the admin token as password acts as admin. A key's id as user and its secret as password acts as that key. Anything else is 401.
+- **A08** With `server.auth: none` every request acts as admin, with or without credentials, and the server logs a warning at start. The setting refuses to start next to an admin token or a client CA.
+- **A09** With `server.tls.client_ca`, a client certificate signed by that CA acts as admin. With `client_names`, only a certificate whose common name or DNS name is listed does. A certificate from another CA fails the handshake, and with `require_client_cert` so does a client without one.
 
 ## HTTP API (S)
 
@@ -174,4 +177,5 @@ What a handler returns decides what happens to the job next.
 - **S14** `GET /v1/backup` streams the store's backup as a tar file, or answers 501 when the store has none.
 - **S15** An enqueue with a `traceparent` header, and `tracestate` with it, puts them in the meta of each job that has none and has room for them.
 - **S16** The server takes its caps from its settings: jobs per enqueue, how far ahead a job may run or live, queues and jobs per claim, the default lease and its range, and jobs per heartbeat.
+- **S18** The remote client and the CLI connect with one URL: `http(s)://[user:password@]host[:port][/path]`, with optional `ca`, `cert` and `key` files for https. User and password go out as Basic auth. Unknown options, a bad scheme or TLS options on plain http are refused, and no error or printed endpoint shows the password.
 - **S17** `GET /v1/system` needs the admin token and reports the version, start time, Go memory and the store's storage, or `null` when the store reports none.

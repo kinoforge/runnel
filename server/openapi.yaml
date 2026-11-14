@@ -7,9 +7,12 @@ info:
     Producers enqueue jobs, workers claim them under a lease, heartbeat and
     finish them. Every namespace is an isolated queue system with its own keys.
 
-    Authentication is a bearer token: the server's admin token for the
-    namespace and key routes, or an API key (`rnk_<id>_<secret>`) whose roles
-    allow the call. Errors are RFC 9457 problem documents.
+    Authentication is the server's admin token for the namespace, backup and
+    system routes, or an API key (`rnk_<id>_<secret>`) whose roles allow the
+    call. Send either as a bearer token, or as Basic auth: user `admin` with
+    the admin token as password, or the key's id as user and its secret as
+    password. A client certificate signed by `server.tls.client_ca` acts as
+    admin. Errors are RFC 9457 problem documents.
 
     Waiting for a result uses RFC 7240: send `Prefer: wait=N` (seconds) to
     enqueue a job or read one and the server holds the request until the job
@@ -21,6 +24,7 @@ servers:
   - url: http://localhost:8700
 security:
   - bearer: []
+  - basic: []
 tags:
   - name: admin
     description: Namespaces and keys. Admin token only.
@@ -705,6 +709,9 @@ components:
     bearer:
       type: http
       scheme: bearer
+    basic:
+      type: http
+      scheme: basic
   parameters:
     Namespace:
       name: ns
