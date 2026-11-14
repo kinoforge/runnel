@@ -223,3 +223,20 @@ func testMigrateAgain(t *testing.T, open Opener) {
 		t.Fatalf("job after migrate: %s", j.State)
 	}
 }
+
+func testStorage(t *testing.T, open Opener) {
+	spec.Rule(t, "X08")
+	e := setup(t, open)
+	sr, ok := e.s.(runnel.StorageReporter)
+	if !ok {
+		t.Skip("store reports no storage")
+	}
+	e.add("q")
+	info, err := sr.Storage(e.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Kind == "" || info.Bytes < 0 {
+		t.Fatalf("storage %+v", info)
+	}
+}

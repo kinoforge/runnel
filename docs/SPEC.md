@@ -145,6 +145,7 @@ What a handler returns decides what happens to the job next.
 - **X05** Only one process at a time opens a hybrid store's directory.
 - **X06** A hybrid store's directory has a `FORMAT` file naming the version of its files. A store refuses a directory of another version, or one that holds data without the file, with `ErrFormat`.
 - **X07** A hybrid store's backup, taken while calls go on, restores into an empty directory and opens with every job acknowledged before the backup began. Restore refuses a non-empty directory, entries outside it and a tar without `FORMAT`.
+- **X08** A store that reports its storage gives its kind and a size of zero or more bytes.
 
 ## Access (A)
 
@@ -173,3 +174,4 @@ What a handler returns decides what happens to the job next.
 - **S14** `GET /v1/backup` streams the store's backup as a tar file, or answers 501 when the store has none.
 - **S15** An enqueue with a `traceparent` header, and `tracestate` with it, puts them in the meta of each job that has none and has room for them.
 - **S16** The server takes its caps from its settings: jobs per enqueue, how far ahead a job may run or live, queues and jobs per claim, the default lease and its range, and jobs per heartbeat.
+- **S17** `GET /v1/system` needs the admin token and reports the version, start time, Go memory and the store's storage, or `null` when the store reports none.

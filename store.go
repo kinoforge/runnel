@@ -194,6 +194,16 @@ type Backuper interface {
 	Backup(ctx context.Context, w io.Writer) error
 }
 
+type StorageReporter interface {
+	Storage(ctx context.Context) (StorageInfo, error)
+}
+
+type StorageInfo struct {
+	Kind    string           `json:"kind"`
+	Bytes   int64            `json:"bytes"`
+	Details map[string]int64 `json:"details,omitempty"`
+}
+
 // Waker is implemented by stores that signal when jobs may be ready, so idle
 // workers claim at once instead of polling.
 type Waker interface {

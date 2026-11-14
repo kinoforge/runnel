@@ -18,6 +18,7 @@ func (s *Server) routes() {
 	})
 	s.patterns = append(s.patterns, "GET /healthz", "GET /readyz", "GET /metrics", "GET /openapi.yaml")
 	s.handle("GET /v1/backup", "", s.backup)
+	s.handle("GET /v1/system", "", s.system)
 
 	s.handle("GET /v1/namespaces", "", s.listNamespaces)
 	s.handle("PUT /v1/namespaces/{name}", "", s.putNamespace)

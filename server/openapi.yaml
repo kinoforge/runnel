@@ -100,6 +100,49 @@ paths:
           content:
             application/x-tar: {}
         default: {$ref: "#/components/responses/Problem"}
+  /v1/system:
+    get:
+      tags: [admin]
+      summary: Process memory, storage and version
+      description: |
+        Reports the server's version, start time, Go runtime memory and the
+        store's size. `storage` is null for a store that does not report its
+        size. A failed storage report sets `storage_error` and leaves the rest.
+      responses:
+        "200":
+          description: The server's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, go_version, started_at, goroutines, cpus, memory, storage]
+                properties:
+                  version: {type: string}
+                  go_version: {type: string}
+                  started_at: {type: string, format: date-time}
+                  goroutines: {type: integer}
+                  cpus: {type: integer}
+                  memory:
+                    type: object
+                    properties:
+                      total_bytes: {type: integer, description: Memory the Go runtime holds from the OS.}
+                      heap_bytes: {type: integer, description: Live and not yet collected heap objects.}
+                      next_gc_bytes: {type: integer}
+                      limit_bytes: {type: integer, description: GOMEMLIMIT, 0 when none.}
+                      container_limit_bytes: {type: integer, description: The cgroup memory limit, 0 when none.}
+                      gc_cycles: {type: integer}
+                  storage:
+                    oneOf:
+                      - type: "null"
+                      - type: object
+                        properties:
+                          kind: {type: string, examples: [hybrid, postgres, mysql, sqlite, redis]}
+                          bytes: {type: integer, description: Bytes on disk, the database size, or Redis used memory.}
+                          details:
+                            type: object
+                            additionalProperties: {type: integer}
+                  storage_error: {type: string}
+        default: {$ref: "#/components/responses/Problem"}
   /v1/namespaces:
     get:
       tags: [admin]

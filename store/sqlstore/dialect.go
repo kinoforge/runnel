@@ -26,6 +26,7 @@ type Dialect struct {
 	Isolation   sql.IsolationLevel
 	LockRows    bool
 	NowQuery    string
+	SizeQuery   string
 	Upsert      func(table string, cols, keys, update []string) string
 	Ignore      func(table string, cols []string) string
 	MigrateLock func(ctx context.Context, c *sql.Conn) (func(), error)
@@ -57,7 +58,8 @@ func Postgres() Dialect {
 	return Dialect{
 		Name: "postgres", Numbered: true, Blob: "BYTEA", Double: "DOUBLE PRECISION", Serial: "BIGSERIAL PRIMARY KEY",
 		LockRows: true, Upsert: conflictUpsert, Ignore: conflictIgnore,
-		NowQuery: "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT",
+		NowQuery:  "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT",
+		SizeQuery: "SELECT pg_database_size(current_database())",
 		MigrateLock: func(ctx context.Context, c *sql.Conn) (func(), error) {
 			if _, err := c.ExecContext(ctx, "SELECT pg_advisory_lock("+pgMigrateLock+")"); err != nil {
 				return nil, err
@@ -79,7 +81,8 @@ func MySQL() Dialect {
 	return Dialect{
 		Name: "mysql", Blob: "LONGBLOB", Double: "DOUBLE", Serial: "BIGINT AUTO_INCREMENT PRIMARY KEY",
 		TableSuffix: " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin", Isolation: sql.LevelReadCommitted, LockRows: true,
-		NowQuery: "SELECT TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', UTC_TIMESTAMP(6)) DIV 1000",
+		NowQuery:  "SELECT TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', UTC_TIMESTAMP(6)) DIV 1000",
+		SizeQuery: "SELECT CAST(COALESCE(SUM(data_length + index_length), 0) AS SIGNED) FROM information_schema.tables WHERE table_schema = DATABASE()",
 		Upsert: func(table string, cols, keys, update []string) string {
 			sets := make([]string, len(update))
 			for i, c := range update {
@@ -109,6 +112,7 @@ func SQLite() Dialect {
 	return Dialect{
 		Name: "sqlite", Blob: "BLOB", Double: "REAL", Serial: "INTEGER PRIMARY KEY AUTOINCREMENT",
 		Upsert: conflictUpsert, Ignore: conflictIgnore,
+		SizeQuery:   "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
 		MigrateLock: func(context.Context, *sql.Conn) (func(), error) { return func() {}, nil },
 	}
 }

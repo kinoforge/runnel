@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `GET /v1/system` (admin token) reports the version, start time, Go memory and the store's storage: bytes on disk for the hybrid store, the database size for Postgres, MySQL and SQLite, and used memory for Redis.
+
 ## [0.0.2-alpha] - 2026-11-14
 
 ### Added

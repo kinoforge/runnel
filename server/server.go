@@ -21,6 +21,7 @@ var openAPI []byte
 
 type Config struct {
 	AdminToken         string
+	Version            string
 	MaxBody            int64
 	Limits             runnel.Limits
 	AllowHTTPCallbacks bool
@@ -88,6 +89,7 @@ type Server struct {
 	obs      *metrics.Observer
 	reqs     *prometheus.CounterVec
 	admin    [32]byte
+	started  time.Time
 	hasRoot  bool
 	draining atomic.Bool
 
@@ -110,7 +112,7 @@ func New(store runnel.Store, cfg Config) *Server {
 		cfg.Registry = prometheus.NewRegistry()
 		cfg.Registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	}
-	s := &Server{store: store, clock: runnel.ClockOf(store), cfg: cfg, log: cfg.Logger, mux: http.NewServeMux(), clients: map[string]*runnel.Client{}, sources: map[string]runnel.Source{}, hubs: map[string]*hub{}}
+	s := &Server{store: store, clock: runnel.ClockOf(store), started: time.Now().UTC(), cfg: cfg, log: cfg.Logger, mux: http.NewServeMux(), clients: map[string]*runnel.Client{}, sources: map[string]runnel.Source{}, hubs: map[string]*hub{}}
 	if cfg.AdminToken != "" {
 		s.admin, s.hasRoot = sha256.Sum256([]byte(cfg.AdminToken)), true
 	}

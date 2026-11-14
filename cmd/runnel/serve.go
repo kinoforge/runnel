@@ -116,6 +116,7 @@ func serve(ctx context.Context, args []string) error {
 func serverConfig(cfg config.Config, log *slog.Logger) server.Config {
 	return server.Config{
 		AdminToken:         cfg.Server.AdminToken,
+		Version:            buildVersion(),
 		MaxBody:            cfg.Server.MaxBody,
 		Limits:             runnel.Limits(cfg.Limits),
 		AllowHTTPCallbacks: cfg.Server.AllowHTTPCallbacks,

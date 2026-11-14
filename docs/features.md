@@ -49,7 +49,7 @@ When a handler finishes, what it returns decides what happens next.
 | Callbacks | signed with HMAC-SHA256, retried, never redirected, never sent to private addresses |
 | Namespaces | each service gets its own queues, pools, schedules, callback secret and API keys with roles |
 | One clock | leases and schedules are measured on the store's clock, so servers whose clocks drift still agree |
-| Operations | pause and resume, retention with an optional archive, `/healthz` and `/readyz`, backups of the hybrid store, Prometheus metrics, OpenTelemetry traces, an OpenAPI document and `runnel bench`. See the [runbook](RUNBOOK.md) |
+| Operations | pause and resume, retention with an optional archive, `/healthz` and `/readyz`, `/v1/system` for memory and storage, backups of the hybrid store, Prometheus metrics, OpenTelemetry traces, an OpenAPI document and `runnel bench`. See the [runbook](RUNBOOK.md) |
 
 ## An example: collecting data from suppliers
 
