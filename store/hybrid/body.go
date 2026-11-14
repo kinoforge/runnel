@@ -11,9 +11,6 @@ import (
 
 const bodyVersion = 1
 
-// encodeBody packs the fields of j that stay out of memory: its unique key and
-// dependencies first, so keyOf can read them without the rest, then the payload,
-// result and everything else.
 func encodeBody(j *runnel.Job) []byte {
 	e := &enc{b: make([]byte, 0, 64+len(j.Payload)+len(j.Result))}
 	e.byte(bodyVersion)
@@ -61,7 +58,6 @@ func fromNanos(n int64) time.Time {
 	return time.Unix(0, n).UTC()
 }
 
-// keyOf reads only the unique key and dependencies of a body.
 func keyOf(b []byte) (string, []string, error) {
 	d := &dec{b: b}
 	if v := d.byte(); v != bodyVersion && d.err == nil {
@@ -75,7 +71,6 @@ func keyOf(b []byte) (string, []string, error) {
 	return key, deps, d.err
 }
 
-// count reads a length, refusing more items than bytes left.
 func count(d *dec) int {
 	n := d.int()
 	if n < 0 || n > int64(len(d.b)) {

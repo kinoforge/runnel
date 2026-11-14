@@ -40,8 +40,6 @@ func (s *Store) Claim(ctx context.Context, ns string, req runnel.ClaimRequest) (
 	return out, nil
 }
 
-// openQueues returns the requested queues that are not paused, and whether
-// any limit applies so the claim must lock.
 func openQueues(cfg *nsConfig, queues []string) ([]string, bool) {
 	locked := cfg.poolLimits()
 	var open []string
@@ -91,8 +89,6 @@ func (t *taker) claimFree(ctx context.Context, open []string, need int) ([]*runn
 	return t.take(ctx, cands, false)
 }
 
-// claimLimited scans in rounds: each round excludes the queues, groups and
-// pools found full, so jobs behind a capped group or pool still run.
 func (t *taker) claimLimited(ctx context.Context, cfg *nsConfig, open []string, need int) ([]*runnel.Job, error) {
 	act, err := t.s.activeCounts(ctx, t.tx, t.ns)
 	if err != nil {
@@ -134,7 +130,6 @@ type admission struct {
 	ex  *exclusions
 }
 
-// pick admits up to need candidates and reports whether a limit refused any.
 func (a *admission) pick(ctx context.Context, cands []cand, need int) ([]cand, bool, error) {
 	var pick []cand
 	blocked := false

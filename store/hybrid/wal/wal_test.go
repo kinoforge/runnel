@@ -111,8 +111,6 @@ func TestFramesDetectDamage(t *testing.T) {
 	}
 }
 
-// TestRotateWhileAppending checks that every record lands where Append said,
-// even when a rotation happens between its Append and its write.
 func TestRotateWhileAppending(t *testing.T) {
 	dir := t.TempDir()
 	l := start(t, dir, wal.SyncPeriodic)

@@ -20,15 +20,10 @@ func TestConformanceDisk(t *testing.T) {
 	conformOnDisk(t, hybrid.Options{SnapshotBytes: 1 << 16})
 }
 
-// TestConformanceDiskRetiring moves finished jobs to the cold store within
-// milliseconds, so every rule also runs against jobs read back from it.
 func TestConformanceDiskRetiring(t *testing.T) {
 	conformOnDisk(t, hybrid.Options{SnapshotBytes: 1 << 14}, time.Nanosecond, 5*time.Millisecond)
 }
 
-// TestConformanceDiskSpilling holds no waiting job in memory longer than a
-// few milliseconds, so every rule also runs against jobs waiting in the cold
-// store.
 func TestConformanceDiskSpilling(t *testing.T) {
 	opt := hybrid.Options{Dir: t.TempDir(), SnapshotBytes: 1 << 14}
 	conformWith(t, func() (*hybrid.Store, error) { return hybrid.OpenSpilling(opt, 1, 5*time.Millisecond) })

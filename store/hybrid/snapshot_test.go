@@ -11,8 +11,6 @@ import (
 	"github.com/kinoforge/runnel/internal/spec"
 )
 
-// TestSnapshotUnderLoad takes snapshots while jobs are added, claimed and
-// finished, then checks that a restart sees exactly the state before it.
 func TestSnapshotUnderLoad(t *testing.T) {
 	spec.Rule(t, "X04")
 	dir := t.TempDir()

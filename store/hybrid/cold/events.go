@@ -7,9 +7,6 @@ import (
 	"github.com/cockroachdb/pebble/v2"
 )
 
-// Events are kept by namespace and sequence number, oldest first. The newest
-// sequence number moved here is kept per namespace, so a replay can tell the
-// events it already holds.
 const (
 	kEvent byte = 'e'
 	kLast  byte = 'l'

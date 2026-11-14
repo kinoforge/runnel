@@ -18,8 +18,7 @@ func (s *Store) PutConfig(ctx context.Context, ns string, kind runnel.ConfigKind
 	return s.rdb.HSet(ctx, s.p(ns)+"cfg:"+string(kind), name, value).Err()
 }
 
-// withPauseMillis adds paused_until_ms to a pool, since the claim script cannot
-// read RFC 3339 times. Readers ignore the extra field.
+// The claim script cannot parse RFC 3339 times.
 func withPauseMillis(value []byte) ([]byte, error) {
 	var p runnel.PoolConfig
 	if json.Unmarshal(value, &p) != nil || p.PausedUntil.IsZero() {

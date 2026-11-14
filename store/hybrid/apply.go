@@ -35,10 +35,7 @@ func (s *Store) Apply(_ context.Context, ns string, changes []runnel.Change, now
 	return out, nil
 }
 
-// applyOne writes c if its guards hold. The store keeps the fields it owns:
-// pending, unique key, dependencies and creation time. body is c.Job encoded
-// before the lock was taken; it is encoded again only when c.Job changed a
-// field the store keeps.
+// body was encoded before the lock was taken; it is encoded again only when c.Job changed.
 func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, error) {
 	sp := t.sp
 	id, ok := parseID(c.Job.ID)
@@ -89,8 +86,6 @@ func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, 
 	return true, nil
 }
 
-// keys returns the unique key and dependencies of a job, reading its body,
-// unless given, only when it has them.
 func (s *Store) keys(sp *space, h *job, body []byte) (string, []string, error) {
 	if h.flags == 0 {
 		return "", nil, nil
@@ -104,9 +99,6 @@ func (s *Store) keys(sp *space, h *job, body []byte) (string, []string, error) {
 	return keyOf(body)
 }
 
-// finalize records the event of a job reaching a final state, frees its unique
-// key and settles the jobs that depend on it: they run once all their
-// dependencies completed, and are cancelled when one did not.
 func (s *Store) finalize(t *tx, h job, key string, now int64) error {
 	sp := t.sp
 	sp.seq++

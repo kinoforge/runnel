@@ -190,7 +190,6 @@ func decide(j *Job, o Outcome, now time.Time) *Job {
 	return n
 }
 
-// end finishes n in the final state st.
 func end(n *Job, st State, now time.Time) {
 	n.Handle = ""
 	n.State, n.FinishedAt, n.StartBy = st, now, time.Time{}

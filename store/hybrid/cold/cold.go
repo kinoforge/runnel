@@ -1,14 +1,8 @@
-// Package cold keeps jobs on disk in Pebble, so they take no memory: finished
-// jobs however long they are kept, and waiting jobs past what memory holds.
-// Each job is one record keyed by namespace and id, with an index entry by
-// state, to list the newest first. Finished jobs are also indexed by finish
-// time, to prune the oldest first; waiting jobs in claim order, to bring the
-// next ones back. Counts per queue and state are written in the same batch as
-// the jobs, so they always match them.
+// Package cold keeps jobs on disk in Pebble so they take no memory: finished
+// jobs, and waiting jobs past what memory holds.
 //
-// Pebble's own write-ahead log is off: the caller logs every change itself
-// and calls Flush before it drops its log, so a crash loses nothing the
-// caller cannot replay.
+// Pebble's own write-ahead log is off. The caller logs every change and calls
+// Flush before dropping its log, so a crash loses nothing it cannot replay.
 package cold
 
 import (
@@ -99,8 +93,6 @@ func Open(dir string, o Options) (*Store, error) {
 		FormatMajorVersion: pebble.FormatNewest,
 		Logger:             quiet{},
 	}
-	// Bloom filters let a lookup of an id that is not stored, as every new
-	// job's is, skip the files without reading them.
 	for i := range opt.Levels {
 		opt.Levels[i].FilterPolicy = bloom.FilterPolicy(o.BloomBits)
 	}
@@ -237,8 +229,6 @@ func (s *Store) Flush() error { return s.db.Flush() }
 // a flush would drop the writes still in memory.
 func (s *Store) Close() error { return errors.Join(s.db.Flush(), s.db.Close()) }
 
-// drop deletes the record stored under id and its index entries, noting the
-// count it leaves.
 func drop(b *pebble.Batch, ns string, id ID, delta map[Count]int64) error {
 	key := jobKey(ns, id)
 	v, closer, err := b.Get(key)
@@ -257,7 +247,6 @@ func drop(b *pebble.Batch, ns string, id ID, delta map[Count]int64) error {
 	return errors.Join(b.Delete(key, nil), b.Delete(stateKey(ns, old.State, id), nil), unindex(b, &old))
 }
 
-// count adds d to the counts j is in.
 func count(j *Job, delta map[Count]int64, d int64) {
 	delta[Count{NS: j.NS, Queue: j.Queue, State: j.State}] += d
 	if j.waiting() && j.Group != "" {
@@ -265,9 +254,6 @@ func count(j *Job, delta map[Count]int64, d int64) {
 	}
 }
 
-// index writes the entries that order j: by finish time when finished, in
-// claim or run time order when waiting. A waiting job's entry holds its
-// record rec too, so jobs are brought back in order without a lookup each.
 func index(b *pebble.Batch, j *Job, rec []byte) error {
 	if !j.waiting() {
 		return b.Set(timeKey(j.NS, j.Finished, j.ID), encodeWhen(j), nil)
@@ -296,7 +282,6 @@ func unindex(b *pebble.Batch, j *Job) error {
 	return err
 }
 
-// commit adds delta to the stored counts and commits b.
 func commit(b *pebble.Batch, delta map[Count]int64) error {
 	for c, d := range delta {
 		if d == 0 {
@@ -323,7 +308,6 @@ func commit(b *pebble.Batch, delta map[Count]int64) error {
 	return b.Commit(pebble.NoSync)
 }
 
-// quiet keeps Pebble's routine messages out of the logs.
 type quiet struct{}
 
 func (quiet) Infof(string, ...any)              {}

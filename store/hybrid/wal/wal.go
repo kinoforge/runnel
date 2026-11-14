@@ -68,8 +68,7 @@ type Log struct {
 	opt  Options
 	lock *os.File
 
-	// io guards writes to f and swapping f; syncMu keeps f open while a
-	// background fsync runs, so that fsync never blocks writers.
+	// syncMu keeps f open during a background fsync, so fsync never blocks writers.
 	io     sync.Mutex
 	syncMu sync.Mutex
 	f      *os.File
@@ -239,7 +238,6 @@ func (l *Log) Rotate() (uint64, error) {
 	return seg, SyncDir(l.dir)
 }
 
-// finish writes the last records of a segment, syncs and closes it.
 func finish(f *os.File, data []byte) error {
 	if len(data) > 0 {
 		if _, err := f.Write(data); err != nil {

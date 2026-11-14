@@ -37,23 +37,17 @@ func (s *Store) Insert(_ context.Context, ns string, jobs []*runnel.Job, now tim
 	return out, nil
 }
 
-// inserter adds the jobs of one batch. remap points a job id of the batch at the
-// job that stands for it: the held job for a duplicate, "" for a refused job.
 type inserter struct {
 	s     *Store
 	t     *tx
 	now   int64
 	remap map[string]string
-	// known holds the states of the batch's ids and dependencies found in the
-	// cold store before the lock was taken, valid while no job left memory
-	// since: gen is the space's retired count then.
+	// Valid only while no job left memory since the lookup: gen is the retired count at that time.
 	known map[uid]uint8
 	gen   uint64
 	err   error
 }
 
-// coldKnown looks up in the cold store the ids and dependencies of jobs,
-// before the namespace lock is taken.
 func (s *Store) coldKnown(ns string, jobs []*runnel.Job) (map[uid]uint8, uint64, error) {
 	if s.cold == nil {
 		return nil, 0, nil
@@ -85,7 +79,6 @@ func (s *Store) coldKnown(ns string, jobs []*runnel.Job) (map[uid]uint8, uint64,
 	return known, gen, nil
 }
 
-// coldState returns the state of a job only the cold store holds.
 func (in *inserter) coldState(id uid) (uint8, bool) {
 	sp := in.t.sp
 	if in.s.cold == nil || !sp.mayBeCold(id) {
@@ -98,7 +91,6 @@ func (in *inserter) coldState(id uid) (uint8, bool) {
 	return in.lookup(id)
 }
 
-// lookup reads the state of id from the cold store.
 func (in *inserter) lookup(id uid) (uint8, bool) {
 	if in.s.cold == nil || !in.t.sp.mayBeCold(id) {
 		return 0, false
@@ -115,8 +107,7 @@ func (in *inserter) refuse(j *runnel.Job, err error) runnel.Inserted {
 	return runnel.Inserted{ID: j.ID, Err: err}
 }
 
-// one adds j. body is j encoded before the lock was taken, or nil when its
-// dependencies may still be remapped.
+// body was encoded before the lock was taken, or is nil when dependencies may still be remapped.
 func (in *inserter) one(j *runnel.Job, body []byte) runnel.Inserted {
 	id, ok := parseID(j.ID)
 	if !ok {
@@ -154,8 +145,6 @@ func (in *inserter) one(j *runnel.Job, body []byte) runnel.Inserted {
 	return runnel.Inserted{ID: j.ID}
 }
 
-// deps maps the dependency ids through the batch and returns them, those still
-// to finish, and false when one is missing, dead or cancelled.
 func (in *inserter) deps(ids []string) ([]string, []uid, bool) {
 	var deps []string
 	var wait []uid
@@ -189,8 +178,6 @@ func (in *inserter) deps(ids []string) ([]string, []uid, bool) {
 	return deps, wait, true
 }
 
-// held returns the id of a job already stored under id, or of the job holding
-// the unique key.
 func (in *inserter) held(id uid, key string) string {
 	sp := in.t.sp
 	if _, ok := sp.get(id); ok {

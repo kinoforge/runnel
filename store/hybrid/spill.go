@@ -8,12 +8,6 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
-// Memory holds the front of each queue's waiting jobs; the rest wait in the
-// cold store, in claim order, so a backlog is bounded by disk, not memory.
-// A claim takes from memory the jobs ahead of a queue's first job in the
-// cold store, its head; past it, the claim brings the next ones back first.
-// spiller keeps the waiting jobs in memory within budget until the store
-// closes.
 func (s *Store) spiller() {
 	defer s.wg.Done()
 	t := time.NewTicker(s.opt.SpillEvery)
@@ -32,9 +26,6 @@ func (s *Store) spiller() {
 	}
 }
 
-// balance moves waiting jobs past the budget to the cold store, last in claim
-// order first, and, while memory has room, brings back the next ones of the
-// queues that run low, ahead of the claims that will reach them.
 func (s *Store) balance() error {
 	s.waitMu.Lock()
 	defer s.waitMu.Unlock()
@@ -65,9 +56,6 @@ func (s *Store) balance() error {
 	return nil
 }
 
-// makeRoom has an insert wait while memory holds twice the budget of waiting
-// jobs, moving some to the cold store itself, so producers faster than the
-// spiller slow to its pace instead of filling memory.
 func (s *Store) makeRoom() error {
 	if s.cold == nil || s.hot.Load() <= 2*s.hotJobs+s.opt.SpillBatch {
 		return nil
@@ -75,7 +63,6 @@ func (s *Store) makeRoom() error {
 	return s.balance()
 }
 
-// spillSome moves up to n waiting jobs of sp to the cold store.
 func (s *Store) spillSome(sp *space, n int64) (int64, error) {
 	now := ms(time.Now())
 	ds := sp.spillable(int(n), int(s.opt.JobBytes), s.opt.BatchBytes)
@@ -99,12 +86,6 @@ func (s *Store) spillSome(sp *space, n int64) (int64, error) {
 	return int64(len(ds) - len(stale)), nil
 }
 
-// spillable drafts up to n waiting jobs, holding at most maxBytes counting
-// jobBytes each besides bodies, from the queues holding the most,
-// last in claim order first: future ones by run time, then ready ones. Jobs
-// others depend on stay, as their dependents are listed in memory, and so do
-// jobs still being deleted from the cold store, so that no job is there
-// twice and the cold store can add the others without looking them up.
 func (sp *space) spillable(n, jobBytes, maxBytes int) []draft {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
@@ -135,8 +116,6 @@ func (sp *space) spillable(n, jobBytes, maxBytes int) []draft {
 	return out
 }
 
-// spilt notes that h left memory for the cold store: its start deadline and
-// deadline stay indexed, and its queue's head moves to it when it comes first.
 func (sp *space) spilt(h *job, now int64) {
 	if h.startBy != 0 {
 		sp.startBy.ReplaceOrInsert(timeKey{h.startBy, h.id})
@@ -167,7 +146,6 @@ func (sp *space) setHead(q sym, h cold.Head) {
 	sp.spilled.Store(len(sp.heads) > 0)
 }
 
-// stop returns the head of q's ready jobs in the cold store, if any.
 func (sp *space) stop(q sym) *readyKey {
 	if h, ok := sp.heads[q]; ok && h.HasReady {
 		k := nextKey(h.Ready)
@@ -176,8 +154,6 @@ func (sp *space) stop(q sym) *readyKey {
 	return nil
 }
 
-// lowQueues names the queues with ready jobs in the cold store and fewer
-// than ahead in memory.
 func (sp *space) lowQueues(ahead int64) []string {
 	if !sp.spilled.Load() {
 		return nil
@@ -193,8 +169,7 @@ func (sp *space) lowQueues(ahead int64) []string {
 	return out
 }
 
-// refill brings the next ready jobs of queue q back from the cold store. The
-// caller holds waitMu.
+// The caller holds waitMu.
 func (s *Store) refill(sp *space, q string) (int, error) {
 	jobs, head, err := s.cold.Take(sp.ns, q, int(s.opt.RefillBatch), s.opt.BatchBytes)
 	if err != nil {
@@ -203,10 +178,7 @@ func (s *Store) refill(sp *space, q string) (int, error) {
 	return len(jobs), s.bring(sp, jobs, q, &head)
 }
 
-// bring puts jobs from the cold store back in memory, apart from those memory
-// holds already, newer, and deletes them there once logged; with head set,
-// it becomes the head of queue q. The caller holds waitMu, so the cold store
-// still holds jobs as read.
+// The caller holds waitMu.
 func (s *Store) bring(sp *space, jobs []cold.Job, q string, head *cold.Head) error {
 	err := s.lease(sp.ns, func(t *tx) error {
 		for i := range jobs {
@@ -242,8 +214,6 @@ func (s *Store) bring(sp *space, jobs []cold.Job, q string, head *cold.Head) err
 	return nil
 }
 
-// loadWaiting reads the heads of the queues with waiting jobs in the cold
-// store and indexes their start deadlines and deadlines.
 func (s *Store) loadWaiting() error {
 	err := s.cold.Starts(func(ns string, at int64, id cold.ID) {
 		s.space(ns).startBy.ReplaceOrInsert(timeKey{at, uid(id)})

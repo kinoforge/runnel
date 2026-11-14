@@ -10,8 +10,6 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-// full returns the whole job h stands for, reading its body.
-// readGap is how far apart two bodies may lie and still be read at once.
 const readGap = 4 << 10
 
 func (s *Store) full(sp *space, h *job) (*runnel.Job, error) {
@@ -22,9 +20,7 @@ func (s *Store) full(sp *space, h *job) (*runnel.Job, error) {
 	return sp.syms.full(sp.ns, h, b)
 }
 
-// rebuild makes whole jobs of drafts once the namespace lock is released,
-// reading the bodies that were not cached. A body a snapshot moved meanwhile
-// is looked up again under the lock.
+// A body a snapshot moved meanwhile is looked up again under the lock.
 func (s *Store) rebuild(ns string, ds []draft) ([]*runnel.Job, error) {
 	if len(ds) == 0 {
 		return nil, nil
@@ -47,9 +43,6 @@ func (s *Store) rebuild(ns string, ds []draft) ([]*runnel.Job, error) {
 	return out, nil
 }
 
-// fill reads the bodies drafts lack in disk order, one read for each run of
-// bodies lying close together, as jobs enqueued together do. A failed read
-// leaves the bodies for fetch.
 func (s *Store) fill(ds []draft) {
 	if s.files == nil {
 		return
@@ -126,8 +119,6 @@ func (s *Store) Get(_ context.Context, ns string, ids []string) ([]*runnel.Job, 
 	return s.gather(ns, want, ds)
 }
 
-// filter holds the symbols a query matches; ok is false when a name it asks for
-// was never used, so nothing can match.
 type filter struct {
 	queue, kind, group sym
 	ok                 bool
@@ -186,8 +177,6 @@ func (s *Store) List(_ context.Context, ns string, q runnel.Query) ([]*runnel.Jo
 	return jobs, next, err
 }
 
-// newest returns the ids of up to limit jobs in trees that match f, newest
-// first, starting after cursor cur when given. No limit means all.
 func (sp *space) newest(trees []*idTree, f filter, cur uid, hasCur bool, limit int) []uid {
 	var ids []uid
 	for _, t := range trees {
@@ -261,7 +250,6 @@ func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.
 	return s.dropGone(ns, kind, want, jobs, keep)
 }
 
-// dueTree returns the index Due reads for kind.
 func dueTree(sp *space, kind runnel.DueKind) *timeTree {
 	switch kind {
 	case runnel.DueLease:
@@ -274,9 +262,7 @@ func dueTree(sp *space, kind runnel.DueKind) *timeTree {
 	return nil
 }
 
-// dropGone drops from the index of kind the entries of want whose job is no
-// longer in memory nor kept in the cold store, which a job leaving the cold
-// store while Due read it may leave behind; it returns the jobs keep accepts.
+// A job leaving the cold store while Due reads may leave index entries behind; this drops them.
 func (s *Store) dropGone(ns string, kind runnel.DueKind, want []timeKey, jobs []*runnel.Job, keep func(runnel.State) bool) ([]*runnel.Job, error) {
 	kept := make(map[uid]bool, len(jobs))
 	out := jobs[:0]

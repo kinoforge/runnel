@@ -11,9 +11,7 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 )
 
-// formatVersion is the version of the files in a data directory: log and
-// snapshot records and cold store keys. A change any older runnel would
-// misread raises it.
+// Raise it for any change an older runnel would misread.
 const formatVersion = 1
 
 const (
@@ -27,8 +25,6 @@ const (
 // not read.
 var ErrFormat = errors.New("hybrid: unsupported data format")
 
-// checkFormat reads the directory's FORMAT file, or writes it into a
-// directory that holds no data yet.
 func checkFormat(dir string) error {
 	b, err := os.ReadFile(filepath.Join(dir, formatFile))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -63,7 +59,6 @@ func newFormat(dir string) error {
 
 func formatLine() []byte { return fmt.Appendf(nil, "%s %d\n", formatName, formatVersion) }
 
-// writeFile writes a small file whole or not at all.
 func writeFile(dir, name string, data []byte) error {
 	tmp := filepath.Join(dir, name+tmpSuffix)
 	if err := os.WriteFile(tmp, data, filePerm); err != nil {
@@ -84,8 +79,6 @@ func writeFile(dir, name string, data []byte) error {
 	return wal.SyncDir(dir)
 }
 
-// removeStaleBackups deletes cold store copies a backup left when the
-// process stopped during it.
 func removeStaleBackups(dir string) error {
 	stale, err := filepath.Glob(filepath.Join(dir, backupGlob))
 	if err != nil {

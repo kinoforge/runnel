@@ -228,7 +228,6 @@ func (j *Job) computeStartBy() {
 	j.StartBy = time.Time{}
 }
 
-// settle turns the relative delay and time to live into times measured from now.
 func (j *Job) settle(now time.Time) {
 	if j.delay > 0 {
 		j.RunAt, j.delay = now.Add(j.delay), 0
@@ -242,7 +241,6 @@ func (j *Job) settle(now time.Time) {
 // be measured on the store's clock.
 func (j *Job) Offsets() (delay, ttl time.Duration) { return j.delay, j.ttl }
 
-// fit returns a queue default d, or zero when it would reach past the deadline.
 func (j *Job) fit(d Duration, now time.Time) Duration {
 	start := j.RunAt
 	if start.Before(now) {
@@ -254,7 +252,6 @@ func (j *Job) fit(d Duration, now time.Time) Duration {
 	return d
 }
 
-// late reports whether the job's deadline has passed at t.
 func (j *Job) late(t time.Time) bool { return !j.Deadline.IsZero() && !t.Before(j.Deadline) }
 
 // Prepare fills defaults, resets the fields stores own and validates the job

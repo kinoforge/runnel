@@ -10,7 +10,7 @@ Thank you for helping. Bug reports, fixes, docs and new store backends are all w
 
 ## Development
 
-You need Go (the version in `go.mod`) and Docker.
+You need Go (the version in `go.mod`) and Docker. Copy `.env.example` to `.env`: the Makefile loads it, and docker compose and `runnel` read the same names.
 
 ```sh
 make up          # postgres, mysql, redis, valkey and dragonfly on local ports

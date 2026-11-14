@@ -80,8 +80,6 @@ func (s *Store) insertWith(ctx context.Context, tx *txn, ns string, cfg *nsConfi
 	return out, nil
 }
 
-// batchInsert holds what the jobs of one Insert call share: ids remapped to
-// duplicates or rejections, and waiting counts already read.
 type batchInsert struct {
 	s       *Store
 	tx      *txn

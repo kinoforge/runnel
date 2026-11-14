@@ -36,11 +36,8 @@ type Options struct {
 	RetireEvery time.Duration
 	RetireBatch int
 
-	// SpillEvery is how often waiting jobs past the budget move to the cold
-	// store, SpillBatch at a time. RefillBatch are brought back at a time,
-	// keeping RefillAhead per queue in memory while there is room; a move
-	// holds at most BatchBytes of jobs. A claim brings jobs back up to
-	// MaxRefills times, and readies WakeBatch future jobs at a time.
+	// Waiting jobs past the memory budget move to disk every SpillEvery and
+	// come back in batches as workers reach them.
 	SpillEvery  time.Duration
 	SpillBatch  int64
 	RefillBatch int64
@@ -75,7 +72,6 @@ var DefaultOptions = Options{
 	Cold:           cold.DefaultOptions,
 }
 
-// withDefaults fills the options left at zero from DefaultOptions.
 func (o Options) withDefaults() Options {
 	d := DefaultOptions
 	pick(&o.SyncInterval, d.SyncInterval)
@@ -105,7 +101,6 @@ func pick[T int | int64 | time.Duration](v *T, def T) {
 	}
 }
 
-// hotBudget is how many waiting jobs memory holds.
 func (o Options) hotBudget() int64 {
 	if o.HotJobs > 0 {
 		return o.HotJobs

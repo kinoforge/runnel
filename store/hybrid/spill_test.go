@@ -10,9 +10,6 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid"
 )
 
-// TestWaitingJobsLeaveMemory lets all waiting jobs but one move to the cold
-// store and checks they keep claim order, survive a restart, and still answer
-// to reads, unique keys, cancels and queue limits.
 func TestWaitingJobsLeaveMemory(t *testing.T) {
 	const n = 3000
 	opt := hybrid.Options{Dir: t.TempDir()}
@@ -77,9 +74,6 @@ func TestWaitingJobsLeaveMemory(t *testing.T) {
 	claimInOrder(t, s, later, n/10)
 }
 
-// TestClaimOrderAcrossMemoryAndCold keeps part of a backlog in memory while
-// jobs ahead of and behind it in claim order come in, and checks claims still
-// follow claim order.
 func TestClaimOrderAcrossMemoryAndCold(t *testing.T) {
 	s, err := hybrid.OpenSpilling(hybrid.Options{Dir: t.TempDir()}, 500, time.Millisecond)
 	if err != nil {
@@ -103,8 +97,6 @@ func TestClaimOrderAcrossMemoryAndCold(t *testing.T) {
 	claimInOrder(t, s, time.Now(), 3900)
 }
 
-// claimInOrder claims want jobs at now, a few at a time, and checks they come
-// in claim order: higher priority, then earlier run time, then id.
 func claimInOrder(t *testing.T, s *hybrid.Store, now time.Time, want int) {
 	t.Helper()
 	var got []*runnel.Job

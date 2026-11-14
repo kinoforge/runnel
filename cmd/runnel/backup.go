@@ -15,8 +15,6 @@ import (
 	"github.com/kinoforge/runnel/stores"
 )
 
-// backupCommand writes a backup to a file: from a running server with
-// --server, or from the store itself when no server holds it.
 func backupCommand(ctx context.Context, args []string) error {
 	c := newCmd("backup")
 	out := c.fs.String("o", "", "file to write, - for stdout (required)")
@@ -78,7 +76,6 @@ func fetchBackup(ctx context.Context, base, token string, w io.Writer) error {
 	return err
 }
 
-// writeAtomic writes path whole or leaves it untouched.
 func writeAtomic(path string, write func(io.Writer) error) error {
 	tmp := path + ".part"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -101,8 +98,6 @@ func writeAtomic(path string, write func(io.Writer) error) error {
 	return nil
 }
 
-// restoreCommand unpacks a backup into the empty directory of a hybrid store
-// and opens it once to check it replays.
 func restoreCommand(ctx context.Context, args []string) error {
 	c := newCmd("restore")
 	pos, err := c.parse(args, 1)

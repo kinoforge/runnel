@@ -50,8 +50,7 @@ func (sp *space) poolConfig(r string) runnel.PoolConfig {
 	return sp.poolCfg[r]
 }
 
-// decodeAll skips values that do not decode; the client validates configs
-// before it stores them.
+// Skips values that do not decode; clients validate configs before they store them.
 func decodeAll[T any](raw map[string][]byte) map[string]T {
 	out := make(map[string]T, len(raw))
 	for name, b := range raw {

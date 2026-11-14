@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	// maxExamine bounds how many refused candidates one claim looks past.
 	maxExamine = 4096
 	pageSize   = 64
 )
@@ -33,8 +32,6 @@ func (s *Store) Claim(_ context.Context, ns string, req runnel.ClaimRequest) ([]
 	return s.rebuild(ns, out)
 }
 
-// claim runs one claim and returns, with the jobs it took, the queues whose
-// next job waits in the cold store.
 func (s *Store) claim(ns string, req runnel.ClaimRequest) ([]draft, []string, error) {
 	var out []draft
 	var held []string
@@ -95,8 +92,6 @@ func (c *claimer) run() {
 	}
 }
 
-// polls hands out polling jobs whose next poll is due; they hold their slot
-// already, so limits do not apply.
 func (c *claimer) polls(queues []sym) {
 	for _, q := range queues {
 		t := c.sp.poll[q]
@@ -162,8 +157,6 @@ func (c *claimer) byID(open []sym) {
 	}
 }
 
-// ready claims in priority order across the open queues, merging their ready
-// trees. Jobs a limit refuses are passed over, so the jobs behind them still run.
 func (c *claimer) ready(open []sym) {
 	h := &merge{}
 	for _, q := range open {
@@ -198,9 +191,7 @@ func (c *claimer) ready(open []sym) {
 	}
 }
 
-// cursor walks one ready tree a page at a time, resuming after the last key it
-// returned, so claiming from the tree while walking it is safe. It stops at
-// stop, the queue's head in the cold store, and is then held there.
+// Resumes after the last key it returned, so claiming from the tree while walking it is safe.
 type cursor struct {
 	t    *readyTree
 	stop *readyKey

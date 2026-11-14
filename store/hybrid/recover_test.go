@@ -26,8 +26,6 @@ func open(t *testing.T, dir string) *hybrid.Store {
 	return s
 }
 
-// fill leaves jobs in every interesting state: done, running, blocked, waiting
-// behind a unique key, plus configs, events and a cursor.
 func fill(t *testing.T, s runnel.Store) {
 	t.Helper()
 	ctx := context.Background()

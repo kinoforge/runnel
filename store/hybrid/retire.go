@@ -8,11 +8,8 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
-// coldDir holds the cold store. Finished jobs stay in memory for a moment, so
-// callers waiting for a result find it there, then move to it in batches.
 const coldDir = "done"
 
-// retirer moves finished jobs to the cold store until the store closes.
 func (s *Store) retirer() {
 	defer s.wg.Done()
 	t := time.NewTicker(s.opt.RetireEvery)
@@ -31,11 +28,7 @@ func (s *Store) retirer() {
 	}
 }
 
-// retire moves every job that finished before cutoff to the cold store. The
-// log is synced first, so the cold store never holds an ending the log could
-// lose. With replace set, as on opening, where a replay may bring back jobs
-// the cold store holds, it replaces copies there; otherwise there are none,
-// as jobs still being deleted there stay in memory.
+// Syncs the log first, so the cold store never holds an ending the log could lose.
 func (s *Store) retire(cutoff int64, replace bool) error {
 	s.coldMu.Lock()
 	defer s.coldMu.Unlock()
@@ -59,8 +52,6 @@ func (s *Store) retire(cutoff int64, replace bool) error {
 	return nil
 }
 
-// retireSome copies up to s.opt.RetireBatch finished jobs to the cold store, then
-// drops from memory those that did not change meanwhile.
 func (s *Store) retireSome(sp *space, cutoff int64, replace bool) (int, error) {
 	ds := sp.retirable(cutoff, s.opt.RetireBatch)
 	if len(ds) == 0 {
@@ -86,8 +77,6 @@ func (s *Store) retireSome(sp *space, cutoff int64, replace bool) (int, error) {
 	return len(ds), nil
 }
 
-// coldJobs encodes drafts for the cold store, reading the bodies they lack.
-// Waiting jobs due at now go in claim order, the others in run time order.
 func (s *Store) coldJobs(ns string, ds []draft, now int64) ([]cold.Job, error) {
 	s.fill(ds)
 	out := make([]cold.Job, len(ds))
@@ -109,7 +98,6 @@ func (s *Store) coldJobs(ns string, ds []draft, now int64) ([]cold.Job, error) {
 	return out, nil
 }
 
-// dropCold deletes ids from the cold store and counts them out.
 func (s *Store) dropCold(sp *space, ids []uid) error {
 	keys := make([]cold.ID, len(ids))
 	for i, id := range ids {
@@ -125,7 +113,6 @@ func (s *Store) dropCold(sp *space, ids []uid) error {
 	return nil
 }
 
-// loadCold reads a job only the cold store holds, interning its names in t.
 func (s *Store) loadCold(ns string, id uid, t *syms) (job, []byte, bool, error) {
 	if s.cold == nil {
 		return job{}, nil, false, nil
@@ -140,7 +127,6 @@ func (s *Store) loadCold(ns string, id uid, t *syms) (job, []byte, bool, error) 
 	return h, body, d.err == nil, d.err
 }
 
-// coldGet returns the whole job id from the cold store, or nil.
 func (s *Store) coldGet(ns string, id uid) (*runnel.Job, error) {
 	t := newSyms()
 	h, body, ok, err := s.loadCold(ns, id, &t)
@@ -150,7 +136,6 @@ func (s *Store) coldGet(ns string, id uid) (*runnel.Job, error) {
 	return t.full(ns, &h, body)
 }
 
-// retirable copies up to n jobs that finished before cutoff, oldest first.
 func (sp *space) retirable(cutoff int64, n int) []draft {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
@@ -168,9 +153,6 @@ func (sp *space) retirable(cutoff int64, n int) []draft {
 	return out
 }
 
-// forget counts delta into the cold counts and drops from memory the drafted
-// jobs that did not change since, calling gone with each; it returns the
-// others, whose cold copy is stale.
 func (sp *space) forget(ds []draft, delta map[cold.Count]int64, gone func(*job)) []uid {
 	top := uid{}
 	for i := range ds {
@@ -198,7 +180,6 @@ func (sp *space) forget(ds []draft, delta map[cold.Count]int64, gone func(*job))
 	return stale
 }
 
-// noteCold raises coldMax to id.
 func (sp *space) noteCold(id uid) {
 	for {
 		cur := sp.coldMax.Load()
@@ -211,13 +192,11 @@ func (sp *space) noteCold(id uid) {
 	}
 }
 
-// mayBeCold reports whether id could be in the cold store.
 func (sp *space) mayBeCold(id uid) bool {
 	top := sp.coldMax.Load()
 	return top != nil && cmpID(id, *top) <= 0
 }
 
-// addCold adds delta to the counts of the namespace's jobs in the cold store.
 func (sp *space) addCold(delta map[cold.Count]int64) {
 	for c, d := range delta {
 		if c.NS != sp.ns || c.State == 0 || c.State >= stCount {
@@ -239,7 +218,6 @@ func (sp *space) addCold(delta map[cold.Count]int64) {
 	}
 }
 
-// hasCold reports whether the cold store holds any job of the namespace.
 func (sp *space) hasCold() bool {
 	for _, n := range sp.coldCounts {
 		for _, v := range n {
@@ -251,8 +229,7 @@ func (sp *space) hasCold() bool {
 	return false
 }
 
-// unretire deletes from the cold store the jobs a call brought back into
-// memory, once the log holding that change is on disk.
+// Deletes the cold copies only once the log holding the change is on disk.
 func (s *Store) unretire(sp *space, ids []uid) error {
 	if err := s.log.Sync(); err != nil {
 		return err
@@ -270,8 +247,6 @@ func (s *Store) unretire(sp *space, ids []uid) error {
 	return err
 }
 
-// gather returns the jobs want names, in that order: those drafted from
-// memory, the others from the cold store. Jobs found in neither are left out.
 func (s *Store) gather(ns string, want []uid, ds []draft) ([]*runnel.Job, error) {
 	jobs, err := s.rebuild(ns, ds)
 	if err != nil {
@@ -296,12 +271,8 @@ func (s *Store) gather(ns string, want []uid, ds []draft) ([]*runnel.Job, error)
 	return out, nil
 }
 
-// finals are the states a job can end in.
 var finals = []uint8{stCompleted, stDead, stCancelled, stExpired}
 
-// coldNewest adds to ram, the ids a listing found in memory, those of the
-// waiting and finished jobs in the cold store that match q, and returns the
-// newest limit.
 func (s *Store) coldNewest(ns string, st uint8, q runnel.Query, cur uid, hasCur bool, ram []uid) ([]uid, error) {
 	states := append([]uint8{stWaiting}, finals...)
 	switch {

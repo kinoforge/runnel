@@ -1,9 +1,3 @@
-// Package config loads the settings of the runnel binary: built-in defaults,
-// then an optional YAML file, then RUNNEL_* environment variables.
-//
-// Every key maps to an environment variable named after its YAML path, such as
-// server.max_body to RUNNEL_SERVER_MAX_BODY. Fields with an env tag use that
-// name instead. Durations and numbers left at zero use the library defaults.
 package config
 
 import (
@@ -81,7 +75,6 @@ type Maintainer struct {
 	Retention  Retention     `yaml:"retention"`
 }
 
-// Retention mirrors runnel.Retention so it converts directly.
 type Retention struct {
 	Completed   time.Duration `yaml:"completed"`
 	Cancelled   time.Duration `yaml:"cancelled"`
@@ -103,7 +96,6 @@ type Callbacks struct {
 	SecretTTL     time.Duration `yaml:"secret_ttl"`
 }
 
-// Limits mirrors runnel.Limits so it converts directly.
 type Limits struct {
 	MaxPayload     int `yaml:"max_payload"`
 	MaxDependsOn   int `yaml:"max_depends_on"`
@@ -136,9 +128,6 @@ func Default() Config {
 	}
 }
 
-// Load returns the defaults overlaid with the YAML file at path, when path is
-// set, and then with the environment read through getenv. It does not
-// validate, so callers can apply flags first.
 func Load(path string, getenv func(string) string) (Config, error) {
 	cfg := Default()
 	if path != "" {

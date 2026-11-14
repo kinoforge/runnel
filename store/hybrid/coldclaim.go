@@ -7,10 +7,7 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
-// claimCold goes on with a claim held at the head of a queue's jobs in the
-// cold store: under waitMu, so that jobs brought back stay in memory, it
-// claims again, as another call may have brought them back already, and
-// brings back the next jobs of the queues still held.
+// Runs under waitMu so jobs brought back stay in memory, and claims again first, since another call may have brought them back already.
 func (s *Store) claimCold(ns string, req runnel.ClaimRequest, out []draft) ([]draft, error) {
 	sp := s.space(ns)
 	s.waitMu.Lock()
@@ -35,9 +32,6 @@ func (s *Store) claimCold(ns string, req runnel.ClaimRequest, out []draft) ([]dr
 	return out, nil
 }
 
-// wake moves the future jobs of the claimed queues that are due by the claim
-// to the cold store's claim order, and brings back the jobs claimed by id
-// that wait there.
 func (s *Store) wake(sp *space, req runnel.ClaimRequest) error {
 	now := ms(req.Now)
 	due, ids := sp.toWake(req, now)
@@ -67,8 +61,6 @@ func (s *Store) wake(sp *space, req runnel.ClaimRequest) error {
 	return s.bring(sp, jobs, "", nil)
 }
 
-// toWake names the claimed queues with future jobs in the cold store due by
-// now, and the ids claimed that memory does not hold.
 func (sp *space) toWake(req runnel.ClaimRequest, now int64) ([]string, []uid) {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
@@ -91,8 +83,6 @@ func (sp *space) toWake(req runnel.ClaimRequest, now int64) ([]string, []uid) {
 	return due, ids
 }
 
-// wakeQueue readies q's future jobs due at now. Until its head is read back,
-// the queue is held at the front, as the jobs readied may come first.
 func (s *Store) wakeQueue(sp *space, q string, now int64) error {
 	sp.mu.Lock()
 	v := sp.syms.id(q)

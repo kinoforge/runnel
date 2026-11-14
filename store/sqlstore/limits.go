@@ -129,8 +129,6 @@ func admit(ctx context.Context, j cand, q runnel.QueueConfig, p runnel.PoolConfi
 	return admitted, nil
 }
 
-// admitPool checks the job's pool and returns the pool's bucket to take a
-// token from when every other limit passes too.
 func admitPool(ctx context.Context, j cand, p runnel.PoolConfig, act counts, lim *limiter) (verdict, []*bucket, error) {
 	if j.pool == "" {
 		return admitted, nil, nil

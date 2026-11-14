@@ -7,7 +7,6 @@ import (
 
 const endedBuffer = 256
 
-// hub fans wake-ups and job endings out to the subscribers of a namespace.
 // Sends never block: a full channel drops the signal.
 type hub struct {
 	mu   sync.Mutex
@@ -56,8 +55,6 @@ func add[T any](m map[string]map[chan T]struct{}, ns string, ch chan T) {
 	m[ns][ch] = struct{}{}
 }
 
-// notify wakes the namespace's subscribers and sends the ids of the jobs that
-// ended; the ids are spelled out only when someone listens.
 func (h *hub) notify(ns string, wake bool, ends []uid) {
 	if !wake && len(ends) == 0 {
 		return

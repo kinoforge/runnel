@@ -6,8 +6,7 @@ import (
 	"errors"
 )
 
-// Keys start with a kind byte and the namespace, ended by a zero byte, which
-// namespace names never contain.
+// Namespace names never contain a zero byte, so a zero byte ends the namespace in a key.
 const (
 	kCount    byte = 'c'
 	kStart    byte = 'd'
@@ -29,7 +28,6 @@ func prefix(kind byte, ns string, more int) []byte {
 	return append(b, 0)
 }
 
-// span returns the bounds of every key of one kind in ns.
 func span(kind byte, ns string) ([]byte, []byte) {
 	lo := prefix(kind, ns, 0)
 	hi := prefix(kind, ns, 0)
@@ -47,8 +45,6 @@ func timeKey(ns string, at int64, id ID) []byte {
 	return append(binary.BigEndian.AppendUint64(prefix(kTime, ns, 8+len(id)), uint64(at)), id[:]...)
 }
 
-// key is where c is stored: a group's count names its queue with a length,
-// so the group can follow it.
 func (c Count) key() []byte {
 	if c.Group != "" {
 		return append(appendStr(prefix(kGroup, c.NS, 1+len(c.Queue)+len(c.Group)), c.Queue), c.Group...)
@@ -71,15 +67,12 @@ func decodeCountKey(k []byte) (Count, bool) {
 	return c, true
 }
 
-// idOf reads the id that ends a key.
 func idOf(k []byte) ID {
 	var id ID
 	copy(id[:], k[len(k)-len(id):])
 	return id
 }
 
-// A record holds the state, finish time, the order of a waiting job and the
-// names, then the caller's data.
 func encodeJob(j *Job) []byte {
 	b := make([]byte, 0, 2+5*binary.MaxVarintLen64+len(j.Queue)+len(j.Kind)+len(j.Group)+3+len(j.Data))
 	b = append(b, j.State)
@@ -140,7 +133,6 @@ func readNames(b []byte) (q, k, t string, rest []byte, ok bool) {
 	return
 }
 
-// encodeWhen is what the finish-time index needs to choose jobs to prune.
 func encodeWhen(j *Job) []byte { return appendStr([]byte{j.State}, j.Queue) }
 
 func decodeWhen(v []byte) (uint8, string, bool) {

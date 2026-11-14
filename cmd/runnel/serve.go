@@ -33,7 +33,6 @@ func newServeFlags(fs *flag.FlagSet) serveFlags {
 	}
 }
 
-// apply overrides cfg with the flags given on the command line only.
 func (f serveFlags) apply(fs *flag.FlagSet, cfg *config.Config) {
 	fs.Visit(func(fl *flag.Flag) {
 		switch fl.Name {

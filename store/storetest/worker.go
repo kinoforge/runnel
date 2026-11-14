@@ -324,8 +324,6 @@ func testWorkerConcurrency(t *testing.T, open Opener) {
 	}
 }
 
-// testWorkerGather fills a worker's slots one job at a time: the last free
-// slot is still claimed although it is fewer than a quarter of them.
 func testWorkerGather(t *testing.T, open Opener) {
 	spec.Rule(t, "R08")
 	e := setup(t, open)

@@ -25,8 +25,6 @@ func lessTime(a, b timeKey) bool {
 	return lessID(a.id, b.id)
 }
 
-// readyKey orders waiting jobs the way they are claimed: higher priority, then
-// earlier run_at, then id.
 type readyKey struct {
 	prio int32
 	at   int64
@@ -80,8 +78,6 @@ type bucket struct {
 	at     int64
 }
 
-// countKey names a running count: a queue, a queue's group, a pool or a
-// pool's group.
 type countKey struct {
 	kind uint8
 	a, b sym
@@ -94,32 +90,22 @@ const (
 	cPoolGroup
 )
 
-// space holds one namespace. Jobs live in a slice of fixed-size records found
-// through idx; freed slots are reused.
 type space struct {
-	ns    string
-	mu    sync.Mutex
-	queue queue
-	syms  syms
-	// coldCounts counts the jobs in the cold store by queue name and state;
-	// retired changes each time jobs leave memory for it.
+	ns         string
+	mu         sync.Mutex
+	queue      queue
+	syms       syms
 	coldCounts map[string]*[stCount]int64
 	retired    atomic.Uint64
 	coldSeq    int64
-	// coldQueued counts the waiting jobs in the cold store by queue and
-	// group; heads holds the front of each queue's jobs there.
 	coldQueued map[[2]string]int64
 	heads      map[sym]cold.Head
 	spilled    atomic.Bool
-	// hot counts the waiting jobs in memory; total, the store's count of
-	// them, too.
-	hot   atomic.Int64
-	total *atomic.Int64
-	// unretiring counts, by id, the calls that brought a job back from the
-	// cold store and have yet to delete it there; such jobs stay in memory.
+	hot        atomic.Int64
+	total      *atomic.Int64
+	// Jobs whose cold copy is still being deleted stay in memory.
 	unretiring map[uid]int
-	// coldMax is the largest id put in the cold store. Ids are time-ordered,
-	// so a new job's id is larger and needs no lookup there.
+	// Ids are time ordered, so a new job's id is above coldMax and needs no cold lookup.
 	coldMax atomic.Pointer[uid]
 
 	idx     map[uid]int32
@@ -182,8 +168,6 @@ func (sp *space) bodyRef(id uid) (ref, bool) {
 	return ref{}, false
 }
 
-// setJob stores h. On a replace, the id index and the state index are left
-// alone when they already hold the job.
 func (sp *space) setJob(h job) {
 	if i, ok := sp.idx[h.id]; ok {
 		old := sp.jobs.at(i)
@@ -215,15 +199,13 @@ func (sp *space) delJob(id uid) {
 	sp.cache.del(id)
 }
 
-// draft copies h with its names and, when cached, its body.
 func (sp *space) draft(h *job) draft {
 	d := sp.syms.draft(h)
 	d.body = sp.cache.bodies[h.id]
 	return d
 }
 
-// shrinkIdx rebuilds the id map once it holds a quarter of its peak, since Go
-// maps, cloned ones too, keep the memory of every entry they ever held.
+// Go maps, clones too, keep the memory of every entry they ever held.
 func (sp *space) shrinkIdx() {
 	if sp.idxPeak < shrinkAt || len(sp.idx)*4 > sp.idxPeak {
 		return
@@ -235,7 +217,6 @@ func (sp *space) shrinkIdx() {
 	sp.idx, sp.idxPeak = m, len(m)
 }
 
-// body returns a job's body from the cache or from disk.
 func (sp *space) body(h *job, fs *files) ([]byte, error) {
 	if b, ok := sp.cache.bodies[h.id]; ok {
 		return b, nil
@@ -288,9 +269,6 @@ func treeOf[K any](m map[sym]*btree.BTreeG[K], q sym, less btree.LessFunc[K]) *b
 
 func readyOf(h *job) readyKey { return readyKey{prio: h.prio, at: h.runAt, id: h.id} }
 
-// index adds h to the indexes of its state, apart from the id and state
-// indexes setJob keeps. Waiting jobs go to the schedule; claims move the due
-// ones to the ready tree.
 func (sp *space) index(h *job) {
 	sp.count(h, 1)
 	if h.deadline != 0 && !h.final() {
@@ -337,7 +315,6 @@ func (sp *space) unindex(h *job) {
 	}
 }
 
-// unready removes h from the ready tree and reports whether it was there.
 func (sp *space) unready(h *job) bool {
 	t := sp.ready[h.queue]
 	if t == nil {
@@ -347,8 +324,6 @@ func (sp *space) unready(h *job) bool {
 	return ok
 }
 
-// promote moves the waiting jobs of queue q due at now from the schedule to the
-// ready tree.
 func (sp *space) promote(q sym, now int64) {
 	t := sp.sched[q]
 	if t == nil {

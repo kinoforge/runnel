@@ -33,7 +33,6 @@ func (f *finished) Finished(*runnel.Job, runnel.Outcome, time.Duration) {
 	}
 }
 
-// BenchmarkRun enqueues b.N jobs, then runs them with workers like runnel bench.
 func BenchmarkRun(b *testing.B) {
 	modes := []struct {
 		name string
@@ -85,8 +84,6 @@ func runJobs(b *testing.B, s *hybrid.Store) {
 	wg.Wait()
 }
 
-// BenchmarkCycle measures the store alone: parallel callers claim batches of
-// jobs and finish them, as workers do, with no worker loop around it.
 func BenchmarkCycle(b *testing.B) {
 	for _, m := range []struct {
 		name string

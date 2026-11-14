@@ -35,9 +35,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	s.healthz(w, r)
 }
 
-// backup streams a copy of the whole store as a tar file. A failure after
-// the status is sent cuts the connection, so the client knows the copy is
-// incomplete.
+// The status is already sent, so a failure aborts the connection and the client sees the copy is incomplete.
 func (s *Server) backup(w http.ResponseWriter, r *http.Request, _ principal) error {
 	b, ok := s.store.(runnel.Backuper)
 	if !ok {

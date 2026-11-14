@@ -2,9 +2,6 @@ package hybrid
 
 import "testing"
 
-// TestSlabsReleaseEmptyBlocks fills three blocks, empties the first, and
-// checks that it is released and its place reused without handing out a slot
-// twice.
 func TestSlabsReleaseEmptyBlocks(t *testing.T) {
 	var s slabs
 	var ids []int32

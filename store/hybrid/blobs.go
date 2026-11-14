@@ -8,13 +8,11 @@ import (
 	"sync"
 )
 
-// snapBit marks a file id as a snapshot rather than a log segment.
 const snapBit = 1 << 31
 
 var errNoBody = errors.New("hybrid: job body missing")
 
-// files reads job bodies from log segments and snapshots, keeping each file
-// open once. Readers hold the read lock, so a file is never closed under them.
+// Readers hold the read lock, so a file is never closed under them.
 type files struct {
 	path func(id uint32) string
 	mu   sync.RWMutex
@@ -29,8 +27,6 @@ func (fs *files) read(r ref) ([]byte, error) {
 	return b, nil
 }
 
-// readAt fills b from file id at off and returns how much it read; past the
-// end of the file it reads less.
 func (fs *files) readAt(id uint32, off int64, b []byte) (int, error) {
 	fs.mu.RLock()
 	f := fs.open[id]
@@ -53,8 +49,6 @@ func (fs *files) readAt(id uint32, off int64, b []byte) (int, error) {
 	return n, nil
 }
 
-// window reads bodies in file order through one buffer, so a snapshot reads
-// each file once instead of once per body.
 type window struct {
 	fs   *files
 	file uint32
@@ -92,7 +86,6 @@ func (fs *files) load(id uint32) error {
 	return nil
 }
 
-// drop closes the files gone reports true for.
 func (fs *files) drop(gone func(id uint32) bool) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -108,20 +101,15 @@ func (fs *files) close() {
 	fs.drop(func(uint32) bool { return true })
 }
 
-// cache holds the job bodies whose records are not written yet; without a log
-// it holds them all.
 type cache struct {
 	bodies map[uid][]byte
 	queue  []leaving
 	peak   int
 }
 
-// shrinkAt is the size past which an emptied cache map is replaced, since Go
-// maps keep their memory.
+// Go maps keep their memory after deletes, so a big emptied map is replaced.
 const shrinkAt = 1 << 12
 
-// leaving is a body that may leave the cache once record lsn is written, if
-// the job still has the body at ref.
 type leaving struct {
 	id  uid
 	at  ref
@@ -135,7 +123,6 @@ func (c *cache) put(id uid, b []byte) {
 
 func (c *cache) del(id uid) { delete(c.bodies, id) }
 
-// evict drops the queued bodies whose records are written by now.
 func (c *cache) evict(written uint64, bodyOf func(uid) (ref, bool)) {
 	i := 0
 	for ; i < len(c.queue) && c.queue[i].lsn <= written; i++ {

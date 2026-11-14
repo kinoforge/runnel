@@ -12,14 +12,8 @@ import (
 
 const chunkBytes = 1 << 20
 
-// A snapshot is written while calls go on, a block of jobs at a time under
-// the namespace lock, so it needs little memory and pauses nobody. The log was
-// rotated first, so whatever the snapshot misses is in the segments after it.
-// Replaying those over the snapshot gives the same state: every op sets its
-// value outright, and replay skips kids and events it already holds.
+// Snapshots run while calls go on. The log was rotated first, so the segments after it hold whatever a snapshot misses, and replaying them over it gives the same state.
 
-// writeSnapshot writes every namespace to the snapshot for seg and returns
-// where each copied body went.
 func (s *Store) writeSnapshot(seg uint64) (map[*space][]moved, error) {
 	path := s.snapPath(seg)
 	f, err := os.OpenFile(path+tmpSuffix, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, filePerm)
@@ -33,12 +27,10 @@ func (s *Store) writeSnapshot(seg uint64) (map[*space][]moved, error) {
 		}
 	}
 	if err == nil {
-		// The snapshot may hold changes made after the rotation; their records
-		// must be on disk before it replaces the segments before them.
+		// Records of changes made after the rotation must be on disk before the snapshot replaces the segments before them.
 		err = s.log.Sync()
 	}
 	if err == nil {
-		// Jobs that left memory for the cold store are not in the snapshot.
 		err = s.cold.Flush()
 	}
 	if err == nil {
@@ -62,8 +54,6 @@ func (s *Store) allSpaces() []*space {
 	return slices.Collect(maps.Values(s.spaces))
 }
 
-// snapWriter writes records of about chunkBytes in the format replay reads,
-// and notes where in the file each copied body lands.
 type snapWriter struct {
 	f      *os.File
 	seg    uint64
@@ -130,7 +120,6 @@ func (w *snapWriter) space(sp *space) error {
 	return w.flush()
 }
 
-// block copies the jobs of block b and the names they use.
 func (w *snapWriter) block(b int) ([]string, bool) {
 	sp := w.sp
 	sp.mu.Lock()
@@ -142,8 +131,6 @@ func (w *snapWriter) block(b int) ([]string, bool) {
 	return sp.syms.names[:len(sp.syms.names):len(sp.syms.names)], true
 }
 
-// jobs writes the copied block in disk order of the bodies, so each file is
-// read once.
 func (w *snapWriter) jobs(names []string) error {
 	sy := syms{names: names}
 	live := slices.DeleteFunc(w.page, func(h job) bool { return h.state == 0 })
@@ -156,8 +143,7 @@ func (w *snapWriter) jobs(names []string) error {
 	return nil
 }
 
-// job writes h with a copy of its body. A body written after the rotation is
-// left where it is: the log after the snapshot sets it again.
+// A body written after the rotation stays where it is: the log after the snapshot sets it again.
 func (w *snapWriter) job(h *job, sy *syms) error {
 	if h.body.n == 0 || (h.body.file&snapBit == 0 && uint64(h.body.file) >= w.seg) {
 		w.e.byte(opPutHot)
@@ -200,7 +186,6 @@ func (w *snapWriter) flush() error {
 	return err
 }
 
-// cmpRef orders bodies by where they lie on disk.
 func cmpRef(a, b ref) int {
 	if a.file != b.file {
 		return cmp.Compare(a.file, b.file)

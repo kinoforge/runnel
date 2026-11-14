@@ -9,14 +9,11 @@ import (
 
 const idLen = 36
 
-// idDigits says where each byte of a canonical id starts.
 var idDigits = [16]int{0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34}
 
-// uid is a job id in its 16 raw bytes, so ids hold no pointers.
 type uid [16]byte
 
-// parseID reads a job id in canonical form. Other spellings of the same UUID
-// are refused, so an id always reads back as it was written.
+// Only the canonical spelling is accepted, so an id always reads back as it was written.
 func parseID(s string) (uid, bool) {
 	var u uid
 	if len(s) != idLen || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
@@ -33,7 +30,6 @@ func parseID(s string) (uid, bool) {
 	return u, true
 }
 
-// unhex reads one lowercase hex digit.
 func unhex(c byte) (byte, bool) {
 	switch {
 	case '0' <= c && c <= '9':
@@ -46,8 +42,6 @@ func unhex(c byte) (byte, bool) {
 
 func (u uid) String() string { return uuid.UUID(u).String() }
 
-// sym stands for a string the namespace has seen, such as a queue or group
-// name. Zero is the empty string.
 type sym uint32
 
 type syms struct {
@@ -70,7 +64,6 @@ func (t *syms) id(s string) sym {
 	return v
 }
 
-// reuse returns v when it stands for s, and interns s otherwise.
 func (t *syms) reuse(v sym, s string) sym {
 	if t.names[v] == s {
 		return v
@@ -78,7 +71,6 @@ func (t *syms) reuse(v sym, s string) sym {
 	return t.id(s)
 }
 
-// find looks s up without adding it.
 func (t *syms) find(s string) (sym, bool) {
 	if s == "" {
 		return 0, true
@@ -120,16 +112,13 @@ const (
 	flagDeps
 )
 
-// ref says where a job's body lies in the log or a snapshot.
 type ref struct {
 	file uint32
 	n    uint32
 	off  int64
 }
 
-// job is what stays in memory for each job: the fields claims, limits and
-// indexes read, with no pointers, so the garbage collector never scans it. The
-// rest of the job, its body, sits in the cache or on disk.
+// No pointers, so the garbage collector never scans job records. Keep it that way.
 type job struct {
 	id                                  uid
 	queue, kind, group, pool, worker    sym
@@ -147,8 +136,6 @@ func (h *job) final() bool             { return final(h.state) }
 func (h *job) is(st uint8) bool        { return h.state == st }
 func (h *job) stateName() runnel.State { return stateNames[h.state] }
 
-// hot takes the in-memory fields of j, interning its names. like, which may be
-// nil, is a stored job whose names j likely shares, sparing the lookups.
 func (t *syms) hot(j *runnel.Job, like *job) job {
 	var l job
 	if like != nil {
@@ -170,15 +157,12 @@ func (t *syms) hot(j *runnel.Job, like *job) job {
 	return h
 }
 
-// full rebuilds the whole job from its in-memory fields and its body.
 func (t *syms) full(ns string, h *job, body []byte) (*runnel.Job, error) {
 	d := t.draft(h)
 	d.body = body
 	return d.job(ns)
 }
 
-// draft is a job copied under the namespace lock with its names and, when
-// cached, its body, so it can be rebuilt once the lock is released.
 type draft struct {
 	h     job
 	names [5]string
@@ -187,7 +171,6 @@ type draft struct {
 
 func (t *syms) draft(h *job) draft { return draft{h: *h, names: t.names5(h)} }
 
-// names5 returns the queue, kind, group, pool and worker of h.
 func (t *syms) names5(h *job) [5]string {
 	return [5]string{t.name(h.queue), t.name(h.kind), t.name(h.group), t.name(h.pool), t.name(h.worker)}
 }

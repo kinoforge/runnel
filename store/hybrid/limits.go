@@ -2,9 +2,6 @@ package hybrid
 
 import "math"
 
-// admit checks h against every running limit and rate limit, taking a token
-// from each rate bucket when it passes. A refusal marks the queue, group or
-// pool full for the rest of the claim.
 func (c *claimer) admit(h *job) bool {
 	sp := c.sp
 	qk := countKey{cQueue, h.queue, 0}
@@ -73,8 +70,6 @@ type token struct {
 	taken  bool
 }
 
-// bucket returns the token bucket under key refilled to now. Only buckets the
-// claim took from are written back.
 func (c *claimer) bucket(key string, rate float64, burst int) *token {
 	if b, ok := c.buckets[key]; ok {
 		return b

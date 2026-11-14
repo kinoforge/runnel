@@ -2,8 +2,6 @@ package wal
 
 import "time"
 
-// offBacklog is how many unwritten bytes SyncOff lets pile up before callers
-// write them themselves, so a fast producer cannot outrun the disk.
 const offBacklog = 8 << 20
 
 // Pos says where an appended record will be: its sequence number for Wait, and
@@ -41,11 +39,8 @@ func (l *Log) reached(lsn uint64) bool {
 	return l.written >= lsn && (l.opt.Sync != SyncEach || l.synced >= lsn)
 }
 
-// Wait blocks until record lsn is written, and synced under SyncEach; under
-// SyncOff it returns at once unless the backlog is too big. The first
-// caller to find nothing in flight writes everything queued so far, its own
-// record and those of every caller behind it, so one write and one fsync serve
-// them all (group commit).
+// Wait blocks until record lsn is written, and synced under SyncEach.
+// Concurrent callers share one write and one fsync (group commit).
 func (l *Log) Wait(lsn uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -75,8 +70,7 @@ func (l *Log) Wait(lsn uint64) error {
 	return nil
 }
 
-// flushLocked writes queued frames, and fsyncs them when sync is set. The
-// caller holds l.io.
+// The caller holds l.io.
 func (l *Log) flushLocked(sync bool) error {
 	l.mu.Lock()
 	data, upto := l.buf, l.appended
@@ -104,8 +98,6 @@ func (l *Log) flushLocked(sync bool) error {
 	return nil
 }
 
-// background writes records nobody waits for, such as claims, and under
-// SyncPeriodic fsyncs every Interval without holding up writers.
 func (l *Log) background() {
 	defer l.wg.Done()
 	t := time.NewTicker(l.opt.Interval)
@@ -126,7 +118,6 @@ func (l *Log) background() {
 	}
 }
 
-// syncWritten fsyncs what is written so far while writers carry on.
 func (l *Log) syncWritten() error {
 	l.syncMu.Lock()
 	defer l.syncMu.Unlock()

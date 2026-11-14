@@ -8,13 +8,10 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/wal"
 )
 
-// Memory sets how much of the container's memory limit Go's heap may use;
-// the rest is left to the page cache. GOMEMLIMIT, when set, wins.
 type Memory struct {
 	HeapPercent int64 `yaml:"heap_percent"`
 }
 
-// Hybrid tunes the hybrid store. The store URL's ?sync= wins over Sync.
 type Hybrid struct {
 	Sync          string        `yaml:"sync"`
 	SyncInterval  time.Duration `yaml:"sync_interval"`
@@ -56,8 +53,6 @@ func defaultHybrid() Hybrid {
 	}
 }
 
-// Options returns the store options these settings name; the store URL
-// supplies the directory and may override the sync mode.
 func (h Hybrid) Options() (hybrid.Options, error) {
 	sync, err := wal.ParseSync(h.Sync)
 	return hybrid.Options{

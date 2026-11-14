@@ -9,8 +9,6 @@ import (
 
 var errShort = errors.New("hybrid: record cut short")
 
-// enc builds a log record. A nil enc writes nothing, which is how a store
-// without a log skips encoding.
 type enc struct{ b []byte }
 
 func (e *enc) byte(v byte) {
@@ -45,8 +43,6 @@ func (e *enc) str(v string) {
 	}
 }
 
-// dec reads what enc wrote. The first failure sticks in err and later reads
-// return zero values.
 type dec struct {
 	b   []byte
 	n   int
@@ -55,7 +51,6 @@ type dec struct {
 
 func newDec(b []byte) *dec { return &dec{b: b, n: len(b)} }
 
-// pos is how many bytes have been read.
 func (d *dec) pos() int { return d.n - len(d.b) }
 
 func (d *dec) done() bool { return d.err != nil || len(d.b) == 0 }
@@ -109,11 +104,8 @@ func (d *dec) bytes() []byte {
 
 func (d *dec) str() string { return string(d.bytes()) }
 
-// hot writes a job's in-memory fields, with names spelled out so a record
-// does not depend on the symbol numbers of one process.
 func (e *enc) hot(h *job, t *syms) { e.named(h, t.names5(h)) }
 
-// named writes h with the names its symbols stand for.
 func (e *enc) named(h *job, names [5]string) {
 	if e == nil {
 		return

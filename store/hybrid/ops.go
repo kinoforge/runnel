@@ -8,9 +8,7 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
-// Every change to a namespace is one of these ops. A store call applies its ops
-// to memory and logs them as one record; replay and snapshots apply the same
-// ops, so recovery runs no job logic.
+// Replay and snapshots apply the same ops, so recovery runs no job logic.
 const (
 	opPutJob byte = iota + 1
 	opPutHot
@@ -28,17 +26,13 @@ const (
 	opSeq
 )
 
-// tx records the ops of one store call on one namespace. bodies lists where
-// in the record each new body starts, to point its job at the log once the
-// record has a place there.
 type tx struct {
-	sp     *space
-	rec    *enc
-	head   int
-	wake   bool
-	ends   []uid
-	bodies []placed
-	// unretired are jobs brought back from the cold store.
+	sp        *space
+	rec       *enc
+	head      int
+	wake      bool
+	ends      []uid
+	bodies    []placed
 	unretired []uid
 }
 
@@ -48,7 +42,6 @@ type placed struct {
 	n   int
 }
 
-// newTx starts a call on sp; with logged unset it records nothing.
 func newTx(sp *space, logged bool) *tx {
 	t := &tx{sp: sp}
 	if logged {
@@ -61,7 +54,6 @@ func newTx(sp *space, logged bool) *tx {
 
 func (t *tx) changed() bool { return t.rec != nil && len(t.rec.b) > t.head }
 
-// put stores h with a new body.
 func (t *tx) put(h job, body []byte) {
 	h.body = ref{}
 	t.sp.setJob(h)
@@ -77,7 +69,6 @@ func (t *tx) put(h job, body []byte) {
 	}
 }
 
-// putHot stores h, keeping the body it has.
 func (t *tx) putHot(h job) {
 	t.sp.setJob(h)
 	t.rec.byte(opPutHot)
@@ -149,7 +140,6 @@ func (t *tx) putBucket(key string, b bucket) {
 	t.rec.opBucket(key, b)
 }
 
-// blob writes b with its length and returns where b starts in the record.
 func (e *enc) blob(b []byte) int {
 	if e == nil {
 		return 0
@@ -209,8 +199,6 @@ func (e *enc) opSeq(seq int64) {
 	e.int(seq)
 }
 
-// replayer applies logged records. file and base say where the current record
-// sits on disk, so bodies are found there later instead of kept in memory.
 type replayer struct {
 	get  func(ns string) *space
 	cold *cold.Store
@@ -308,8 +296,6 @@ func (r *replayer) op(d *dec, sp *space) error {
 	return d.err
 }
 
-// uncold deletes id from the cold store: a job back in memory unfinished, or
-// one pruned, has no copy there.
 func (r *replayer) uncold(sp *space, id uid) error {
 	if r.cold == nil || !sp.hasCold() {
 		return nil

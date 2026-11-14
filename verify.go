@@ -60,7 +60,6 @@ func VerifySignature(header string, body []byte, maxAge time.Duration, now time.
 	return fmt.Errorf("%w: no secret matches", ErrSignature)
 }
 
-// parseSignature reads t=<unix seconds> and every v1=<hex> of a header.
 func parseSignature(header string) (int64, []string, error) {
 	var ts int64
 	var sigs []string

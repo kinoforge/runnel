@@ -66,8 +66,6 @@ func (s *Store) Prune(_ context.Context, ns string, req runnel.PruneRequest) (in
 	return n, err
 }
 
-// archivePruned archives the pruned jobs: those in memory, then those only
-// the cold store held, read beforehand into cold.
 func (s *Store) archivePruned(sp *space, gone []job, dropped []uid, cold map[uid]*runnel.Job) error {
 	list := make([]*runnel.Job, 0, len(gone)+len(dropped))
 	for i := range gone {
@@ -85,7 +83,6 @@ func (s *Store) archivePruned(sp *space, gone []job, dropped []uid, cold map[uid
 	return s.archive(list)
 }
 
-// expire frees the unique keys held for a time that ended before before.
 func expire(t *tx, before int64) {
 	for {
 		k, ok := t.sp.expiry.Min()
@@ -96,8 +93,6 @@ func expire(t *tx, before int64) {
 	}
 }
 
-// prunable returns up to limit jobs in memory that finished before before in
-// one of states, and in queue when it is named.
 func (sp *space) prunable(before int64, states []uint8, queue string, limit int) []job {
 	q, known := sp.syms.find(queue)
 	var gone []job
@@ -114,7 +109,6 @@ func (sp *space) prunable(before int64, states []uint8, queue string, limit int)
 	return gone
 }
 
-// coldOld are jobs in the cold store to prune, read whole when archived.
 type coldOld struct {
 	ids  []uid
 	jobs map[uid]*runnel.Job
@@ -144,8 +138,6 @@ func (s *Store) coldPrunable(ns string, before int64, states []uint8, req runnel
 	return old, nil
 }
 
-// archive appends pruned jobs to the archive file in the store's directory. A
-// store in memory only has nowhere to keep them.
 func (s *Store) archive(jobs []*runnel.Job) error {
 	if s.opt.Dir == "" || len(jobs) == 0 {
 		return nil

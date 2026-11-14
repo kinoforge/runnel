@@ -6,9 +6,6 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-// carryTrace copies the caller's W3C trace context into a job that carries
-// none and has room for it in its meta, so the worker's span joins the
-// caller's trace.
 func (s *Server) carryTrace(r *http.Request, j *runnel.Job) {
 	parent := r.Header.Get(runnel.TraceParent)
 	if parent == "" || j.Meta[runnel.TraceParent] != "" {

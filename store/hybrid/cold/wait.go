@@ -8,11 +8,6 @@ import (
 	"github.com/cockroachdb/pebble/v2"
 )
 
-// Waiting jobs are kept in two orders per queue. Ready ones in claim order:
-// higher priority, then earlier run time, then id. Future ones in run time
-// order, until Wake moves those due to the ready order. A deadline entry per
-// job with a start deadline lets the caller rebuild its deadline index.
-
 const signBit = 1 << 63
 
 // Next names a waiting job by its place in claim order.
@@ -43,7 +38,6 @@ func queueSpan(kind byte, ns, queue string) ([]byte, []byte) {
 	return lo, after(lo)
 }
 
-// after returns the first key past every key starting with p.
 func after(p []byte) []byte {
 	b := bytes.Clone(p)
 	for i := len(b) - 1; i >= 0; i-- {
@@ -67,8 +61,6 @@ func futureKey(ns, queue string, at int64, id ID) []byte {
 	return append(b, id[:]...)
 }
 
-// whenKey orders the jobs of ns by the time at, for the start and deadline
-// indexes.
 func whenKey(kind byte, ns string, at int64, id ID) []byte {
 	return append(binary.BigEndian.AppendUint64(prefix(kind, ns, 24), uint64(at)), id[:]...)
 }

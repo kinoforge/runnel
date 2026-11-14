@@ -9,12 +9,6 @@ const (
 	slabStart = 64
 )
 
-// slabs hold job records in blocks of slabSize. Growing one slice would copy
-// every record and briefly need twice their memory; blocks never move. New
-// records fill the tail block, which grows until full, so small namespaces
-// stay small. A block whose records are all gone is released, and its place
-// is reused for a later tail, so memory follows the jobs held, not the most
-// ever held.
 type slabs struct {
 	blocks [][]job
 	live   []int32
@@ -25,7 +19,6 @@ type slabs struct {
 
 func (s *slabs) at(i int32) *job { return &s.blocks[i>>slabBits][i&slabMask] }
 
-// put stores h in a free slot and returns its index.
 func (s *slabs) put(h job) int32 {
 	if n := len(s.free); n > 0 {
 		i := s.free[n-1]
@@ -48,7 +41,6 @@ func (s *slabs) put(h job) int32 {
 	return s.tail<<slabBits | int32(len(b))
 }
 
-// newTail starts a tail block in a released place, or after the last block.
 func (s *slabs) newTail() {
 	if n := len(s.empty); n > 0 {
 		s.tail = s.empty[n-1]
@@ -61,7 +53,6 @@ func (s *slabs) newTail() {
 	s.blocks[s.tail] = make([]job, 0, slabStart)
 }
 
-// clear frees slot i, releasing its block once the block is empty.
 func (s *slabs) clear(i int32) {
 	b := i >> slabBits
 	*s.at(i) = job{}

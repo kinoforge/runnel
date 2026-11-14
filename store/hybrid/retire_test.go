@@ -9,9 +9,6 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid"
 )
 
-// TestFinishedJobsLeaveMemory finishes jobs, waits for them to reach the cold
-// store, and checks they read, list, count, survive a restart, come back on
-// retry and go on prune.
 func TestFinishedJobsLeaveMemory(t *testing.T) {
 	dir := t.TempDir()
 	opt := hybrid.Options{Dir: dir}

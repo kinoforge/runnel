@@ -83,8 +83,7 @@ func (b *backup) bytes(name string, data []byte) error {
 	return err
 }
 
-// file copies the bytes src holds now. The newest log segment grows while it
-// is read; a record cut off at its end is dropped when the copy is opened.
+// The newest segment grows while it is copied; opening the copy drops a record cut off at its end.
 func (b *backup) file(ctx context.Context, src, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -166,7 +165,7 @@ func emptyDir(dir string) error {
 	return nil
 }
 
-// entryPath keeps every entry inside dir.
+// Rejects entries that would land outside dir.
 func entryPath(dir, name string) (string, error) {
 	clean := path.Clean(name)
 	if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(name, `\`) {

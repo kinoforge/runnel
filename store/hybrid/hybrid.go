@@ -23,23 +23,17 @@ var ErrBroken = errors.New("hybrid: store stopped after a disk error")
 // errors) are read back from the log and snapshots once written.
 // One process owns the directory; serve it over HTTP to share it.
 type Store struct {
-	opt   Options
-	log   *wal.Log
-	files *files
-	// snapBytes is the size of the newest snapshot; the log grows at least
-	// that much before the next one, so rewriting stays in proportion.
+	opt       Options
+	log       *wal.Log
+	files     *files
 	snapBytes atomic.Int64
-	// cold holds finished jobs once they leave memory; coldMu keeps moving
-	// them there apart from pruning them.
+	// coldMu keeps retiring apart from pruning.
 	cold   *cold.Store
 	coldMu sync.Mutex
-	// waitMu keeps moving waiting jobs to and from the cold store apart from
-	// each other and from deleting the jobs a call brought back.
-	waitMu sync.Mutex
-	// hotJobs is how many waiting jobs memory holds.
+	// waitMu keeps spilling and refilling waiting jobs apart from each other and from deleting the jobs a call brought back.
+	waitMu  sync.Mutex
 	hotJobs int64
-	// hot counts the waiting jobs in memory.
-	hot atomic.Int64
+	hot     atomic.Int64
 
 	mu     sync.RWMutex
 	spaces map[string]*space
@@ -99,8 +93,6 @@ func (s *Store) prepareDir() error {
 	return removeStaleBackups(s.opt.Dir)
 }
 
-// load opens the cold store, replays the snapshot and log into memory, starts
-// the log and moves every finished job to the cold store.
 func (s *Store) load() error {
 	c, err := cold.Open(filepath.Join(s.opt.Dir, coldDir), s.opt.Cold)
 	if err != nil {
@@ -180,15 +172,9 @@ func (s *Store) fail(err error) {
 	s.errMu.Unlock()
 }
 
-// write runs fn on namespace ns under its lock and logs the ops fn made. It
-// returns once the log holds them, after releasing the lock so other calls can
-// share the same fsync.
 func (s *Store) write(ns string, fn func(*tx) error) error { return s.commit(ns, true, fn) }
 
-// lease is write for claims and lease extensions, which return without waiting
-// for the disk. The log is ordered, so the finish that follows a claim makes the
-// claim durable too; a crash before then only lets the job run again, as
-// at-least-once delivery allows.
+// Claims do not wait for fsync: the finish that follows makes them durable, and a crash before it only runs the job again.
 func (s *Store) lease(ns string, fn func(*tx) error) error { return s.commit(ns, false, fn) }
 
 func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
@@ -216,9 +202,6 @@ func (s *Store) commit(ns string, wait bool, fn func(*tx) error) error {
 	return c.err
 }
 
-// place points the jobs given new bodies by t at where the record puts them.
-// Each body leaves the cache once the record is written; after that it is
-// read from disk, which the OS page cache keeps in memory while it can.
 func (s *Store) place(sp *space, t *tx, pos wal.Pos) {
 	sp.cache.evict(s.log.Written(), sp.bodyRef)
 	for _, b := range t.bodies {
@@ -237,7 +220,6 @@ func (s *Store) filePath(id uint32) string {
 	return s.log.Path(uint64(id))
 }
 
-// read runs fn on namespace ns under its lock.
 func (s *Store) read(ns string, fn func(*space) error) error {
 	if err := s.broken(); err != nil {
 		return err

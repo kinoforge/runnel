@@ -7,8 +7,6 @@ import (
 	"github.com/kinoforge/runnel/store/hybrid/cold"
 )
 
-// retireEvents moves the events older than cutoff to the cold store; retire
-// synced the log that holds them.
 func (s *Store) retireEvents(sp *space, cutoff int64) error {
 	for {
 		evs := sp.retirableEvents(cutoff, s.opt.RetireBatch)
@@ -29,8 +27,6 @@ func (s *Store) retireEvents(sp *space, cutoff int64) error {
 	}
 }
 
-// retirableEvents encodes up to n of the oldest events, as long as they
-// happened before cutoff.
 func (sp *space) retirableEvents(cutoff int64, n int) []cold.Event {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
@@ -48,7 +44,6 @@ func (sp *space) retirableEvents(cutoff int64, n int) []cold.Event {
 	return out
 }
 
-// coldEvent decodes an event of ns from the cold store.
 func coldEvent(ns string, e cold.Event) (runnel.Event, error) {
 	d := newDec(e.Data)
 	at := d.int()
@@ -60,9 +55,6 @@ func coldEvent(ns string, e cold.Event) (runnel.Event, error) {
 	return out, d.err
 }
 
-// olderEvents puts before mem, the events read from memory, those after
-// after that only the cold store holds: everything before head, the first
-// sequence number in memory.
 func (s *Store) olderEvents(ns string, after, head int64, limit int, mem []runnel.Event) ([]runnel.Event, error) {
 	if s.cold == nil || limit <= 0 || after+1 >= head {
 		return mem, nil
@@ -86,9 +78,6 @@ func (s *Store) olderEvents(ns string, after, head int64, limit int, mem []runne
 	return out[:min(len(out), limit)], nil
 }
 
-// pruneColdEvents deletes the oldest events in the cold store up to limit, as
-// long as they happened before before and, when given, are no later than upTo.
-// It reports how many it deleted and whether it went through them all.
 func (s *Store) pruneColdEvents(ns string, before, upTo int64, limit int) (int, bool, error) {
 	if s.cold == nil {
 		return 0, true, nil
@@ -110,7 +99,6 @@ func (s *Store) pruneColdEvents(ns string, before, upTo int64, limit int) (int, 
 	return n, !stopped && n < limit, err
 }
 
-// eventHead is the first sequence number of the events in memory.
 func (sp *space) eventHead() int64 {
 	if len(sp.events) == 0 {
 		return math.MaxInt64

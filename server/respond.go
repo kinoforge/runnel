@@ -60,8 +60,6 @@ func (s *Server) retryAfter() string {
 	return strconv.Itoa(int(max(1, s.cfg.RetryAfter.Round(time.Second)/time.Second)))
 }
 
-// preferWait reads the wait of a Prefer header, capped at the server's maximum,
-// and reports whether the request sent one.
 func (s *Server) preferWait(r *http.Request) (time.Duration, bool) {
 	for _, h := range r.Header.Values("Prefer") {
 		for _, part := range strings.FieldsFunc(h, func(c rune) bool { return c == ',' || c == ';' }) {
@@ -82,7 +80,6 @@ func (s *Server) preferWait(r *http.Request) (time.Duration, bool) {
 	return 0, false
 }
 
-// enqueueWait is the Prefer wait of an enqueue, or else the queue's default.
 func (s *Server) enqueueWait(r *http.Request, ns, queue string) time.Duration {
 	if wait, ok := s.preferWait(r); ok {
 		return wait

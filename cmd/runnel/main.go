@@ -56,7 +56,6 @@ func runMain(args []string) error {
 	return run(ctx, args[0], args[1:])
 }
 
-// errorLine prefixes err with the program name unless the library already did.
 func errorLine(err error) string {
 	msg := err.Error()
 	if strings.HasPrefix(msg, errPrefix) {

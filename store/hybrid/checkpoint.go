@@ -18,8 +18,6 @@ const (
 	tmpSuffix  = ".tmp"
 )
 
-// recover loads the newest snapshot, then replays the log segments written
-// after it. Bodies stay on disk; jobs only learn where they are.
 func (s *Store) recover() error {
 	snaps, err := s.snapshots()
 	if err != nil {
@@ -131,17 +129,13 @@ func (s *Store) Checkpoint() error {
 	return s.log.Remove(seg)
 }
 
-// moved is a body copied into a snapshot, to offset to.
 type moved struct {
 	id   uid
 	from ref
 	to   int64
 }
 
-// repoint moves jobs whose body is still the one copied to the copy in
-// snapshot file, so the older files can go. It takes the lock a slab at a
-// time. Bodies cached from before the rotation are all written by now and
-// leave first, so no cached body refers to an old file.
+// Takes the lock one slab at a time. Bodies cached before the rotation are written by now, so no cached body points at an old file.
 func (s *Store) repoint(file uint32, bySpace map[*space][]moved) {
 	written := s.log.Written()
 	for sp, list := range bySpace {
