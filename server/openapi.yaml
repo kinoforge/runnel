@@ -630,14 +630,27 @@ paths:
       tags: [config]
       summary: Read a queue's settings
       responses:
-        "200": {description: Settings., content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
+        "200": {description: Settings., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
         default: {$ref: "#/components/responses/Problem"}
     put:
       tags: [config]
       summary: Set a queue's settings
+      parameters: [{$ref: "#/components/parameters/IfMatch"}, {$ref: "#/components/parameters/IfNoneMatch"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
       responses:
-        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
+        "200": {description: Saved., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
+        "412": {$ref: "#/components/responses/Stale"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [config]
+      summary: Change some fields of a queue's settings
+      description: "An RFC 7396 merge patch: named fields are set, null clears one, others stay. A missing setting is created from the patch."
+      parameters: [{$ref: "#/components/parameters/IfMatch"}, {$ref: "#/components/parameters/IfNoneMatch"}]
+      requestBody: {required: true, content: {application/merge-patch+json: {schema: {$ref: "#/components/schemas/MergePatch"}}, application/json: {schema: {$ref: "#/components/schemas/MergePatch"}}}}
+      responses:
+        "200": {description: Saved., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/QueueConfig"}}}}
+        "412": {$ref: "#/components/responses/Stale"}
+        "415": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
     delete:
       tags: [config]
@@ -659,14 +672,27 @@ paths:
       tags: [config]
       summary: Read a pool
       responses:
-        "200": {description: The pool., content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        "200": {description: The pool., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
         default: {$ref: "#/components/responses/Problem"}
     put:
       tags: [config]
       summary: Set a pool
+      parameters: [{$ref: "#/components/parameters/IfMatch"}, {$ref: "#/components/parameters/IfNoneMatch"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
       responses:
-        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        "200": {description: Saved., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        "412": {$ref: "#/components/responses/Stale"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [config]
+      summary: Change some fields of a pool
+      description: "An RFC 7396 merge patch: named fields are set, null clears one, others stay. A missing setting is created from the patch."
+      parameters: [{$ref: "#/components/parameters/IfMatch"}, {$ref: "#/components/parameters/IfNoneMatch"}]
+      requestBody: {required: true, content: {application/merge-patch+json: {schema: {$ref: "#/components/schemas/MergePatch"}}, application/json: {schema: {$ref: "#/components/schemas/MergePatch"}}}}
+      responses:
+        "200": {description: Saved., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/PoolConfig"}}}}
+        "412": {$ref: "#/components/responses/Stale"}
+        "415": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
     delete:
       tags: [config]
@@ -688,14 +714,27 @@ paths:
       tags: [config]
       summary: Read a schedule
       responses:
-        "200": {description: The schedule., content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+        "200": {description: The schedule., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
         default: {$ref: "#/components/responses/Problem"}
     put:
       tags: [config]
       summary: Set a schedule
+      parameters: [{$ref: "#/components/parameters/IfMatch"}, {$ref: "#/components/parameters/IfNoneMatch"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
       responses:
-        "200": {description: Saved., content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+        "200": {description: Saved., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+        "412": {$ref: "#/components/responses/Stale"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [config]
+      summary: Change some fields of a schedule
+      description: "An RFC 7396 merge patch: named fields are set, null clears one, others stay. A missing setting is created from the patch."
+      parameters: [{$ref: "#/components/parameters/IfMatch"}, {$ref: "#/components/parameters/IfNoneMatch"}]
+      requestBody: {required: true, content: {application/merge-patch+json: {schema: {$ref: "#/components/schemas/MergePatch"}}, application/json: {schema: {$ref: "#/components/schemas/MergePatch"}}}}
+      responses:
+        "200": {description: Saved., headers: {ETag: {$ref: "#/components/headers/ETag"}}, content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+        "412": {$ref: "#/components/responses/Stale"}
+        "415": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
     delete:
       tags: [config]
@@ -733,6 +772,18 @@ components:
       in: path
       required: true
       schema: {$ref: "#/components/schemas/Name"}
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: "Write only if the setting still has one of these ETags, or exists at all with `*`. Otherwise 412."
+      schema: {type: string}
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: "`*` writes only if the setting does not exist yet. Otherwise 412."
+      schema: {type: string}
     Prefer:
       name: Prefer
       in: header
@@ -740,6 +791,9 @@ components:
       description: "`wait=N` holds the request up to N seconds (server maximum 60 by default) for the job to finish."
       schema: {type: string, examples: ["wait=30"]}
   headers:
+    ETag:
+      description: Version of the setting, for If-Match.
+      schema: {type: string}
     Location:
       description: Path of the job.
       schema: {type: string}
@@ -752,6 +806,11 @@ components:
   responses:
     Problem:
       description: An RFC 9457 problem.
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Stale:
+      description: The setting changed since the ETag was read, or If-None-Match found it.
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
@@ -942,6 +1001,9 @@ components:
         wait: {$ref: "#/components/schemas/Duration", description: "How long an enqueue without a Prefer header waits for the result."}
         retention: {$ref: "#/components/schemas/Duration"}
         dead_retention: {$ref: "#/components/schemas/Duration"}
+    MergePatch:
+      type: object
+      description: Fields to set; null clears a field.
     PoolConfig:
       type: object
       additionalProperties: false

@@ -35,6 +35,7 @@ When a handler finishes, what it returns decides what happens next.
 | Fair claiming | a group at its `group_max_running`, or a pool with no free slot, is skipped, and the jobs behind it still run |
 | Limits | running jobs per queue, per group, per pool, and per group inside a pool. Start rates per queue, per group and per pool. All of them hold across every worker |
 | Pool pause | `paused` or `paused_until` on a pool. Its jobs wait while a provider recovers, and every other pool keeps going |
+| Safe settings changes | `UpdateQueue` and `UpdatePool` change only the fields you touch, and try again if someone else wrote first. Over HTTP: `PATCH` with a merge patch, and `ETag` with `If-Match` so an old copy never overwrites a newer one |
 | Queue caps | `max_queued` and `group_max_queued` turn new jobs away with `429` and `Retry-After`, so a queue cannot grow forever |
 | Retries | exponential backoff with jitter, per job or per queue. Every attempt's error is kept |
 | Start timeouts | `StartTimeout(d)`: a job that waited `d` without starting ends `expired`, with an event and its callback, and the caller decides what to do next |
@@ -97,8 +98,17 @@ go runnel.NewMaintainer(store, runnel.MaintainerConfig{}).Run(ctx)
 If supplier A goes down for a while, pause its pool until it should be back. Its jobs wait, and B keeps working:
 
 ```go
-c.SetPool(ctx, runnel.PoolConfig{Name: "supplier-a", Slots: 5, Rate: 2, PausedUntil: time.Now().Add(10 * time.Minute)})
+c.UpdatePool(ctx, "supplier-a", func(p *runnel.PoolConfig) { p.PausedUntil = time.Now().Add(10 * time.Minute) })
 ```
+
+`UpdatePool` keeps the slots and rate as they are. If the app sets the slots while someone pauses the pool, both changes stay. `SetPool` would replace the whole pool, and the last writer would win. Over HTTP the same change is a merge patch:
+
+```sh
+curl -u admin:$TOKEN -X PATCH -H 'Content-Type: application/merge-patch+json' \
+  -d '{"paused_until":"2026-11-14T18:00:00Z"}' http://localhost:8700/v1/ns/default/pools/supplier-a
+```
+
+`null` clears a field. Send `If-Match` with the `ETag` of a read to write only if nobody changed the pool since: a newer pool answers 412.
 
 ## Work that runs somewhere else
 

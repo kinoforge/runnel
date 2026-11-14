@@ -38,6 +38,10 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusBadRequest, "invalid", err.Error())
 	case errors.Is(err, runnel.ErrNotFound):
 		s.problem(w, http.StatusNotFound, "not found", "")
+	case errors.Is(err, runnel.ErrStale):
+		s.problem(w, http.StatusPreconditionFailed, "precondition failed", err.Error())
+	case errors.Is(err, errMediaType):
+		s.problem(w, http.StatusUnsupportedMediaType, "unsupported media type", err.Error())
 	case errors.Is(err, runnel.ErrGroupFull):
 		w.Header().Set("Retry-After", s.retryAfter())
 		s.problem(w, http.StatusTooManyRequests, "group full", err.Error())

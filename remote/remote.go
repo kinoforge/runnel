@@ -97,6 +97,8 @@ func (e *APIError) Unwrap() error {
 		return runnel.ErrNotFound
 	case http.StatusConflict:
 		return runnel.ErrConflict
+	case http.StatusPreconditionFailed:
+		return runnel.ErrStale
 	case http.StatusTooManyRequests:
 		if e.Title == "queue full" {
 			return runnel.ErrQueueFull
@@ -111,22 +113,22 @@ func (e *APIError) Unwrap() error {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
-	_, err := c.send(ctx, method, path, in, out, nil)
+	_, _, err := c.send(ctx, method, path, in, out, nil)
 	return err
 }
 
-func (c *Client) send(ctx context.Context, method, path string, in, out any, header http.Header) (int, error) {
+func (c *Client) send(ctx context.Context, method, path string, in, out any, header http.Header) (int, http.Header, error) {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	maps.Copy(req.Header, header)
 	c.auth(req)
@@ -135,19 +137,19 @@ func (c *Client) send(ctx context.Context, method, path string, in, out any, hea
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		e := &APIError{Status: resp.StatusCode}
 		_ = json.NewDecoder(io.LimitReader(resp.Body, maxErrorBody)).Decode(e)
 		e.Status = resp.StatusCode
-		return resp.StatusCode, e
+		return resp.StatusCode, resp.Header, e
 	}
 	if out == nil {
-		return resp.StatusCode, nil
+		return resp.StatusCode, resp.Header, nil
 	}
-	return resp.StatusCode, json.NewDecoder(resp.Body).Decode(out)
+	return resp.StatusCode, resp.Header, json.NewDecoder(resp.Body).Decode(out)
 }
 
 func waitHeader(ctx context.Context, most time.Duration) http.Header {
@@ -212,7 +214,7 @@ func (c *Client) EnqueueAndWait(ctx context.Context, queue, kind string, payload
 		return nil, err
 	}
 	var raw json.RawMessage
-	status, err := c.send(ctx, http.MethodPost, c.path("/jobs"), request(j), &raw, waitHeader(ctx, c.resultWait))
+	status, _, err := c.send(ctx, http.MethodPost, c.path("/jobs"), request(j), &raw, waitHeader(ctx, c.resultWait))
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +234,7 @@ func (c *Client) Wait(ctx context.Context, id string) (*runnel.Job, error) {
 	for {
 		began := time.Now()
 		var j runnel.Job
-		_, err := c.send(ctx, http.MethodGet, c.path("/jobs/"+url.PathEscape(id)), nil, &j, waitHeader(ctx, c.resultWait))
+		_, _, err := c.send(ctx, http.MethodGet, c.path("/jobs/"+url.PathEscape(id)), nil, &j, waitHeader(ctx, c.resultWait))
 		if err != nil {
 			if last != nil && ctx.Err() != nil {
 				return last, ctx.Err()
@@ -295,16 +297,6 @@ func (c *Client) Cancel(ctx context.Context, id string) (*runnel.Job, error) {
 func (c *Client) Retry(ctx context.Context, id string) (*runnel.Job, error) {
 	var j runnel.Job
 	return &j, c.do(ctx, http.MethodPost, c.path("/jobs/"+url.PathEscape(id)+"/retry"), struct{}{}, &j)
-}
-
-// SetQueue creates or replaces a queue's settings; the key needs the admin role.
-func (c *Client) SetQueue(ctx context.Context, q runnel.QueueConfig) error {
-	return c.do(ctx, http.MethodPut, c.path("/queues/"+url.PathEscape(q.Name)), q, nil)
-}
-
-// SetPool creates or replaces a pool's settings; the key needs the admin role.
-func (c *Client) SetPool(ctx context.Context, p runnel.PoolConfig) error {
-	return c.do(ctx, http.MethodPut, c.path("/pools/"+url.PathEscape(p.Name)), p, nil)
 }
 
 func (c *Client) Stats(ctx context.Context) ([]runnel.QueueStats, error) {

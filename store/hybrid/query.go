@@ -1,6 +1,7 @@
 package hybrid
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -364,6 +365,20 @@ func (s *Store) PutConfig(_ context.Context, ns string, kind runnel.ConfigKind, 
 		t.putConfig(kind, name, slices.Clone(value))
 		return nil
 	})
+}
+
+func (s *Store) SwapConfig(_ context.Context, ns string, kind runnel.ConfigKind, name string, old, next []byte) (bool, error) {
+	ok := false
+	err := s.write(ns, func(t *tx) error {
+		cur, found := t.sp.configs[kind][name]
+		if found != (old != nil) || !bytes.Equal(cur, old) {
+			return nil
+		}
+		t.putConfig(kind, name, slices.Clone(next))
+		ok = true
+		return nil
+	})
+	return ok, err
 }
 
 func (s *Store) DeleteConfig(_ context.Context, ns string, kind runnel.ConfigKind, name string) error {

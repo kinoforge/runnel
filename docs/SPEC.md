@@ -140,12 +140,14 @@ What a handler returns decides what happens to the job next.
 
 - **X01** Namespaces never see each other's jobs, settings, events or cursors.
 - **X02** `Migrate` can run again on a migrated store.
-- **X03** Queue, pool and schedule settings are stored per namespace, replaced and deleted by name. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
+- **X03** Queue, pool and schedule settings are stored per namespace, replaced, swapped (X09) and deleted by name. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
 - **X04** The hybrid store restarts with every change it acknowledged, read from its snapshot and log. A record cut short by a crash is dropped, and the store opens again after it.
 - **X05** Only one process at a time opens a hybrid store's directory.
 - **X06** A hybrid store's directory has a `FORMAT` file naming the version of its files. A store refuses a directory of another version, or one that holds data without the file, with `ErrFormat`.
 - **X07** A hybrid store's backup, taken while calls go on, restores into an empty directory and opens with every job acknowledged before the backup began. Restore refuses a non-empty directory, entries outside it and a tar without `FORMAT`.
 - **X08** A store that reports its storage gives its kind and a size of zero or more bytes.
+- **X09** `SwapConfig` writes a setting only if it still holds the value the caller read, or, with no value read, only if it does not exist yet. Of two writers racing, one wins, and the other learns it lost.
+- **X10** `UpdateQueue` and `UpdatePool` read a setting, let the caller change it and swap it in (X09). When another writer got there first they read again and call the change again, so no writer's fields are lost. A change that leaves the setting as it was writes nothing, and a change that breaks the setting is `ErrInvalid`.
 
 ## Access (A)
 
@@ -162,7 +164,7 @@ What a handler returns decides what happens to the job next.
 ## HTTP API (S)
 
 - **S01** Request bodies are strict: one JSON value, no unknown fields, no trailing data, at most 4 MiB (413 above). Errors are `application/problem+json` (RFC 9457).
-- **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a failed dependency 422; a full queue or group 429. The remote client turns them back into the same Go errors.
+- **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a setting that changed since it was read 412; a patch of another media type 415; a failed dependency 422; a full queue or group 429. The remote client turns them back into the same Go errors.
 - **S03** Over the API a callback must use https unless the server allows http, and the reserved `runnel.callbacks` queue and `runnel.callback` kind are refused.
 - **S04** Enqueueing one job answers 201 with `Location: /v1/ns/{ns}/jobs/{id}`, or 200 for a duplicate. A batch, `{"jobs": [...]}`, answers 200 with one result per job.
 - **S05** `Prefer: wait=N` on an enqueue holds the answer for up to N seconds: 200 with the finished job, or 202 with `Location` and `Retry-After` while it is still going. `Preference-Applied` echoes the wait used. N is capped at 60 by default; a bad or non-positive N means no wait. Without a Prefer header the queue's `wait` is used.
@@ -179,3 +181,6 @@ What a handler returns decides what happens to the job next.
 - **S16** The server takes its caps from its settings: jobs per enqueue, how far ahead a job may run or live, queues and jobs per claim, the default lease and its range, and jobs per heartbeat.
 - **S18** The remote client and the CLI connect with one URL: `http(s)://[user:password@]host[:port][/path]`, with optional `ca`, `cert` and `key` files for https. User and password go out as Basic auth. Unknown options, a bad scheme or TLS options on plain http are refused, and no error or printed endpoint shows the password.
 - **S17** `GET /v1/system` needs the admin token and reports the version, start time, Go memory and the store's storage, or `null` when the store reports none.
+- **S19** Reading one queue, pool or schedule answers with an `ETag`, and so does setting one. `PUT` and `PATCH` with `If-Match` write only if the setting still has one of the listed tags (`*`: if it exists), compared strongly. With `If-None-Match: *` they write only if it does not exist. Otherwise they answer 412 with the title `precondition failed`. Without these headers a `PUT` replaces the setting as before.
+- **S20** `PATCH` on a queue, pool or schedule takes an RFC 7396 merge patch as `application/merge-patch+json` or `application/json`, any other type is 415. Named fields are set, `null` clears a field and the rest stay. A missing setting is created from the patch. The name comes from the path, and a different name, an unknown field or a setting that fails its checks is 400. It needs the admin role.
+- **S21** The remote client's `UpdateQueue` and `UpdatePool` work like X10 over the API, with `If-Match` on the tag they read and `If-None-Match: *` for a new setting, and start again on 412. A 412 is `ErrStale`.
