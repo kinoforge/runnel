@@ -4,6 +4,24 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- Settings for what was fixed before. Server: `max_batch`, `max_delay`, `max_claim_queues`, `max_claim`, `default_lease`, `min_lease`, `max_lease`, `max_extend`, `key_cache_ttl`, `health_timeout`. Callbacks: `max_attempts`, `backoff_base`, `backoff_max`, `max_retry_after`, `unique_for`, `secret_ttl`. Limits: `max_meta_key`, `max_meta_value`. Tracing: `flush_timeout`.
+- SQL connection pool in the store URL: `max_conns`, `max_idle_conns`, `conn_max_lifetime`, `conn_max_idle_time`, for databases that allow only a few connections.
+- `remote.Client.WithWaits` sets how long the client waits for results and claims.
+- `make test-box` runs tests in a container with caps on CPU, memory, processes and disk operations.
+- Docs split into features, stores and benchmarks pages, with a shorter README.
+
+### Changed
+
+- `runnel.CallbackReader` replaces `ReadCallback`, with a settable body limit.
+- `NewCallbackJob` takes a `CallbackConfig` instead of a queue name.
+- A heartbeat may extend 10,000 jobs by default instead of 1,000, so remote workers with more than 1,000 slots keep their leases.
+
+### Fixed
+
+- The Docker image is built with Go 1.26.11, which fixes the `net/http` crash (GO-2026-6859). The 0.0.1-alpha image was built with 1.26.10.
+
 ## [0.0.1-alpha] - 2026-11-14
 
 First release, for trying Runnel out. The model is settled; the API may still change before 1.0.
