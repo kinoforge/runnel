@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.0.3-beta.1] - 2026-11-14
+
 ### Added
 
 - `GET /v1/system` (admin token) reports the version, start time, Go memory and the store's storage: bytes on disk for the hybrid store, the database size for Postgres, MySQL and SQLite, and used memory for Redis.
@@ -66,6 +68,7 @@ First release, for trying Runnel out. The model is settled; the API may still ch
 - Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
 - SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.2-alpha...HEAD
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.1...HEAD
+[0.0.3-beta.1]: https://github.com/kinoforge/runnel/compare/v0.0.2-alpha...v0.0.3-beta.1
 [0.0.2-alpha]: https://github.com/kinoforge/runnel/compare/v0.0.1-alpha...v0.0.2-alpha
 [0.0.1-alpha]: https://github.com/kinoforge/runnel/releases/tag/v0.0.1-alpha
