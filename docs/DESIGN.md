@@ -66,7 +66,7 @@ A namespace is the unit of isolation: its own queues, jobs, settings, events and
 There are two kinds, applied at different moments:
 
 - **At enqueue: queued caps** (`max_queued`, `group_max_queued`). These are back-pressure: the caller gets `ErrQueueFull` or `ErrGroupFull` (HTTP 429 with `Retry-After`) and can slow down, shed load or tell its own user.
-- **At claim: how much runs** (`max_running`, `group_max_running`, pool `slots` and `group_slots`, `rate` and `group_rate`). These are checked when a job starts, because a slot frees when a job ends.
+- **At claim: how much runs** (`max_running`, `group_max_running`, pool `slots` and `group_slots`, `rate` and `group_rate`, pool `rate`, `paused` and `paused_until`). These are checked when a job starts, because a slot frees when a job ends.
 
 Details:
 

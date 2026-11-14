@@ -4,59 +4,33 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
-### Added
+## [0.0.1-alpha] - 2026-11-14
 
-- Hybrid store: a small record per job in memory, payloads and results on disk read through the OS page cache, every change in a write-ahead log, snapshots written without pausing calls. Open it with `hybrid:DIR` (`?sync=each|periodic|off`), or `memory:` for no disk.
-- `store/hybrid/wal`, a group-commit write-ahead log usable on its own.
-- `store/hybrid/cold`: finished jobs and their events leave memory for an embedded Pebble store on disk, so retention costs disk, not memory.
-- Hybrid store: waiting jobs past a quarter of the memory limit wait in the cold store in claim order and come back in batches, so a backlog is bounded by disk. Inserts slow down while memory holds twice that many.
-- `runnel` keeps Go's heap under 70% of the container's memory limit unless `GOMEMLIMIT` is set.
-- Config sections `memory` and `hybrid` override every size and timing of the hybrid store; `hybrid.Options` and `cold.Options` take them in Go, defaults in `hybrid.DefaultOptions`.
-- `runnel bench -payload` sets the payload size.
-- `remote.Client.SetQueue` and `SetPool` change settings over HTTP with an admin key.
-- Deadlines: `deadline` or `ttl` on a job (`runnel.Deadline`, `runnel.TTL`), or `ttl` on a queue. A job not completed by then ends `expired` from any state; a running handler's context ends with `ErrDeadline`. `start_timeout` and `timeout` must fit before it.
-- A queue's `wait` is the default `Prefer: wait` of an HTTP enqueue.
-- `Client.Queue` reads a queue's settings; `Client.Refresh` drops the cached ones.
-
-### Removed
-
-- Fallbacks (`runnel.Fallbacks`, `runnel.Target`, `runnel.Fallback`, the `fallback` outcome, `max_fallbacks`): what to try next is the caller's choice, so a worker enqueues the next job itself, linking it through `meta`.
-
-### Fixed
-
-- The remote client sent no delay for `runnel.In`.
-- Queue settings changed over HTTP reached enqueues only after the 5 second cache ran out.
-
-### Changed
-
-- Tenants are now groups: a plain id with `group_max_queued`, `group_max_running`, `group_rate` and `group_burst`, the `group` job field and `runnel.Group`; `ErrGroupFull`.
-- Pools keep their name; a pool's limits are `slots` and `group_slots`.
-- `start_within` is now `start_timeout`: a job that waits longer ends in the new final state `expired`, with its event and callback; dependents are cancelled and `Retry` runs it again.
-- Webhooks are now callbacks: the job's `callback_url` (`runnel.Callback`), the namespace `callback_secret`, and the `callbacks` config section.
-- A busy worker claims once a quarter of its slots are free, or after 2ms, so claims take jobs in batches.
-- Queue limits use one pattern: `max_running` and `group_max_running` (were `concurrency` and `tenant_slots`), `max_queued` and `group_max_queued` (were `max_waiting` and `tenant_waiting`).
-
-## [0.0.1]
-
-First public release.
+First release, for trying Runnel out. The model is settled; the API may still change before 1.0.
 
 ### Added
 
-- Job queue library and HTTP server, on Postgres, MySQL 8, SQLite, Redis, Valkey and Dragonfly, all checked by one shared conformance suite.
+- Job queue library and HTTP server, on Postgres, MySQL 8, SQLite, Redis, Valkey, Dragonfly and the hybrid store, all checked by one shared conformance suite.
+- Hybrid store (`hybrid:DIR`, or `memory:` for no disk): a small record per job in memory, payloads and results on disk read through the OS page cache, every change in a write-ahead log, snapshots written without pausing calls. Finished jobs, and waiting jobs past a quarter of the memory limit, move to an embedded Pebble store on disk. `?sync=each|periodic|off` picks durability.
+- Hybrid backups while calls go on: `GET /v1/backup` (admin token), `runnel backup` and `runnel restore`, `hybrid.Store.Backup` and `hybrid.Restore`.
+- A `FORMAT` file in each hybrid data directory; a build refuses a directory written in a format it does not read.
 - Namespaces: one isolated queue system per service, with its own API keys and roles (admin, producer, worker, reader).
-- Queues with concurrency, tenant slots, waiting caps, rate limits, pause, retries with backoff, timeouts and retention.
-- Pools: one limit shared by every queue that uses a resource.
-- Outcomes beyond retry: fail, fallback to the next target, busy without using an attempt, pending with polling of an outside task, and release.
-- Start-within deadlines that move a job to its fallback when it waits too long.
-- Unique jobs, workflows with dependencies, cron schedules, and signed webhooks with SSRF protection.
+- Queues with `max_running`, `group_max_running`, `max_queued`, `group_max_queued`, token-bucket `rate` and `group_rate`, pause, retries with backoff, timeouts, retention and a default `wait`.
+- Pools: `slots` and `group_slots` shared by every queue whose jobs name the pool, a token-bucket `rate`, and `paused` or `paused_until` to hold its jobs back while the rest run.
+- Groups: a plain id per job that every group limit counts by.
+- Outcomes beyond retry: fail, busy without using an attempt, pending with polling of an outside task, and release.
+- `start_timeout`, `deadline` and `ttl`: a job past them ends `expired`, with an event and its callback.
+- Unique jobs, workflows with dependencies, and cron schedules.
+- Callbacks signed with HMAC-SHA256, retried, never redirected and never sent to private addresses. `runnel.VerifySignature` and `runnel.ReadCallback` check them, with several secrets while one is rotated.
 - Waiting for results: `Prefer: wait=N` on enqueue and read, `Client.Wait`, `EnqueueAndWait`, and direct start with `Worker.Do`.
 - Enqueue inside your own transaction on the SQL stores (`Client.EnqueueTx`).
-- Fair claiming: a tenant or pool at its limit never blocks the jobs behind it.
+- Fair claiming: a group or pool at its limit never blocks the jobs behind it.
 - A store clock, so every process measures leases on the database's or Redis's time.
-- Remote worker protocol over HTTP with long-poll claims and leases, and a Go client for it.
-- OpenAPI 3.1 document, served at `/openapi.yaml`.
-- Prometheus metrics, `runnel bench`, and signed multi-platform releases with SBOMs.
-- SPEC.md, every rule with an ID and the tests that check it, and DESIGN.md, the decisions behind them.
+- Remote worker protocol over HTTP with long-poll claims and leases, and a Go client for it, which also sets queues and pools.
+- `/healthz` for liveness and `/readyz` for readiness; on shutdown `/readyz` answers 503 for `server.drain_delay` first.
+- OpenTelemetry tracing: `tracing.Handler` for API requests (`tracing.enabled` in `runnel serve`), `tracing.Middleware` for worker attempts and `tracing.Job` for producers. A job carries `traceparent` in its meta from the enqueue to the worker and its callback.
+- Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
+- SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/kinoforge/runnel/releases/tag/v0.0.1
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.1-alpha...HEAD
+[0.0.1-alpha]: https://github.com/kinoforge/runnel/releases/tag/v0.0.1-alpha

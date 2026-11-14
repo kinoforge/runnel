@@ -12,7 +12,7 @@ Embed it in a Go service as a library, or run `runnel serve` and use it over HTT
 go get github.com/kinoforge/runnel
 ```
 
-Runnel is developed by [Kinoforge](https://kinoforge.dev) and released under Apache 2.0. It is at version 0.0.1: the model is settled, but the API may still change before 1.0.
+Runnel is developed by [Kinoforge](https://kinoforge.dev) and released under Apache 2.0. It is at version 0.0.1-alpha: the model is settled, but the API may still change before 1.0.
 
 ## The model
 
@@ -113,7 +113,8 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 |---|---|
 | Priority | -1000 to 1000. Higher runs first, then oldest first. |
 | Fair claiming | A group at its `group_max_running`, or a pool with no free `slots`, is skipped, and the jobs behind it run. |
-| Limits | Max running per queue, per group, per pool and per group in a pool. Token-bucket rates per queue and per group. All are enforced across every worker. |
+| Limits | Max running per queue, per group, per pool and per group in a pool. Token-bucket rates per queue, per group and per pool. All are enforced across every worker. |
+| Pool pause | `paused` or `paused_until` on a pool: its jobs wait while a provider recovers, and every other pool keeps running. |
 | Queued caps | `max_queued` and `group_max_queued` refuse new jobs with `429` and `Retry-After` instead of letting a queue grow without end. |
 | Retries | Exponential backoff with jitter, per job or per queue. Every attempt's error is kept. |
 | Start timeouts | `StartTimeout(d)`: a job that waited `d` without starting ends `expired`, with an event and its callback, so the caller decides what next. Busy requeues keep the time already waited. |
@@ -128,7 +129,7 @@ While a job polls it keeps its slot, so limits stay true to what is really runni
 | Callbacks | HMAC-SHA256 signed, retried, never redirected, never sent to private addresses. |
 | Namespaces | Each service gets its own queues, pools, schedules, callback secret and API keys with roles. |
 | One clock | Leases and schedules are measured on the store's clock, so servers whose clocks drift apart still agree. |
-| Operations | Pause and resume, retention with optional archive, Prometheus metrics, OpenAPI document, `runnel bench`. |
+| Operations | Pause and resume, retention with optional archive, `/healthz` and `/readyz` with draining, online backup and restore of the hybrid store, Prometheus metrics, OpenTelemetry traces, OpenAPI document, `runnel bench`. See the [runbook](docs/RUNBOOK.md). |
 
 ## Stores
 
@@ -202,7 +203,18 @@ Runnel-Delivery: 1842
 Runnel-Signature: t=1761900000,v1=<hex hmac_sha256(secret, "<t>.<body>")>
 ```
 
-Compute the HMAC of `"<t>.<raw body>"` with the namespace secret, compare it in constant time, and reject old values of `t`.
+Compute the HMAC of `"<t>.<raw body>"` with the namespace secret, compare it in constant time, and reject old values of `t`. Go receivers can let Runnel do it, with an old and a new secret while rotating:
+
+```go
+cb, err := runnel.ReadCallback(r, 5*time.Minute, newSecret, oldSecret)
+if err != nil {
+	http.Error(w, err.Error(), http.StatusUnauthorized) // not retried
+	return
+}
+// cb.Event, cb.Delivery (dedupe on it), cb.Job
+```
+
+A job whose meta holds `traceparent` sends it with the callback, so the receiver's span joins the job's trace.
 
 ## Transactional enqueue
 
@@ -263,7 +275,7 @@ make bench       # RUNNEL_STORE=... make bench
 RUNNEL_RULES=C04,W make test-all   # only the tests of rule C04 and area W
 ```
 
-[SPEC.md](docs/SPEC.md) lists every rule Runnel follows, each checked by tests. [DESIGN.md](docs/DESIGN.md) explains the decisions and the known limits.
+[SPEC.md](docs/SPEC.md) lists every rule Runnel follows, each checked by tests. [DESIGN.md](docs/DESIGN.md) explains the decisions and the known limits. [RUNBOOK.md](docs/RUNBOOK.md) covers deploying, probes, metrics, tracing, backups, upgrades and incidents.
 
 See [CONTRIBUTING.md](.github/CONTRIBUTING.md). Security reports go through [SECURITY.md](.github/SECURITY.md).
 
