@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.0.3-beta.2] - 2026-11-14
+
 ### Added
 
 - `PATCH` on queues, pools and schedules takes an RFC 7396 merge patch: it changes only the fields named, `null` clears one, and a missing setting is created.
@@ -79,7 +81,8 @@ First release, for trying Runnel out. The model is settled; the API may still ch
 - Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
 - SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.1...HEAD
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.2...HEAD
+[0.0.3-beta.2]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.1...v0.0.3-beta.2
 [0.0.3-beta.1]: https://github.com/kinoforge/runnel/compare/v0.0.2-alpha...v0.0.3-beta.1
 [0.0.2-alpha]: https://github.com/kinoforge/runnel/compare/v0.0.1-alpha...v0.0.2-alpha
 [0.0.1-alpha]: https://github.com/kinoforge/runnel/releases/tag/v0.0.1-alpha
