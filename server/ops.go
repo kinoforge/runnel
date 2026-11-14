@@ -37,7 +37,9 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	s.healthz(w, r)
 }
 
-// backup streams a copy of the whole store as a tar file.
+// backup streams a copy of the whole store as a tar file. A failure after
+// the status is sent cuts the connection, so the client knows the copy is
+// incomplete.
 func (s *Server) backup(w http.ResponseWriter, r *http.Request, _ principal) error {
 	b, ok := s.store.(runnel.Backuper)
 	if !ok {
@@ -49,8 +51,6 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request, _ principal) err
 	w.Header().Set("Content-Disposition", `attachment; filename="runnel-`+s.clock.Now().UTC().Format("20060102T150405Z")+`.tar"`)
 	if err := b.Backup(r.Context(), w); err != nil {
 		s.log.Error("backup failed", "err", err)
-		// The status is sent; cutting the connection tells the client the
-		// copy is incomplete.
 		panic(http.ErrAbortHandler)
 	}
 	return nil

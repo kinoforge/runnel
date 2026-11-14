@@ -87,7 +87,6 @@ func Handler(h http.Handler, tp trace.TracerProvider) http.Handler {
 		rec := &recorder{ResponseWriter: w, code: http.StatusOK}
 		r = r.WithContext(ctx)
 		h.ServeHTTP(rec, r)
-		// The mux sets the pattern on the request it was given.
 		if r.Pattern != "" {
 			span.SetName(r.Pattern)
 			span.SetAttributes(attribute.String("http.route", r.Pattern))

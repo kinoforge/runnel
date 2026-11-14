@@ -28,7 +28,9 @@ make down        # stop the services and drop their data
 - Tests. A behaviour change in a store goes in the shared conformance suite (`store/storetest`), so every backend proves it.
 - A note in [DESIGN.md](../docs/DESIGN.md) when the change is a decision someone could make differently.
 - `make lint` and `make test-all` passing.
-- Code that reads like the code around it. Exported identifiers have doc comments. Function bodies carry no comments: if a block needs explaining, give it a name.
+- Code that reads like the code around it. As few comments as possible: exported identifiers have a short doc comment, function bodies carry none. If a block needs explaining, give it a name.
+- Tests that fail are fixed in the code, never bent to pass: no loosened assertions, skips, longer timeouts, retries or sleeps to hide a failure. Change a test only when the test itself is wrong, and say why in the pull request.
+- No hardcoded rules. Runnel is a generic tool: every limit, timeout, size or behaviour a user could need differently is a setting with a sensible default. No business rules and no special cases for one user.
 - No new dependency without a reason in the pull request.
 - An entry in [CHANGELOG.md](CHANGELOG.md) under "Unreleased" for anything a user would notice.
 

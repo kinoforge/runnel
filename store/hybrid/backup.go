@@ -19,7 +19,7 @@ import (
 // newest snapshot, then a checkpoint of the cold store, then the log from
 // the snapshot on. Each part is taken after the one before it, so the log
 // covers everything the cold store holds and opening the copy replays it.
-// Unpack it with Restore.
+// Checkpoints wait until it ends. Unpack it with Restore.
 func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	if s.log == nil {
 		return errors.New("hybrid: a memory store has nothing to back up")
@@ -27,7 +27,6 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	if err := s.broken(); err != nil {
 		return err
 	}
-	// Holding snapMu keeps checkpoints from deleting the files being copied.
 	s.snapMu.Lock()
 	defer s.snapMu.Unlock()
 	tw := tar.NewWriter(w)
