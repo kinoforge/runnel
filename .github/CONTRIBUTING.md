@@ -14,8 +14,9 @@ You need Go (the version in `go.mod`) and Docker.
 
 ```sh
 make up          # postgres, mysql, redis, valkey and dragonfly on local ports
-make test        # unit tests and SQLite, with the race detector
-make test-all    # every backend
+make test-box PKG=./server RUN=TestName   # tests in a container capped at 1 CPU, 2 GB and 150 disk ops/s
+make test        # unit tests and SQLite, with the race detector; heavy
+make test-all    # every backend; heavy, CI runs it on every pull request
 make lint        # gofmt and go vet
 make vuln        # govulncheck
 make fuzz        # fuzz targets, 30s each
@@ -28,7 +29,7 @@ make down        # stop the services and drop their data
 - Tests. A behaviour change in a store goes in the shared conformance suite (`store/storetest`), so every backend proves it.
 - A note in [DESIGN.md](../docs/DESIGN.md) when the change is a decision someone could make differently.
 - `make lint` and `make test-all` passing.
-- Code that reads like the code around it. As few comments as possible: exported identifiers have a short doc comment, function bodies carry none. If a block needs explaining, give it a name.
+- No comments in code. One short line is allowed only for a real trap a reader would fall into. Explanations go in the docs, the README or the commit.
 - Tests that fail are fixed in the code, never bent to pass: no loosened assertions, skips, longer timeouts, retries or sleeps to hide a failure. Change a test only when the test itself is wrong, and say why in the pull request.
 - No hardcoded rules. Runnel is a generic tool: every limit, timeout, size or behaviour a user could need differently is a setting with a sensible default. No business rules and no special cases for one user.
 - No new dependency without a reason in the pull request.
