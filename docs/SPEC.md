@@ -29,7 +29,7 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 
 - **J01** A job reads back as it was enqueued: queue, kind, payload, priority, group, pool, max attempts, timeout, start timeout, callback and meta. A new job is `waiting`, or `blocked` (F01). Its id is a UUID v7; reading an unknown id is `ErrNotFound`.
 - **J02** Input is checked before anything is written; bad input is `ErrInvalid`. Queue, kind and pool names are 1 to 128 letters, digits, dots, dashes or underscores, starting with a letter or digit. Priority is -1000 to 1000. The payload is JSON of at most 1 MiB. Max attempts is 1 to 1000. Durations are not negative. Dependencies are job ids. A unique key has no `|`. A callback is an absolute http or https URL without credentials.
-- **J03** Options a job leaves unset come from its queue's settings: max attempts, backoff, timeout and start timeout. With neither set, a job has 5 attempts.
+- **J03** Options a job leaves unset come from its queue's settings: max attempts, backoff, timeout, start timeout and callback. With neither set, a job has 5 attempts.
 - **J04** One call enqueues 1 to 1000 jobs. Each job gets its own answer: its id; or, as a duplicate, the id of the job holding its unique key; or its own error (`ErrDependency`, `ErrQueueFull`, `ErrGroupFull`) while the others go in.
 - **J05** A job given a start time (`At`, `In`, `run_at`, `delay`) is not claimed before it. `In` is measured on the store's clock.
 - **J06** While a job with a unique key is not final, enqueueing the same key adds nothing and returns that job's id, marked duplicate. Once the job is final, the key is free.
@@ -96,6 +96,7 @@ What a handler returns decides what happens to the job next.
 - **R07** A worker needs at least one queue and one handler; otherwise `Run` returns `ErrInvalid`.
 - **R08** A busy worker claims again once a quarter of its slots are free, or after 2ms, so claims take jobs in batches. A free slot never waits longer than that for a claim.
 - **R09** With `tracing.Middleware`, each attempt is a consumer span named after its queue, a child of the trace in the job's `traceparent` meta, with an error status when it fails or retries. `tracing.Job` puts the caller's trace in a job, and `tracing.Handler` makes each API request a server span named after its route.
+- **R10** `SetConcurrency` changes a running worker's concurrency. A larger one claims more jobs at once; a smaller one lets running jobs finish and starts no new one until fewer than the new number run. It must be at least 1, or it is `ErrInvalid` and nothing changes.
 
 ## Managing jobs (M)
 
@@ -165,7 +166,7 @@ What a handler returns decides what happens to the job next.
 
 - **S01** Request bodies are strict: one JSON value, no unknown fields, no trailing data, at most 4 MiB (413 above). Errors are `application/problem+json` (RFC 9457).
 - **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a setting that changed since it was read 412; a patch of another media type 415; a failed dependency 422; a full queue or group 429. The remote client turns them back into the same Go errors.
-- **S03** Over the API a callback must use https unless the server allows http, and the reserved `runnel.callbacks` queue and `runnel.callback` kind are refused.
+- **S03** Over the API a callback, whether on a job, a queue or a schedule, must use https unless the server allows http, and the reserved `runnel.callbacks` queue and `runnel.callback` kind are refused.
 - **S04** Enqueueing one job answers 201 with `Location: /v1/ns/{ns}/jobs/{id}`, or 200 for a duplicate. A batch, `{"jobs": [...]}`, answers 200 with one result per job.
 - **S05** `Prefer: wait=N` on an enqueue holds the answer for up to N seconds: 200 with the finished job, or 202 with `Location` and `Retry-After` while it is still going. `Preference-Applied` echoes the wait used. N is capped at 60 by default; a bad or non-positive N means no wait. Without a Prefer header the queue's `wait` is used.
 - **S06** A `GET` of a job with `Prefer: wait=N` answers when the job is final or N seconds pass, with its latest state.

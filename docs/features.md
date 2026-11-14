@@ -10,7 +10,7 @@ This page walks through what Runnel does and how to use it. The exact rules, eac
 | **Queue** | where jobs wait. It has its own limits: how many run at once (`max_running`), how many per group (`group_max_running`), how fast they start (`rate`), and how many may wait (`max_queued`) |
 | **Pool** | a number of `slots` shared by every job that names it, whatever its queue. Think of one provider account or one GPU machine |
 | **Group** | any id you give a job, like a customer, an API key or a project. Each group has its own caps, so one group cannot crowd out the rest |
-| **Worker** | your process, in Go or any language over HTTP. It has slots of its own, claims the next jobs the limits allow and runs one per slot |
+| **Worker** | your process, in Go or any language over HTTP. It has slots of its own, claims the next jobs the limits allow and runs one per slot. In Go, `SetConcurrency` changes its slots while it runs |
 | **Lease** | a worker's hold on a job, kept alive by heartbeats. If the worker dies, the job goes back to the queue |
 | **Namespace** | one separate set of queues, jobs, settings and keys. Usually one per service |
 
@@ -196,7 +196,9 @@ Errors are RFC 9457 problem documents. Request bodies have a size cap and are pa
 
 ## Callbacks
 
-When a job finishes, Runnel posts its summary to the job's callback URL:
+When a job finishes, Runnel posts its summary to the job's callback URL. A queue's `callback_url` is used for every job in it that sets none.
+
+The request looks like this:
 
 ```
 Runnel-Event: job.completed

@@ -4,13 +4,28 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/kinoforge/runnel.svg)](https://pkg.go.dev/github.com/kinoforge/runnel)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## What is it?
+## What it is
 
-Runnel is a job queue. Your service puts work in, and workers take it out and do it in the background.
+Runnel is a job queue manager. Your service puts jobs in, and your workers take them out and run them. Runnel manages everything in between:
 
-It is made for slow work that can fail: calling another company's API, generating an image, sending emails, collecting data. Jobs that fail are tried again. Jobs that wait too long are stopped, and you are told.
+- it keeps every job under an id until the job ends;
+- it picks the next job by priority, then by age;
+- it holds every limit across all workers: slots, pools, groups, rate, burst and pause;
+- it retries failed jobs with backoff;
+- it ends jobs that wait too long or miss their deadline, and tells you.
 
-## Why use it?
+It is made for slow work that can fail: calling another company's API, generating an image, sending emails, collecting data.
+
+| Who | Decides |
+|---|---|
+| Your service | which jobs to add, and each job's priority, group, pool, attempts and timeouts |
+| Your workers | how many jobs they run at once, and how each job ends: done, failed, try again later, or still running somewhere else |
+| You or an operator | queue and pool settings: slots, rate, burst, caps and pause, through the API or the [dashboard](https://github.com/kinoforge/runnel-dashboard) |
+| Runnel | which job runs next, and that every limit holds |
+
+Runnel knows nothing about your business: customers, prices and providers stay in your service. It does not start or scale workers either. Your app decides how many run.
+
+## Why use it
 
 Because it is fair, and it keeps you inside your limits.
 
@@ -19,7 +34,7 @@ Because it is fair, and it keeps you inside your limits.
 - **No new database needed.** Runnel uses the Postgres, MySQL, SQLite or Redis you already run, or keeps everything itself on a local disk.
 - **Any language.** Use it as a Go library, or run `runnel serve` and talk to it over HTTP.
 
-## How does it work?
+## How it works
 
 You enqueue a job. Runnel keeps it until a worker with a free slot claims it, and makes sure every limit you set still holds. The worker runs your handler and reports back: done, failed, try again later, or still running somewhere else. You get the result by waiting for it, by asking for it later, or by a callback to your URL.
 
@@ -63,7 +78,7 @@ curl localhost:8700/v1/ns/shop/jobs -H "Authorization: Bearer $KEY" \
 | [Design](docs/DESIGN.md) | why it works the way it does, and its known limits |
 | [API](server/openapi.yaml) | the HTTP API as an OpenAPI 3.1 document |
 
-Runnel is at version 0.0.1-alpha. The model is settled, but the API may still change before 1.0.
+Runnel is in beta. The model is settled, but the API may still change before 1.0. See the [changelog](CHANGELOG.md).
 
 ## Development
 
@@ -90,4 +105,4 @@ Apache 2.0. Copyright 2026 The Runnel Authors. Free for any use, including comme
 
 ## Benchmarks
 
-How fast is it? On a 4-core desktop, Redis runs about 6,000 jobs a second and Postgres about 1,200. The hybrid store runs over 100,000 a second when it flushes to disk every 100 ms. See the [benchmarks](docs/benchmark/index.md) for the full tables, the hardware, and how to run them yourself.
+On a 4-core desktop, Redis runs about 6,000 jobs a second and Postgres about 1,200. The hybrid store runs over 100,000 a second when it flushes to disk every 100 ms. See the [benchmarks](docs/benchmark/index.md) for the full tables, the hardware, and how to run them yourself.

@@ -56,6 +56,7 @@ type Worker struct {
 	log *slog.Logger
 	mux *Mux
 
+	slots atomic.Int64
 	mu    sync.Mutex
 	runs  map[string]*inflight
 	held  int
@@ -91,7 +92,9 @@ func NewSourceWorker(src Source, cfg WorkerConfig) *Worker {
 	if ss, ok := src.(*storeSource); ok {
 		ss.log = cfg.Logger
 	}
-	return &Worker{src: src, cfg: cfg, log: cfg.Logger, mux: NewMux(cfg.Middleware...), runs: map[string]*inflight{}}
+	w := &Worker{src: src, cfg: cfg, log: cfg.Logger, mux: NewMux(cfg.Middleware...), runs: map[string]*inflight{}}
+	w.slots.Store(int64(cfg.Concurrency))
+	return w
 }
 
 // ID returns the worker's id, which leases are held under.
@@ -126,11 +129,12 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.mu.Unlock()
 	pause := claimRetryMin
 	for ctx.Err() == nil {
-		free := w.reserve(w.cfg.Concurrency)
-		if want := w.cfg.Concurrency / gatherShare; free > 0 && free < want && w.busy() {
+		size := w.Concurrency()
+		free := w.reserve(size)
+		if want := size / gatherShare; free > 0 && free < want && w.busy() {
 			w.unreserve(free)
 			w.gather(ctx, freed, want)
-			free = w.reserve(w.cfg.Concurrency)
+			free = w.reserve(size)
 		}
 		if free > 0 {
 			jobs, err := w.src.Claim(ctx, w.cfg.ID, w.cfg.Queues, free, w.cfg.Lease)
@@ -197,7 +201,7 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 func (w *Worker) reserve(most int) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	n := max(min(most, w.cfg.Concurrency-len(w.runs)-w.held), 0)
+	n := max(min(most, w.Concurrency()-len(w.runs)-w.held), 0)
 	w.held += n
 	return n
 }
@@ -225,7 +229,7 @@ func (w *Worker) gather(ctx context.Context, freed <-chan struct{}, want int) {
 func (w *Worker) free() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.cfg.Concurrency - len(w.runs) - w.held
+	return w.Concurrency() - len(w.runs) - w.held
 }
 
 func (w *Worker) unreserve(n int) {

@@ -110,6 +110,9 @@ func (c *Client) prepare(ctx context.Context, j *Job, now time.Time) error {
 	if j.StartTimeout == 0 {
 		j.StartTimeout = j.fit(cfg.StartTimeout, now)
 	}
+	if j.CallbackURL == "" {
+		j.CallbackURL = cfg.CallbackURL
+	}
 	return j.Prepare(now, c.limits)
 }
 

@@ -95,3 +95,24 @@ func testUpdateConfig(t *testing.T, open Opener) {
 		t.Fatalf("queue %+v %v", got, err)
 	}
 }
+
+func testQueueCallback(t *testing.T, open Opener) {
+	spec.Rule(t, "J03")
+	e := setup(t, open)
+	const hook, own = "https://example.com/q", "https://example.com/own"
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", CallbackURL: hook}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.get(e.add("q").ID).CallbackURL; got != hook {
+		t.Fatalf("queue default callback %q", got)
+	}
+	if got := e.get(e.add("q", runnel.Callback(own)).ID).CallbackURL; got != own {
+		t.Fatalf("own callback %q", got)
+	}
+	if got := e.get(e.add("other").ID).CallbackURL; got != "" {
+		t.Fatalf("other queue callback %q", got)
+	}
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", CallbackURL: "ftp://example.com"}); !errors.Is(err, runnel.ErrInvalid) {
+		t.Fatalf("bad queue callback: %v", err)
+	}
+}

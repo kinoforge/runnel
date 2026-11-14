@@ -136,6 +136,8 @@ func Run(t *testing.T, open Opener) {
 		"StorageReport":              testStorage,
 		"ConfigSwap":                 testSwapConfig,
 		"ConfigUpdate":               testUpdateConfig,
+		"QueueCallback":              testQueueCallback,
+		"WorkerResize":               testWorkerResize,
 	}
 	for _, n := range slices.Sorted(maps.Keys(tests)) {
 		t.Run(n, func(t *testing.T) { tests[n](t, open) })

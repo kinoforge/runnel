@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -196,5 +197,32 @@ func TestRemoteUpdateKeepsOtherWriters(t *testing.T) {
 	}
 	if err := c.UpdateQueue(ctx, "image", func(q *runnel.QueueConfig) { q.MaxQueued = -1 }); !errors.Is(err, runnel.ErrInvalid) {
 		t.Fatalf("bad update: %v", err)
+	}
+}
+
+func TestQueueCallbackOverAPI(t *testing.T) {
+	spec.Rule(t, "S03")
+	srv, _ := setup(t)
+	const q, hook = "/v1/ns/default/queues/q", "https://example.com/h"
+	if got := ask(t, srv, "PUT", q, `{"name":"q","callback_url":"http://example.com/h"}`); got.code != 400 {
+		t.Fatalf("http queue callback put: %d", got.code)
+	}
+	if got := ask(t, srv, "PATCH", q, `{"callback_url":"http://example.com/h"}`, "Content-Type", mergePatch); got.code != 400 {
+		t.Fatalf("http queue callback patch: %d", got.code)
+	}
+	if got := ask(t, srv, "PATCH", q, `{"callback_url":"`+hook+`"}`, "Content-Type", mergePatch); got.code != 200 || got.body["callback_url"] != hook {
+		t.Fatalf("queue callback patch: %d %v", got.code, got.body)
+	}
+	added := ask(t, srv, "POST", "/v1/ns/default/jobs", `{"queue":"q","kind":"k"}`)
+	id, _ := added.body["id"].(string)
+	if got := ask(t, srv, "GET", "/v1/ns/default/jobs/"+id, ""); got.body["callback_url"] != hook {
+		t.Fatalf("job %d %v", got.code, got.body)
+	}
+	const s = `{"name":"s","queue":"q","kind":"k","spec":"@every 1h","callback_url":"%s"}`
+	if got := ask(t, srv, "PUT", "/v1/ns/default/schedules/s", fmt.Sprintf(s, "http://example.com/h")); got.code != 400 {
+		t.Fatalf("http schedule callback: %d", got.code)
+	}
+	if got := ask(t, srv, "PUT", "/v1/ns/default/schedules/s", fmt.Sprintf(s, hook)); got.code != 200 {
+		t.Fatalf("https schedule callback: %d %v", got.code, got.body)
 	}
 }

@@ -40,14 +40,11 @@ func (s *Server) routes() {
 	s.handle("POST /v1/ns/{ns}/jobs/{id}/finish", runnel.RoleWorker, s.finish)
 	s.handle("POST /v1/ns/{ns}/dependencies", runnel.RoleWorker, s.dependencies)
 
-	configRoutes(s, "queues", runnel.ConfigQueue, func(c runnel.QueueConfig) (string, error) { return c.Name, c.Validate() })
+	configRoutes(s, "queues", runnel.ConfigQueue, func(c runnel.QueueConfig) (string, error) {
+		return c.Name, s.withCallback(c.CallbackURL, c.Validate)
+	})
 	configRoutes(s, "pools", runnel.ConfigPool, func(c runnel.PoolConfig) (string, error) { return c.Name, c.Validate() })
 	configRoutes(s, "schedules", runnel.ConfigSchedule, func(c runnel.Schedule) (string, error) {
-		if c.CallbackURL != "" {
-			if err := s.checkCallback(c.CallbackURL); err != nil {
-				return c.Name, err
-			}
-		}
-		return c.Name, c.Validate()
+		return c.Name, s.withCallback(c.CallbackURL, c.Validate)
 	})
 }

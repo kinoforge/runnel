@@ -122,6 +122,15 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
+func (s *Server) withCallback(u string, validate func() error) error {
+	if u != "" {
+		if err := s.checkCallback(u); err != nil {
+			return err
+		}
+	}
+	return validate()
+}
+
 func (s *Server) checkCallback(u string) error {
 	if err := runnel.ValidCallbackURL(u, s.cfg.Limits.MaxCallbackURL); err != nil {
 		return err

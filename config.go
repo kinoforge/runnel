@@ -13,8 +13,8 @@ import (
 // MaxRunning caps running jobs across all workers; GroupMaxRunning caps them
 // per group. MaxQueued and GroupMaxQueued refuse new jobs past that many queued.
 // Rate and GroupRate limit starts per second with token buckets of Burst and
-// GroupBurst. MaxAttempts, Backoff, Timeout, StartTimeout and TTL are defaults
-// for jobs that do not set them. Wait is how long an HTTP enqueue waits for the
+// GroupBurst. MaxAttempts, Backoff, Timeout, StartTimeout, TTL and CallbackURL
+// are defaults for jobs that do not set them. Wait is how long an HTTP enqueue waits for the
 // result when the caller sends no Prefer header. Retention and DeadRetention keep finished jobs that
 // long before they are pruned.
 type QueueConfig struct {
@@ -36,6 +36,7 @@ type QueueConfig struct {
 	Wait            Duration `json:"wait,omitempty"`
 	Retention       Duration `json:"retention,omitempty"`
 	DeadRetention   Duration `json:"dead_retention,omitempty"`
+	CallbackURL     string   `json:"callback_url,omitempty"`
 }
 
 // PoolConfig is a number of slots shared by every job that names the pool,
@@ -69,6 +70,9 @@ func (q QueueConfig) Validate() error {
 	}
 	if q.Timeout < 0 || q.StartTimeout < 0 || q.TTL < 0 || q.Wait < 0 || q.Retention < 0 || q.DeadRetention < 0 {
 		return invalid("durations must not be negative")
+	}
+	if q.CallbackURL != "" {
+		return ValidCallbackURL(q.CallbackURL, DefaultLimits.MaxCallbackURL)
 	}
 	return nil
 }

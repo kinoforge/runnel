@@ -4,6 +4,15 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- A queue's `callback_url` is the callback of every job in it that sets none, so producers no longer add it to each job. Over the API it must use https unless the server allows http, like a job's.
+- `Worker.SetConcurrency` changes a running worker's number of slots, and `Worker.Concurrency` reads it. Growing claims more jobs at once; shrinking lets running jobs finish first. The app decides when, for example from its own admin page.
+
+### Changed
+
+- The README says what Runnel is and who decides what, and has no question headings.
+
 ## [0.0.3-beta.2] - 2026-11-14
 
 ### Added

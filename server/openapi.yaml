@@ -1001,6 +1001,7 @@ components:
         wait: {$ref: "#/components/schemas/Duration", description: "How long an enqueue without a Prefer header waits for the result."}
         retention: {$ref: "#/components/schemas/Duration"}
         dead_retention: {$ref: "#/components/schemas/Duration"}
+        callback_url: {type: string, format: uri, description: "Callback of jobs that set none."}
     MergePatch:
       type: object
       description: Fields to set; null clears a field.
