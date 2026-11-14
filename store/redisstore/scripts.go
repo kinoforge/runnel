@@ -23,10 +23,12 @@ var (
 	pruneEventsLua string
 	//go:embed scripts/swap.lua
 	swapLua string
+	//go:embed scripts/swap_config.lua
+	swapConfigLua string
 )
 
 type scripts struct {
-	insert, claim, apply, extend, prune, pruneEvents, swap *redis.Script
+	insert, claim, apply, extend, prune, pruneEvents, swap, swapConfig *redis.Script
 }
 
 func newScripts() scripts {
@@ -34,5 +36,6 @@ func newScripts() scripts {
 	return scripts{
 		insert: load(insertLua), claim: load(claimLua), apply: load(applyLua), extend: load(extendLua),
 		prune: load(pruneLua), pruneEvents: load(pruneEventsLua), swap: load(swapLua),
+		swapConfig: load(swapConfigLua),
 	}
 }

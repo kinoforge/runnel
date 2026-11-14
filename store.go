@@ -28,6 +28,7 @@ var (
 	ErrNotFinal = errors.New("runnel: job is not dead or cancelled")
 	// ErrInvalid wraps every validation error.
 	ErrInvalid = errors.New("runnel: invalid input")
+	ErrStale   = errors.New("runnel: setting changed since it was read")
 	// ErrNoHandler means no handler is registered for the job's kind.
 	ErrNoHandler = errors.New("runnel: no handler for kind")
 )
@@ -175,6 +176,7 @@ type Store interface {
 	// whether it did.
 	SwapCursor(ctx context.Context, ns, name string, old, next int64) (bool, error)
 	PutConfig(ctx context.Context, ns string, kind ConfigKind, name string, value []byte) error
+	SwapConfig(ctx context.Context, ns string, kind ConfigKind, name string, old, next []byte) (bool, error)
 	// Configs returns every value of a configuration kind by name.
 	Configs(ctx context.Context, ns string, kind ConfigKind) (map[string][]byte, error)
 	DeleteConfig(ctx context.Context, ns string, kind ConfigKind, name string) error

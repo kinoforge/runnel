@@ -8,14 +8,31 @@ import (
 )
 
 func (s *Store) PutConfig(ctx context.Context, ns string, kind runnel.ConfigKind, name string, value []byte) error {
-	if kind == runnel.ConfigPool {
-		v, err := withPauseMillis(value)
-		if err != nil {
-			return err
-		}
-		value = v
+	value, err := stored(kind, value)
+	if err != nil {
+		return err
 	}
 	return s.rdb.HSet(ctx, s.p(ns)+"cfg:"+string(kind), name, value).Err()
+}
+
+func (s *Store) SwapConfig(ctx context.Context, ns string, kind runnel.ConfigKind, name string, old, next []byte) (bool, error) {
+	next, err := stored(kind, next)
+	if err != nil {
+		return false, err
+	}
+	had := "0"
+	if old != nil {
+		had = "1"
+	}
+	n, err := s.swapConfig.Run(ctx, s.rdb, []string{s.p(ns)}, string(kind), name, had, old, next).Int()
+	return n == 1, err
+}
+
+func stored(kind runnel.ConfigKind, value []byte) ([]byte, error) {
+	if kind != runnel.ConfigPool {
+		return value, nil
+	}
+	return withPauseMillis(value)
 }
 
 // The claim script cannot parse RFC 3339 times.

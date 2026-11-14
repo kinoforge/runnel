@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/kinoforge/runnel"
@@ -50,55 +49,5 @@ func (s *Server) routes() {
 			}
 		}
 		return c.Name, c.Validate()
-	})
-}
-
-func configRoutes[T any](s *Server, path string, kind runnel.ConfigKind, check func(T) (string, error)) {
-	s.handle("GET /v1/ns/{ns}/"+path, runnel.RoleReader, func(w http.ResponseWriter, r *http.Request, _ principal) error {
-		all, err := runnel.LoadTyped[T](r.Context(), s.store, r.PathValue("ns"), kind)
-		if err != nil {
-			return err
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": all})
-		return nil
-	})
-	s.handle("GET /v1/ns/{ns}/"+path+"/{name}", runnel.RoleReader, func(w http.ResponseWriter, r *http.Request, _ principal) error {
-		all, err := runnel.LoadTyped[T](r.Context(), s.store, r.PathValue("ns"), kind)
-		if err != nil {
-			return err
-		}
-		v, ok := all[r.PathValue("name")]
-		if !ok {
-			return runnel.ErrNotFound
-		}
-		writeJSON(w, http.StatusOK, v)
-		return nil
-	})
-	s.handle("PUT /v1/ns/{ns}/"+path+"/{name}", runnel.RoleAdmin, func(w http.ResponseWriter, r *http.Request, _ principal) error {
-		var v T
-		if err := decode(r, &v); err != nil {
-			return err
-		}
-		name, err := check(v)
-		if err != nil {
-			return err
-		}
-		if name != r.PathValue("name") {
-			return fmt.Errorf("%w: name in body must match the path", runnel.ErrInvalid)
-		}
-		if err := runnel.PutTyped(r.Context(), s.store, r.PathValue("ns"), kind, name, v); err != nil {
-			return err
-		}
-		s.client(r.PathValue("ns")).Refresh()
-		writeJSON(w, http.StatusOK, v)
-		return nil
-	})
-	s.handle("DELETE /v1/ns/{ns}/"+path+"/{name}", runnel.RoleAdmin, func(w http.ResponseWriter, r *http.Request, _ principal) error {
-		if err := s.store.DeleteConfig(r.Context(), r.PathValue("ns"), kind, r.PathValue("name")); err != nil {
-			return err
-		}
-		s.client(r.PathValue("ns")).Refresh()
-		w.WriteHeader(http.StatusNoContent)
-		return nil
 	})
 }

@@ -4,6 +4,17 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `PATCH` on queues, pools and schedules takes an RFC 7396 merge patch: it changes only the fields named, `null` clears one, and a missing setting is created.
+- Reading or setting one queue, pool or schedule answers with an `ETag`. `PUT` and `PATCH` honour `If-Match` and `If-None-Match: *`, and answer 412 when the setting changed.
+- `UpdateQueue` and `UpdatePool` on `runnel.Client` and `remote.Client` change a setting from a fresh read and try again when another writer got there first. `runnel.ErrStale` is the 412.
+- `Store.SwapConfig` writes a setting only if it still holds the value read. Every store has it.
+
+### Fixed
+
+- Two writers of one pool no longer undo each other: an app that sets slots keeps a pause set from elsewhere, when both use `UpdatePool` or `PATCH`.
+
 ## [0.0.3-beta.1] - 2026-11-14
 
 ### Added

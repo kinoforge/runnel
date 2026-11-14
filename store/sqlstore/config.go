@@ -60,6 +60,22 @@ func (s *Store) PutConfig(ctx context.Context, ns string, kind runnel.ConfigKind
 	return err
 }
 
+func (s *Store) SwapConfig(ctx context.Context, ns string, kind runnel.ConfigKind, name string, old, next []byte) (bool, error) {
+	defer s.forget(ns)
+	var res sql.Result
+	var err error
+	if old == nil {
+		res, err = s.db.ExecContext(ctx, s.q(s.d.Ignore("rn_configs", []string{"ns", "kind", "name", "val"})), ns, string(kind), name, next)
+	} else {
+		res, err = s.db.ExecContext(ctx, s.q("UPDATE rn_configs SET val=? WHERE ns=? AND kind=? AND name=? AND val=?"), next, ns, string(kind), name, old)
+	}
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 func (s *Store) Configs(ctx context.Context, ns string, kind runnel.ConfigKind) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	err := s.eachConfig(ctx, s.db, ns, kind, func(name string, b []byte) error {
