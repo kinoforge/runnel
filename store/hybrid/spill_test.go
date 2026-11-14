@@ -136,3 +136,35 @@ func compareStr(a, b string) int {
 	}
 	return 0
 }
+
+func TestSpillKeepsAParentThatGainsAKid(t *testing.T) {
+	s, err := hybrid.OpenSpilling(hybrid.Options{Dir: t.TempDir()}, 1, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+	c := runnel.NewClient(s, ns)
+	late, err := c.Enqueue(ctx, "slow", "k", nil, runnel.StartTimeout(50*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kid runnel.Inserted
+	if _, err := s.SpillAround(ns, func() {
+		if kid, err = c.Enqueue(ctx, "after", "k", nil, runnel.After(late.ID)); err != nil {
+			t.Error(err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if err := runnel.NewMaintainer(s, runnel.MaintainerConfig{Namespaces: []string{ns}}).Tick(ctx, ns); err != nil {
+		t.Fatal(err)
+	}
+	if j, err := c.Get(ctx, late.ID); err != nil || j.State != runnel.StateExpired {
+		t.Fatalf("parent %+v %v", j, err)
+	}
+	if j, err := c.Get(ctx, kid.ID); err != nil || j.State != runnel.StateCancelled {
+		t.Fatalf("kid of an expired parent %+v %v", j, err)
+	}
+}

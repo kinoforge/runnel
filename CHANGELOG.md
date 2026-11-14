@@ -16,6 +16,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Fixed
 
 - Two writers of one pool no longer undo each other: an app that sets slots keeps a pause set from elsewhere, when both use `UpdatePool` or `PATCH`.
+- Hybrid store: a job that got a dependant while it was being moved to disk lost the link, so the dependant stayed blocked after the job ended. It now stays in memory instead.
 
 ## [0.0.3-beta.1] - 2026-11-14
 

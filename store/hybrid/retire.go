@@ -167,7 +167,7 @@ func (sp *space) forget(ds []draft, delta map[cold.Count]int64, gone func(*job))
 	var stale []uid
 	for i := range ds {
 		id := ds[i].h.id
-		if h, ok := sp.get(id); ok && h.version == ds[i].h.version {
+		if h, ok := sp.get(id); ok && h.version == ds[i].h.version && len(sp.kids[id]) == 0 {
 			sp.delJob(id)
 			if gone != nil {
 				gone(&h)

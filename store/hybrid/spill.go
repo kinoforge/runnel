@@ -63,27 +63,44 @@ func (s *Store) makeRoom() error {
 	return s.balance()
 }
 
+type spill struct {
+	now   int64
+	ds    []draft
+	delta map[cold.Count]int64
+}
+
 func (s *Store) spillSome(sp *space, n int64) (int64, error) {
-	now := ms(time.Now())
-	ds := sp.spillable(int(n), int(s.opt.JobBytes), s.opt.BatchBytes)
-	if len(ds) == 0 {
-		return 0, nil
-	}
-	jobs, err := s.coldJobs(sp.ns, ds, now)
-	if err != nil {
+	p, err := s.spillStart(sp, n)
+	if err != nil || p == nil {
 		return 0, err
 	}
-	delta, err := s.cold.Add(jobs)
-	if err != nil {
-		return 0, err
+	return s.spillEnd(sp, p)
+}
+
+func (s *Store) spillStart(sp *space, n int64) (*spill, error) {
+	p := &spill{now: ms(time.Now())}
+	p.ds = sp.spillable(int(n), int(s.opt.JobBytes), s.opt.BatchBytes)
+	if len(p.ds) == 0 {
+		return nil, nil
 	}
-	stale := sp.forget(ds, delta, func(h *job) { sp.spilt(h, now) })
+	jobs, err := s.coldJobs(sp.ns, p.ds, p.now)
+	if err != nil {
+		return nil, err
+	}
+	if p.delta, err = s.cold.Add(jobs); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *Store) spillEnd(sp *space, p *spill) (int64, error) {
+	stale := sp.forget(p.ds, p.delta, func(h *job) { sp.spilt(h, p.now) })
 	if len(stale) > 0 {
 		if err := s.dropCold(sp, stale); err != nil {
 			return 0, err
 		}
 	}
-	return int64(len(ds) - len(stale)), nil
+	return int64(len(p.ds) - len(stale)), nil
 }
 
 func (sp *space) spillable(n, jobBytes, maxBytes int) []draft {

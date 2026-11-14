@@ -24,3 +24,13 @@ func (s *Store) Cold(ns string) int64 {
 	}
 	return n
 }
+
+func (s *Store) SpillAround(ns string, during func()) (int64, error) {
+	sp := s.space(ns)
+	p, err := s.spillStart(sp, 1<<20)
+	if err != nil || p == nil {
+		return 0, err
+	}
+	during()
+	return s.spillEnd(sp, p)
+}
