@@ -27,16 +27,29 @@ const (
 
 // Client talks to a Runnel server for one namespace.
 type Client struct {
-	base string
-	key  string
-	ns   string
-	http *http.Client
+	base       string
+	key        string
+	ns         string
+	http       *http.Client
+	resultWait time.Duration
+	claimWait  time.Duration
 }
 
 // New returns a client for the server at baseURL, authenticating with an API
 // key.
 func New(baseURL, key, namespace string) *Client {
-	return &Client{base: strings.TrimRight(baseURL, "/"), key: key, ns: namespace, http: &http.Client{Timeout: httpTimeout}}
+	return &Client{base: strings.TrimRight(baseURL, "/"), key: key, ns: namespace, http: &http.Client{Timeout: httpTimeout},
+		resultWait: resultWait, claimWait: workerClaimWait}
+}
+
+func (c *Client) WithWaits(result, claim time.Duration) *Client {
+	if result > 0 {
+		c.resultWait = result
+	}
+	if claim > 0 {
+		c.claimWait = claim
+	}
+	return c
 }
 
 // WithHTTPClient replaces the HTTP client. Its timeout must exceed the long-poll
@@ -180,7 +193,7 @@ func (c *Client) EnqueueAndWait(ctx context.Context, queue, kind string, payload
 		return nil, err
 	}
 	var raw json.RawMessage
-	status, err := c.send(ctx, http.MethodPost, c.path("/jobs"), request(j), &raw, waitHeader(ctx, resultWait))
+	status, err := c.send(ctx, http.MethodPost, c.path("/jobs"), request(j), &raw, waitHeader(ctx, c.resultWait))
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +213,7 @@ func (c *Client) Wait(ctx context.Context, id string) (*runnel.Job, error) {
 	for {
 		began := time.Now()
 		var j runnel.Job
-		_, err := c.send(ctx, http.MethodGet, c.path("/jobs/"+url.PathEscape(id)), nil, &j, waitHeader(ctx, resultWait))
+		_, err := c.send(ctx, http.MethodGet, c.path("/jobs/"+url.PathEscape(id)), nil, &j, waitHeader(ctx, c.resultWait))
 		if err != nil {
 			if last != nil && ctx.Err() != nil {
 				return last, ctx.Err()
@@ -327,5 +340,5 @@ func NewWorker(c *Client, cfg runnel.WorkerConfig) *runnel.Worker {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = workerPoll
 	}
-	return runnel.NewSourceWorker(c.Source(workerClaimWait), cfg)
+	return runnel.NewSourceWorker(c.Source(c.claimWait), cfg)
 }

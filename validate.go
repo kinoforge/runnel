@@ -11,8 +11,6 @@ import (
 const (
 	maxPriority      = 1000
 	maxAttemptsLimit = 1000
-	maxMetaKey       = 64
-	maxMetaValue     = 512
 )
 
 var (
@@ -125,14 +123,14 @@ func (j *Job) validateExtras(l Limits) error {
 }
 
 // ValidMeta checks meta against the limits: at most MaxMeta entries, keys of
-// 1 to 64 bytes and values of at most 512.
+// 1 to MaxMetaKey bytes and values of at most MaxMetaValue.
 func ValidMeta(meta map[string]string, l Limits) error {
 	if len(meta) > l.MaxMeta {
 		return invalid("at most %d meta entries", l.MaxMeta)
 	}
 	for k, v := range meta {
-		if len(k) == 0 || len(k) > maxMetaKey || len(v) > maxMetaValue {
-			return invalid("meta keys must be 1-%d bytes and values at most %d", maxMetaKey, maxMetaValue)
+		if len(k) == 0 || len(k) > l.MaxMetaKey || len(v) > l.MaxMetaValue {
+			return invalid("meta keys must be 1-%d bytes and values at most %d", l.MaxMetaKey, l.MaxMetaValue)
 		}
 	}
 	return nil

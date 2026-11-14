@@ -16,20 +16,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
-const (
-	defaultMaxBody       = 4 << 20
-	defaultMaxClaimWait  = 30 * time.Second
-	defaultMaxResultWait = 60 * time.Second
-	defaultRetryAfter    = time.Second
-)
-
 //go:embed openapi.yaml
 var openAPI []byte
 
-// Config configures a server. AdminToken guards the namespace and key routes;
-// without it they are closed. MaxBody caps request bodies (4 MiB). MaxClaimWait
-// and MaxResultWait cap long-polls for claims (30s) and results (60s).
-// RetryAfter is the hint sent with 202 and 429 answers (1s).
 type Config struct {
 	AdminToken         string
 	MaxBody            int64
@@ -38,8 +27,54 @@ type Config struct {
 	MaxClaimWait       time.Duration
 	MaxResultWait      time.Duration
 	RetryAfter         time.Duration
+	MaxBatch           int
+	MaxDelay           time.Duration
+	MaxClaimQueues     int
+	MaxClaim           int
+	DefaultLease       time.Duration
+	MinLease           time.Duration
+	MaxLease           time.Duration
+	MaxExtend          int
+	KeyCacheTTL        time.Duration
+	HealthTimeout      time.Duration
 	Logger             *slog.Logger
 	Registry           *prometheus.Registry
+}
+
+var DefaultConfig = Config{
+	MaxBody: 4 << 20, Limits: runnel.DefaultLimits, MaxClaimWait: 30 * time.Second, MaxResultWait: 60 * time.Second,
+	RetryAfter: time.Second, MaxBatch: 1000, MaxDelay: 365 * 24 * time.Hour, MaxClaimQueues: 64, MaxClaim: 100,
+	DefaultLease: 30 * time.Second, MinLease: 5 * time.Second, MaxLease: 10 * time.Minute, MaxExtend: 10000,
+	KeyCacheTTL: 5 * time.Second, HealthTimeout: 2 * time.Second,
+}
+
+func (c Config) withDefaults() Config {
+	d := DefaultConfig
+	c.MaxBody = or(c.MaxBody, d.MaxBody)
+	if c.Limits == (runnel.Limits{}) {
+		c.Limits = d.Limits
+	}
+	c.MaxClaimWait = or(c.MaxClaimWait, d.MaxClaimWait)
+	c.MaxResultWait = or(c.MaxResultWait, d.MaxResultWait)
+	c.RetryAfter = or(c.RetryAfter, d.RetryAfter)
+	c.MaxBatch = or(c.MaxBatch, d.MaxBatch)
+	c.MaxDelay = or(c.MaxDelay, d.MaxDelay)
+	c.MaxClaimQueues = or(c.MaxClaimQueues, d.MaxClaimQueues)
+	c.MaxClaim = or(c.MaxClaim, d.MaxClaim)
+	c.DefaultLease = or(c.DefaultLease, d.DefaultLease)
+	c.MinLease = or(c.MinLease, d.MinLease)
+	c.MaxLease = or(c.MaxLease, d.MaxLease)
+	c.MaxExtend = or(c.MaxExtend, d.MaxExtend)
+	c.KeyCacheTTL = or(c.KeyCacheTTL, d.KeyCacheTTL)
+	c.HealthTimeout = or(c.HealthTimeout, d.HealthTimeout)
+	return c
+}
+
+func or[T int | int64 | time.Duration](v, fallback T) T {
+	if v > 0 {
+		return v
+	}
+	return fallback
 }
 
 // Server is the Runnel HTTP API: namespaces, keys, jobs, configuration and the
@@ -67,21 +102,7 @@ type Server struct {
 }
 
 func New(store runnel.Store, cfg Config) *Server {
-	if cfg.MaxBody <= 0 {
-		cfg.MaxBody = defaultMaxBody
-	}
-	if cfg.Limits == (runnel.Limits{}) {
-		cfg.Limits = runnel.DefaultLimits
-	}
-	if cfg.MaxClaimWait <= 0 {
-		cfg.MaxClaimWait = defaultMaxClaimWait
-	}
-	if cfg.MaxResultWait <= 0 {
-		cfg.MaxResultWait = defaultMaxResultWait
-	}
-	if cfg.RetryAfter <= 0 {
-		cfg.RetryAfter = defaultRetryAfter
-	}
+	cfg = cfg.withDefaults()
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}

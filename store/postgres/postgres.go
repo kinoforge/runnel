@@ -15,12 +15,9 @@ import (
 )
 
 const (
-	maxOpenConns    = 20
-	maxIdleConns    = 10
-	connMaxIdleTime = 5 * time.Minute
-	endedBuffer     = 256
-	listenRetryMin  = time.Second
-	listenRetryMax  = 30 * time.Second
+	endedBuffer    = 256
+	listenRetryMin = time.Second
+	listenRetryMax = 30 * time.Second
 )
 
 // Store is a Postgres store. Besides the runnel.Store methods it wakes workers
@@ -37,14 +34,14 @@ type Store struct {
 }
 
 // Open connects to Postgres. The DSN is a pgx connection string or URL.
-func Open(dsn string) (*Store, error) {
+func Open(dsn string) (*Store, error) { return OpenWith(dsn, sqlstore.Pool{}) }
+
+func OpenWith(dsn string, pool sqlstore.Pool) (*Store, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(maxOpenConns)
-	db.SetMaxIdleConns(maxIdleConns)
-	db.SetConnMaxIdleTime(connMaxIdleTime)
+	pool.Apply(db)
 	return &Store{Store: sqlstore.New(db, sqlstore.Postgres()), dsn: dsn,
 		wakes: map[string][]chan struct{}{}, ends: map[string][]chan string{}}, nil
 }

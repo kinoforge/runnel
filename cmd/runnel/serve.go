@@ -14,8 +14,6 @@ import (
 	"github.com/kinoforge/runnel/tracing"
 )
 
-const traceFlushTimeout = 5 * time.Second
-
 type serveFlags struct {
 	addr, token                       *string
 	noMaintain, archive, noHooks      *bool
@@ -89,7 +87,7 @@ func serve(ctx context.Context, args []string) error {
 			return err
 		}
 		defer func() {
-			sctx, cancel := context.WithTimeout(context.Background(), traceFlushTimeout)
+			sctx, cancel := context.WithTimeout(context.Background(), cfg.Tracing.FlushTimeout)
 			defer cancel()
 			if err := tp.Shutdown(sctx); err != nil {
 				log.Warn("sending the last spans failed", "err", err)
@@ -125,6 +123,16 @@ func serverConfig(cfg config.Config, log *slog.Logger) server.Config {
 		MaxClaimWait:       cfg.Server.MaxClaimWait,
 		MaxResultWait:      cfg.Server.MaxResultWait,
 		RetryAfter:         cfg.Server.RetryAfter,
+		MaxBatch:           cfg.Server.MaxBatch,
+		MaxDelay:           cfg.Server.MaxDelay,
+		MaxClaimQueues:     cfg.Server.MaxClaimQueues,
+		MaxClaim:           cfg.Server.MaxClaim,
+		DefaultLease:       cfg.Server.DefaultLease,
+		MinLease:           cfg.Server.MinLease,
+		MaxLease:           cfg.Server.MaxLease,
+		MaxExtend:          cfg.Server.MaxExtend,
+		KeyCacheTTL:        cfg.Server.KeyCacheTTL,
+		HealthTimeout:      cfg.Server.HealthTimeout,
 		Logger:             log,
 	}
 }
@@ -150,10 +158,15 @@ func runMaintainer(ctx context.Context, s runnel.Store, cfg config.Config, log *
 		Batch:      cfg.Maintainer.Batch,
 		Logger:     log,
 		Callbacks: runnel.CallbackConfig{
-			Enabled:      cfg.Callbacks.Enabled,
-			Concurrency:  cfg.Callbacks.Concurrency,
-			Timeout:      cfg.Callbacks.Timeout,
-			AllowPrivate: cfg.Callbacks.AllowPrivate,
+			Enabled:       cfg.Callbacks.Enabled,
+			Concurrency:   cfg.Callbacks.Concurrency,
+			Timeout:       cfg.Callbacks.Timeout,
+			AllowPrivate:  cfg.Callbacks.AllowPrivate,
+			MaxAttempts:   cfg.Callbacks.MaxAttempts,
+			Backoff:       runnel.Backoff{Base: runnel.Duration(cfg.Callbacks.BackoffBase), Max: runnel.Duration(cfg.Callbacks.BackoffMax)},
+			MaxRetryAfter: cfg.Callbacks.MaxRetryAfter,
+			UniqueFor:     cfg.Callbacks.UniqueFor,
+			SecretTTL:     cfg.Callbacks.SecretTTL,
 		},
 	})
 	if err := m.Run(ctx); err != nil {

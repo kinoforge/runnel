@@ -50,7 +50,7 @@ func TestCallbackDelivery(t *testing.T) {
 	srv := httptest.NewServer(rcv)
 	defer srv.Close()
 	done := &Job{ID: NewID(), Namespace: "app", Queue: "q", Kind: "k", State: StateCompleted, CallbackURL: srv.URL + "/hook", Result: json.RawMessage(`{"ok":true}`)}
-	hook, err := NewCallbackJob(done, "job.completed", 42, "")
+	hook, err := NewCallbackJob(done, "job.completed", 42, CallbackConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

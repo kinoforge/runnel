@@ -101,13 +101,15 @@ type Limits struct {
 	MaxPayload     int
 	MaxDependsOn   int
 	MaxMeta        int
+	MaxMetaKey     int
+	MaxMetaValue   int
 	MaxUniqueKey   int
 	MaxCallbackURL int
 }
 
 // DefaultLimits are the limits used unless a client or server sets others: 1 MiB
 // payloads, 256 dependencies, 32 meta entries.
-var DefaultLimits = Limits{MaxPayload: 1 << 20, MaxDependsOn: 256, MaxMeta: 32, MaxUniqueKey: 255, MaxCallbackURL: 2048}
+var DefaultLimits = Limits{MaxPayload: 1 << 20, MaxDependsOn: 256, MaxMeta: 32, MaxMetaKey: 64, MaxMetaValue: 512, MaxUniqueKey: 255, MaxCallbackURL: 2048}
 
 // PutTyped stores v as JSON under a configuration kind and name.
 func PutTyped(ctx context.Context, s Store, ns string, kind ConfigKind, name string, v any) error {

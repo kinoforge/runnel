@@ -25,6 +25,16 @@ server:
   max_header_bytes: 65536
   shutdown_timeout: 15s
   drain_delay: 0s       # /readyz answers 503 this long before shutdown starts
+  max_batch: 0          # 1000 jobs per enqueue
+  max_delay: 0s         # 8760h, how far ahead a job may run or live
+  max_claim_queues: 0   # 64
+  max_claim: 0          # 100 jobs per claim
+  default_lease: 0s     # 30s
+  min_lease: 0s         # 5s
+  max_lease: 0s         # 10m
+  max_extend: 0         # 10000 jobs per heartbeat
+  key_cache_ttl: 0s     # 5s
+  health_timeout: 0s    # 2s
 
 maintainer:
   enabled: true
@@ -41,14 +51,22 @@ maintainer:
 
 callbacks:
   enabled: true
-  concurrency: 0 # 4
-  timeout: 0s    # 10s
+  concurrency: 0        # 4
+  timeout: 0s           # 10s
   allow_private: false
+  max_attempts: 0       # 10
+  backoff_base: 0s      # 5s
+  backoff_max: 0s       # 30m
+  max_retry_after: 0s   # 1h, longest Retry-After a receiver may ask for
+  unique_for: 0s        # 48h, an event seen twice in this window is posted once
+  secret_ttl: 0s        # 30s, how long namespace secrets are cached
 
 limits:
   max_payload: 1048576
   max_depends_on: 256
   max_meta: 32
+  max_meta_key: 64
+  max_meta_value: 512
   max_unique_key: 255
   max_callback_url: 2048
 
@@ -57,6 +75,7 @@ memory:
 
 tracing:
   enabled: false # spans over OTLP/HTTP; set OTEL_EXPORTER_OTLP_ENDPOINT and other OTEL_* variables
+  flush_timeout: 5s # how long shutdown waits to send the last spans
 
 hybrid:
   sync: each # each, periodic or off; the store url's ?sync= wins

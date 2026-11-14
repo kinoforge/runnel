@@ -129,7 +129,7 @@ What a handler returns decides what happens to the job next.
 - **H02** A delivery POSTs `{"event", "delivery", "job"}` with the headers `Runnel-Event`, `Runnel-Delivery` and, when the namespace has a secret, `Runnel-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`.
 - **H03** A 2xx answer completes the delivery. 408, 429 and 5xx retry, after `Retry-After` seconds when given (up to an hour). Any other answer, a redirect included, fails it. A delivery has 10 attempts.
 - **H04** Deliveries connect only to public addresses, checked after DNS on every connection, unless private ones are allowed.
-- **H05** `VerifySignature` and `ReadCallback` accept a delivery signed with any of the given secrets, so secrets can rotate, and refuse a missing, malformed or wrong signature and one signed more than 5 minutes (or the given age) from now, with `ErrSignature`.
+- **H05** `VerifySignature` and `CallbackReader` accept a delivery signed with any of the given secrets, so secrets can rotate, and refuse a missing, malformed or wrong signature and one signed more than 5 minutes (or the given age) from now, with `ErrSignature`. `CallbackReader` refuses a body over 16 MiB (or its `MaxBody`).
 - **H06** A job whose meta holds `traceparent` or `tracestate` sends them as headers with its callback, so a trace continues to the receiver.
 
 ## Clock (K)
@@ -172,3 +172,4 @@ What a handler returns decides what happens to the job next.
 - **S13** `/readyz` answers like `/healthz` until the server starts shutting down, then 503.
 - **S14** `GET /v1/backup` streams the store's backup as a tar file, or answers 501 when the store has none.
 - **S15** An enqueue with a `traceparent` header, and `tracestate` with it, puts them in the meta of each job that has none and has room for them.
+- **S16** The server takes its caps from its settings: jobs per enqueue, how far ahead a job may run or live, queues and jobs per claim, the default lease and its range, and jobs per heartbeat.

@@ -17,7 +17,6 @@ import (
 
 const (
 	maxTokenLen  = 512
-	keyCacheTTL  = 5 * time.Second
 	keyMissRetry = time.Second
 )
 
@@ -71,7 +70,7 @@ func (s *Server) authenticate(r *http.Request) (principal, bool) {
 func (s *Server) lookupKey(ctx context.Context, id string) (keyEntry, bool) {
 	s.mu.Lock()
 	e, ok := s.keys[id]
-	stale := time.Since(s.loaded) > keyCacheTTL || (!ok && time.Since(s.loaded) > keyMissRetry)
+	stale := time.Since(s.loaded) > s.cfg.KeyCacheTTL || (!ok && time.Since(s.loaded) > keyMissRetry)
 	s.mu.Unlock()
 	if !stale {
 		return e, ok

@@ -289,7 +289,7 @@ func (m *Maintainer) callbacks(ctx context.Context, ns string, now time.Time) er
 		if j == nil || j.CallbackURL == "" || j.Queue == m.cfg.Callbacks.Queue {
 			continue
 		}
-		hook, err := NewCallbackJob(j, "job."+string(e.State), e.Seq, m.cfg.Callbacks.Queue)
+		hook, err := NewCallbackJob(j, "job."+string(e.State), e.Seq, m.cfg.Callbacks)
 		if err != nil {
 			return err
 		}

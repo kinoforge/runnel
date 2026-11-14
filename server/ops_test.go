@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kinoforge/runnel"
 	"github.com/kinoforge/runnel/internal/spec"
@@ -113,5 +114,35 @@ func TestEnqueueCarriesTrace(t *testing.T) {
 		if err != nil || len(jobs) != 1 || jobs[0].Meta["traceparent"] != want {
 			t.Fatalf("job %s meta %v: %v", id, jobs, err)
 		}
+	}
+}
+
+func TestServerCapsAreSettings(t *testing.T) {
+	spec.Rule(t, "S16")
+	s, err := hybrid.Open(hybrid.Options{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	srv := httptest.NewServer(server.New(s, server.Config{AdminToken: admin, MaxBatch: 2, MaxClaim: 1, MaxExtend: 1, MaxDelay: time.Hour}))
+	defer srv.Close()
+	call(t, srv, admin, "PUT", "/v1/namespaces/c", nil)
+	tok := key(t, srv, "c", "producer", "worker")
+	job := map[string]any{"queue": "q", "kind": "k"}
+	if code, _ := call(t, srv, tok, "POST", "/v1/ns/c/jobs", map[string]any{"jobs": []any{job, job, job}}); code != 400 {
+		t.Fatalf("3 jobs over max_batch 2: %d", code)
+	}
+	if code, _ := call(t, srv, tok, "POST", "/v1/ns/c/jobs", map[string]any{"queue": "q", "kind": "k", "delay": "2h"}); code != 400 {
+		t.Fatalf("delay over max_delay: %d", code)
+	}
+	if code, _ := call(t, srv, tok, "POST", "/v1/ns/c/jobs", map[string]any{"jobs": []any{job, job}}); code != 200 {
+		t.Fatalf("batch of 2: %d", code)
+	}
+	code, out := call(t, srv, tok, "POST", "/v1/ns/c/claim", map[string]any{"worker": "w", "queues": []string{"q"}, "limit": 10})
+	if jobs, _ := out["jobs"].([]any); code != 200 || len(jobs) != 1 {
+		t.Fatalf("claim over max_claim 1: %d %v", code, out)
+	}
+	if code, _ := call(t, srv, tok, "POST", "/v1/ns/c/extend", map[string]any{"worker": "w", "ids": []string{"a", "b"}, "lease": "30s"}); code != 400 {
+		t.Fatalf("extend over max_extend 1: %d", code)
 	}
 }

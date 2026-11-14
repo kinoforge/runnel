@@ -2,6 +2,7 @@ package runnel
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -20,18 +21,10 @@ import (
 )
 
 const (
-	defaultCallbackConcurrency = 4
-	defaultCallbackTimeout     = 10 * time.Second
-	callbackMaxAttempts        = 10
-	callbackUniqueFor          = 48 * time.Hour
-	callbackBackoffBase        = 5 * time.Second
-	callbackBackoffMax         = 30 * time.Minute
-	secretCacheTTL             = 30 * time.Second
-	maxDrainBody               = 64 << 10
-	maxRetryAfterSeconds       = 3600
-	dialKeepAlive              = 30 * time.Second
-	maxIdleConns               = 50
-	idleConnTimeout            = 90 * time.Second
+	maxDrainBody    = 64 << 10
+	dialKeepAlive   = 30 * time.Second
+	maxIdleConns    = 50
+	idleConnTimeout = 90 * time.Second
 )
 
 const (
@@ -41,28 +34,45 @@ const (
 	CallbackQueue = "runnel.callbacks"
 )
 
-// CallbackConfig configures callback delivery. Deliveries refuse private addresses
-// unless AllowPrivate is set.
 type CallbackConfig struct {
-	Enabled      bool
-	Queue        string
-	Concurrency  int
-	AllowPrivate bool
-	Timeout      time.Duration
-	Client       *http.Client
+	Enabled       bool
+	Queue         string
+	Concurrency   int
+	AllowPrivate  bool
+	Timeout       time.Duration
+	MaxAttempts   int
+	Backoff       Backoff
+	MaxRetryAfter time.Duration
+	UniqueFor     time.Duration
+	SecretTTL     time.Duration
+	Client        *http.Client
+}
+
+var DefaultCallbackConfig = CallbackConfig{
+	Queue: CallbackQueue, Concurrency: 4, Timeout: 10 * time.Second, MaxAttempts: 10,
+	Backoff:       Backoff{Base: Duration(5 * time.Second), Max: Duration(30 * time.Minute)},
+	MaxRetryAfter: time.Hour, UniqueFor: 48 * time.Hour, SecretTTL: 30 * time.Second,
 }
 
 func (c CallbackConfig) withDefaults() CallbackConfig {
-	if c.Queue == "" {
-		c.Queue = CallbackQueue
-	}
-	if c.Concurrency <= 0 {
-		c.Concurrency = defaultCallbackConcurrency
-	}
-	if c.Timeout <= 0 {
-		c.Timeout = defaultCallbackTimeout
-	}
+	d := DefaultCallbackConfig
+	c.Queue = cmp.Or(c.Queue, d.Queue)
+	c.Concurrency = positive(c.Concurrency, d.Concurrency)
+	c.Timeout = positive(c.Timeout, d.Timeout)
+	c.MaxAttempts = positive(c.MaxAttempts, d.MaxAttempts)
+	c.Backoff.Base = positive(c.Backoff.Base, d.Backoff.Base)
+	c.Backoff.Max = positive(c.Backoff.Max, d.Backoff.Max)
+	c.MaxRetryAfter = positive(c.MaxRetryAfter, d.MaxRetryAfter)
+	c.UniqueFor = positive(c.UniqueFor, d.UniqueFor)
+	c.SecretTTL = positive(c.SecretTTL, d.SecretTTL)
 	return c
+}
+
+func positive[T int | Duration | time.Duration](v, fallback T) T {
+	if v > 0 {
+		return v
+	}
+	return fallback
 }
 
 // JobSummary is the body of a callback: what a receiver needs to know about the
@@ -100,25 +110,23 @@ type callbackTask struct {
 
 // NewCallbackJob returns the job that delivers event for j. Delivery numbers keep
 // deliveries unique, so an event is posted once even when it is seen twice.
-func NewCallbackJob(j *Job, event string, delivery int64, queue string) (*Job, error) {
-	if queue == "" {
-		queue = CallbackQueue
-	}
+func NewCallbackJob(j *Job, event string, delivery int64, cfg CallbackConfig) (*Job, error) {
+	cfg = cfg.withDefaults()
 	body, err := json.Marshal(callbackTask{URL: j.CallbackURL, Delivery: delivery, Event: event, Job: summarize(j)})
 	if err != nil {
 		return nil, err
 	}
-	return &Job{Queue: queue, Kind: CallbackKind, Payload: body, MaxAttempts: callbackMaxAttempts,
-		UniqueKey: fmt.Sprintf("callback:%d", delivery), UniqueFor: Duration(callbackUniqueFor),
-		Backoff: Backoff{Base: Duration(callbackBackoffBase), Max: Duration(callbackBackoffMax)}}, nil
+	return &Job{Queue: cfg.Queue, Kind: CallbackKind, Payload: body, MaxAttempts: cfg.MaxAttempts,
+		UniqueKey: fmt.Sprintf("callback:%d", delivery), UniqueFor: Duration(cfg.UniqueFor), Backoff: cfg.Backoff}, nil
 }
 
 // SecretFunc returns the callback secret of a namespace.
 type SecretFunc func(ctx context.Context, namespace string) (string, error)
 
 type callbackHandler struct {
-	secret SecretFunc
-	client *http.Client
+	secret        SecretFunc
+	client        *http.Client
+	maxRetryAfter time.Duration
 }
 
 // NewCallbackSender returns the handler of callback jobs, signing each body with
@@ -132,19 +140,20 @@ func NewCallbackSender(secret SecretFunc, cfg CallbackConfig) Handler {
 	if secret == nil {
 		secret = func(context.Context, string) (string, error) { return "", nil }
 	}
-	return &callbackHandler{secret: secret, client: client}
+	return &callbackHandler{secret: secret, client: client, maxRetryAfter: cfg.MaxRetryAfter}
 }
 
 // NewCallbackHandler returns a callback sender that reads secrets from the
 // namespaces in s.
 func NewCallbackHandler(s Store, cfg CallbackConfig) Handler {
+	ttl := cfg.withDefaults().SecretTTL
 	var mu sync.Mutex
 	var cache map[string]string
 	var loaded time.Time
 	return NewCallbackSender(func(ctx context.Context, ns string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if cache == nil || time.Since(loaded) > secretCacheTTL {
+		if cache == nil || time.Since(loaded) > ttl {
 			all, err := Namespaces(ctx, s)
 			if err != nil {
 				return "", err
@@ -214,7 +223,7 @@ func (h *callbackHandler) Work(ctx context.Context, j *Job) error {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode >= 500:
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 && s <= maxRetryAfterSeconds {
+		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 && time.Duration(s)*time.Second <= h.maxRetryAfter {
 			return RetryIn(time.Duration(s)*time.Second, fmt.Errorf("callback answered %d", resp.StatusCode))
 		}
 		return fmt.Errorf("callback answered %d", resp.StatusCode)

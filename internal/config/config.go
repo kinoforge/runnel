@@ -35,10 +35,9 @@ type Config struct {
 	Tracing    Tracing    `yaml:"tracing"`
 }
 
-// Tracing turns on OpenTelemetry spans for API requests, sent over OTLP/HTTP
-// as the standard OTEL_* variables say.
 type Tracing struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled      bool          `yaml:"enabled"`
+	FlushTimeout time.Duration `yaml:"flush_timeout"`
 }
 
 type Log struct {
@@ -61,6 +60,16 @@ type Server struct {
 	MaxHeaderBytes     int           `yaml:"max_header_bytes"`
 	ShutdownTimeout    time.Duration `yaml:"shutdown_timeout"`
 	DrainDelay         time.Duration `yaml:"drain_delay"`
+	MaxBatch           int           `yaml:"max_batch"`
+	MaxDelay           time.Duration `yaml:"max_delay"`
+	MaxClaimQueues     int           `yaml:"max_claim_queues"`
+	MaxClaim           int           `yaml:"max_claim"`
+	DefaultLease       time.Duration `yaml:"default_lease"`
+	MinLease           time.Duration `yaml:"min_lease"`
+	MaxLease           time.Duration `yaml:"max_lease"`
+	MaxExtend          int           `yaml:"max_extend"`
+	KeyCacheTTL        time.Duration `yaml:"key_cache_ttl"`
+	HealthTimeout      time.Duration `yaml:"health_timeout"`
 }
 
 type Maintainer struct {
@@ -82,10 +91,16 @@ type Retention struct {
 }
 
 type Callbacks struct {
-	Enabled      bool          `yaml:"enabled"`
-	Concurrency  int           `yaml:"concurrency"`
-	Timeout      time.Duration `yaml:"timeout"`
-	AllowPrivate bool          `yaml:"allow_private"`
+	Enabled       bool          `yaml:"enabled"`
+	Concurrency   int           `yaml:"concurrency"`
+	Timeout       time.Duration `yaml:"timeout"`
+	AllowPrivate  bool          `yaml:"allow_private"`
+	MaxAttempts   int           `yaml:"max_attempts"`
+	BackoffBase   time.Duration `yaml:"backoff_base"`
+	BackoffMax    time.Duration `yaml:"backoff_max"`
+	MaxRetryAfter time.Duration `yaml:"max_retry_after"`
+	UniqueFor     time.Duration `yaml:"unique_for"`
+	SecretTTL     time.Duration `yaml:"secret_ttl"`
 }
 
 // Limits mirrors runnel.Limits so it converts directly.
@@ -93,6 +108,8 @@ type Limits struct {
 	MaxPayload     int `yaml:"max_payload"`
 	MaxDependsOn   int `yaml:"max_depends_on"`
 	MaxMeta        int `yaml:"max_meta"`
+	MaxMetaKey     int `yaml:"max_meta_key"`
+	MaxMetaValue   int `yaml:"max_meta_value"`
 	MaxUniqueKey   int `yaml:"max_unique_key"`
 	MaxCallbackURL int `yaml:"max_callback_url"`
 }
@@ -115,6 +132,7 @@ func Default() Config {
 		Limits:     Limits(runnel.DefaultLimits),
 		Memory:     Memory{HeapPercent: 70},
 		Hybrid:     defaultHybrid(),
+		Tracing:    Tracing{FlushTimeout: 5 * time.Second},
 	}
 }
 

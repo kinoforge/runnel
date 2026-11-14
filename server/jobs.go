@@ -13,11 +13,6 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-const (
-	maxDelayDays   = 365
-	maxEnqueueJobs = 1000
-)
-
 // JobRequest is the JSON body that enqueues a job.
 type JobRequest struct {
 	Queue        string            `json:"queue"`
@@ -47,8 +42,8 @@ func (s *Server) toJob(req JobRequest) (*runnel.Job, error) {
 			return nil, err
 		}
 	}
-	if req.Delay < 0 || req.Delay.D() > maxDelayDays*24*time.Hour || req.TTL < 0 || req.TTL.D() > maxDelayDays*24*time.Hour {
-		return nil, fmt.Errorf("%w: delay and ttl must be between 0 and %d days", runnel.ErrInvalid, maxDelayDays)
+	if req.Delay < 0 || req.Delay.D() > s.cfg.MaxDelay || req.TTL < 0 || req.TTL.D() > s.cfg.MaxDelay {
+		return nil, fmt.Errorf("%w: delay and ttl must be between 0 and %s", runnel.ErrInvalid, s.cfg.MaxDelay)
 	}
 	if req.TTL > 0 && !req.Deadline.IsZero() {
 		return nil, fmt.Errorf("%w: set deadline or ttl, not both", runnel.ErrInvalid)
@@ -106,8 +101,8 @@ func (s *Server) enqueue(w http.ResponseWriter, r *http.Request, _ principal) er
 		}
 		batch.Jobs = []JobRequest{one}
 	}
-	if len(batch.Jobs) == 0 || len(batch.Jobs) > maxEnqueueJobs {
-		return fmt.Errorf("%w: send 1 to %d jobs", runnel.ErrInvalid, maxEnqueueJobs)
+	if len(batch.Jobs) == 0 || len(batch.Jobs) > s.cfg.MaxBatch {
+		return fmt.Errorf("%w: send 1 to %d jobs", runnel.ErrInvalid, s.cfg.MaxBatch)
 	}
 	jobs := make([]*runnel.Job, len(batch.Jobs))
 	for i, req := range batch.Jobs {

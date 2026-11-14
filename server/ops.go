@@ -8,14 +8,12 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-const healthTimeout = 2 * time.Second
-
 // Drain makes /readyz answer 503, so load balancers stop sending requests
 // before the server shuts down. Requests still get answers.
 func (s *Server) Drain() { s.draining.Store(true) }
 
 func (s *Server) storeAnswers(r *http.Request) bool {
-	ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.HealthTimeout)
 	defer cancel()
 	_, err := s.store.Configs(ctx, "", runnel.ConfigNamespace)
 	return err == nil

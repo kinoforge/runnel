@@ -12,11 +12,10 @@ import (
 	"time"
 )
 
-const maxCallbackBody = 16 << 20
-
-// DefaultSignatureAge is how far a callback's signing time may be from now
-// when VerifySignature is given no age.
-const DefaultSignatureAge = 5 * time.Minute
+const (
+	DefaultSignatureAge = 5 * time.Minute
+	DefaultCallbackBody = 16 << 20
+)
 
 // ErrSignature means a callback's Runnel-Signature header is missing,
 // malformed, too old, or signed with another secret.
@@ -84,23 +83,30 @@ func parseSignature(header string) (int64, []string, error) {
 	return ts, sigs, nil
 }
 
-// ReadCallback reads a callback request, verifies its signature with
-// VerifySignature and decodes it. Answer 2xx once it is handled; any error
-// here should be answered 400 or 401, which Runnel does not retry.
-func ReadCallback(r *http.Request, maxAge time.Duration, secrets ...string) (CallbackBody, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxCallbackBody+1))
+type CallbackReader struct {
+	Secrets []string
+	MaxAge  time.Duration
+	MaxBody int64
+}
+
+func (c CallbackReader) Read(r *http.Request) (CallbackBody, error) {
+	limit := c.MaxBody
+	if limit <= 0 {
+		limit = DefaultCallbackBody
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		return CallbackBody{}, err
 	}
-	if len(body) > maxCallbackBody {
-		return CallbackBody{}, fmt.Errorf("%w: callback body over %d bytes", ErrInvalid, maxCallbackBody)
+	if int64(len(body)) > limit {
+		return CallbackBody{}, fmt.Errorf("%w: callback body over %d bytes", ErrInvalid, limit)
 	}
-	if err := VerifySignature(r.Header.Get("Runnel-Signature"), body, maxAge, time.Now(), secrets...); err != nil {
+	if err := VerifySignature(r.Header.Get("Runnel-Signature"), body, c.MaxAge, time.Now(), c.Secrets...); err != nil {
 		return CallbackBody{}, err
 	}
-	var c CallbackBody
-	if err := json.Unmarshal(body, &c); err != nil {
+	var out CallbackBody
+	if err := json.Unmarshal(body, &out); err != nil {
 		return CallbackBody{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	return c, nil
+	return out, nil
 }

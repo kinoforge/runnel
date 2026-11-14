@@ -50,7 +50,7 @@ func TestReadCallbackAndTraceHeaders(t *testing.T) {
 	var trace string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		trace = r.Header.Get("traceparent")
-		c, err := ReadCallback(r, time.Minute, "s3cret")
+		c, err := CallbackReader{Secrets: []string{"s3cret"}, MaxAge: time.Minute}.Read(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
@@ -61,7 +61,7 @@ func TestReadCallbackAndTraceHeaders(t *testing.T) {
 	const tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 	done := &Job{ID: NewID(), Namespace: "app", Queue: "q", Kind: "k", State: StateCompleted, CallbackURL: srv.URL,
 		Meta: map[string]string{"traceparent": tp}}
-	hook, err := NewCallbackJob(done, "job.completed", 7, "")
+	hook, err := NewCallbackJob(done, "job.completed", 7, CallbackConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package mysql
 import (
 	"database/sql"
 	"errors"
-	"time"
 
 	driver "github.com/go-sql-driver/mysql"
 
@@ -11,16 +10,15 @@ import (
 )
 
 const (
-	maxOpenConns    = 20
-	maxIdleConns    = 10
-	connMaxLifetime = 30 * time.Minute
-	errDeadlock     = 1213
-	errLockTimeout  = 1205
+	errDeadlock    = 1213
+	errLockTimeout = 1205
 )
 
 // Open connects to MySQL with a go-sql-driver DSN such as
 // user:pass@tcp(host:3306)/db. Sessions run in UTC.
-func Open(dsn string) (*sqlstore.Store, error) {
+func Open(dsn string) (*sqlstore.Store, error) { return OpenWith(dsn, sqlstore.Pool{}) }
+
+func OpenWith(dsn string, pool sqlstore.Pool) (*sqlstore.Store, error) {
 	cfg, err := driver.ParseDSN(dsn)
 	if err != nil {
 		return nil, err
@@ -36,9 +34,7 @@ func Open(dsn string) (*sqlstore.Store, error) {
 		return nil, err
 	}
 	db := sql.OpenDB(conn)
-	db.SetMaxOpenConns(maxOpenConns)
-	db.SetMaxIdleConns(maxIdleConns)
-	db.SetConnMaxLifetime(connMaxLifetime)
+	pool.Apply(db)
 	d := sqlstore.MySQL()
 	d.Retryable = func(err error) bool {
 		var me *driver.MySQLError

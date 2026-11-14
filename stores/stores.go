@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kinoforge/runnel"
 	"github.com/kinoforge/runnel/store/hybrid"
@@ -14,6 +16,7 @@ import (
 	"github.com/kinoforge/runnel/store/postgres"
 	"github.com/kinoforge/runnel/store/redisstore"
 	"github.com/kinoforge/runnel/store/sqlite"
+	"github.com/kinoforge/runnel/store/sqlstore"
 )
 
 // Open opens and migrates the store a URL names: postgres://, mysql://,
@@ -34,7 +37,10 @@ func OpenWith(ctx context.Context, dsn string, hy hybrid.Options) (runnel.Store,
 	var err error
 	switch strings.ToLower(scheme) {
 	case "postgres", "postgresql":
-		s, err = postgres.Open(dsn)
+		var pool sqlstore.Pool
+		if dsn, pool, err = takePool(dsn); err == nil {
+			s, err = postgres.OpenWith(dsn, pool)
+		}
 	case "mysql":
 		s, err = openMySQL(dsn)
 	case "sqlite", "sqlite3", "file":
@@ -66,6 +72,10 @@ func OpenWith(ctx context.Context, dsn string, hy hybrid.Options) (runnel.Store,
 }
 
 func openMySQL(dsn string) (runnel.Store, error) {
+	dsn, pool, err := takePool(dsn)
+	if err != nil {
+		return nil, err
+	}
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, errors.New("runnel: bad mysql url")
@@ -77,7 +87,7 @@ func openMySQL(dsn string) (runnel.Store, error) {
 	}
 	q := u.Query()
 	q.Set("parseTime", "false")
-	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)%s?%s", u.User.Username(), pass, host, u.Path, q.Encode()))
+	return mysql.OpenWith(fmt.Sprintf("%s:%s@tcp(%s)%s?%s", u.User.Username(), pass, host, u.Path, q.Encode()), pool)
 }
 
 func openHybrid(rest string, opt hybrid.Options) (runnel.Store, error) {
@@ -96,6 +106,55 @@ func openHybrid(rest string, opt hybrid.Options) (runnel.Store, error) {
 	}
 	opt.Dir = dir
 	return hybrid.Open(opt)
+}
+
+var poolParams = []string{"max_conns", "max_idle_conns", "conn_max_lifetime", "conn_max_idle_time"}
+
+func takePool(dsn string) (string, sqlstore.Pool, error) {
+	var p sqlstore.Pool
+	u, err := url.Parse(dsn)
+	if err != nil || u.RawQuery == "" {
+		return dsn, p, nil
+	}
+	q := u.Query()
+	for _, k := range poolParams {
+		v := q.Get(k)
+		q.Del(k)
+		if v == "" {
+			continue
+		}
+		if err := setPool(&p, k, v); err != nil {
+			return "", p, fmt.Errorf("runnel: store %s: %w", k, err)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), p, nil
+}
+
+func setPool(p *sqlstore.Pool, key, v string) error {
+	switch key {
+	case "max_conns", "max_idle_conns":
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return errors.New("must be a positive number")
+		}
+		if key == "max_conns" {
+			p.MaxOpen = n
+		} else {
+			p.MaxIdle = n
+		}
+	default:
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return errors.New("must be a positive duration like 5m")
+		}
+		if key == "conn_max_lifetime" {
+			p.MaxLifetime = d
+		} else {
+			p.MaxIdleTime = d
+		}
+	}
+	return nil
 }
 
 // HybridDir returns the directory of a hybrid store URL.
