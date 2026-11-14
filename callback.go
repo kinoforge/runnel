@@ -177,7 +177,7 @@ func (h *callbackHandler) Work(ctx context.Context, j *Job) error {
 	if err := ValidCallbackURL(t.URL, DefaultLimits.MaxCallbackURL); err != nil {
 		return Fail(err)
 	}
-	body, err := json.Marshal(map[string]any{"event": t.Event, "delivery": t.Delivery, "job": t.Job})
+	body, err := json.Marshal(CallbackBody{Event: t.Event, Delivery: t.Delivery, Job: t.Job})
 	if err != nil {
 		return Fail(err)
 	}
@@ -193,6 +193,11 @@ func (h *callbackHandler) Work(ctx context.Context, j *Job) error {
 	req.Header.Set("User-Agent", "runnel-callback/1")
 	req.Header.Set("Runnel-Event", t.Event)
 	req.Header.Set("Runnel-Delivery", strconv.FormatInt(t.Delivery, 10))
+	for _, h := range traceHeaders {
+		if v := t.Job.Meta[h]; v != "" {
+			req.Header.Set(h, v)
+		}
+	}
 	if secret != "" {
 		req.Header.Set("Runnel-Signature", Sign(secret, time.Now().Unix(), body))
 	}
@@ -217,6 +222,16 @@ func (h *callbackHandler) Work(ctx context.Context, j *Job) error {
 		return Fail(fmt.Errorf("callback answered %d", resp.StatusCode))
 	}
 }
+
+// TraceParent and TraceState are the W3C trace context headers. A job
+// carries them in its meta under the same names, so a trace goes on through
+// workers and callbacks.
+const (
+	TraceParent = "traceparent"
+	TraceState  = "tracestate"
+)
+
+var traceHeaders = []string{TraceParent, TraceState}
 
 var errBlockedAddress = errors.New("runnel: callback address is private or reserved")
 

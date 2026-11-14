@@ -98,6 +98,16 @@ func openHybrid(rest string, opt hybrid.Options) (runnel.Store, error) {
 	return hybrid.Open(opt)
 }
 
+// HybridDir returns the directory of a hybrid store URL.
+func HybridDir(dsn string) (string, error) {
+	scheme, rest, _ := strings.Cut(dsn, ":")
+	dir, _, _ := strings.Cut(strings.TrimPrefix(rest, "//"), "?")
+	if !strings.EqualFold(scheme, "hybrid") || dir == "" {
+		return "", fmt.Errorf("runnel: restore needs a hybrid store, like hybrid:/var/lib/runnel, not %q", redact(dsn))
+	}
+	return dir, nil
+}
+
 func redact(dsn string) string {
 	if u, err := url.Parse(dsn); err == nil && u.User != nil {
 		u.User = url.User(u.User.Username())

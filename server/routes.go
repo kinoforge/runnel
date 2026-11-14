@@ -1,33 +1,23 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/kinoforge/runnel"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-const healthTimeout = 2 * time.Second
-
 func (s *Server) routes() {
-	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
-		defer cancel()
-		if _, err := s.store.Configs(ctx, "", runnel.ConfigNamespace); err != nil {
-			s.problem(w, http.StatusServiceUnavailable, "unavailable", "store unreachable")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	s.mux.HandleFunc("GET /healthz", s.healthz)
+	s.mux.HandleFunc("GET /readyz", s.readyz)
 	s.mux.Handle("GET /metrics", promhttp.HandlerFor(s.cfg.Registry, promhttp.HandlerOpts{}))
 	s.mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
 		_, _ = w.Write(openAPI)
 	})
-	s.patterns = append(s.patterns, "GET /healthz", "GET /metrics", "GET /openapi.yaml")
+	s.patterns = append(s.patterns, "GET /healthz", "GET /readyz", "GET /metrics", "GET /openapi.yaml")
+	s.handle("GET /v1/backup", "", s.backup)
 
 	s.handle("GET /v1/namespaces", "", s.listNamespaces)
 	s.handle("PUT /v1/namespaces/{name}", "", s.putNamespace)

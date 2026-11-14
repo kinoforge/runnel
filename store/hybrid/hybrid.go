@@ -73,6 +73,10 @@ func Open(opt Options) (*Store, error) {
 		return nil, err
 	}
 	s.log = l
+	if err := s.prepareDir(); err != nil {
+		_ = l.Close()
+		return nil, err
+	}
 	if err := s.load(); err != nil {
 		s.files.close()
 		_ = l.Close()
@@ -86,6 +90,13 @@ func Open(opt Options) (*Store, error) {
 	go s.retirer()
 	go s.spiller()
 	return s, nil
+}
+
+func (s *Store) prepareDir() error {
+	if err := checkFormat(s.opt.Dir); err != nil {
+		return err
+	}
+	return removeStaleBackups(s.opt.Dir)
 }
 
 // load opens the cold store, replays the snapshot and log into memory, starts

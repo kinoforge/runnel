@@ -98,15 +98,10 @@ func admit(ctx context.Context, j cand, q runnel.QueueConfig, p runnel.PoolConfi
 	if j.group != "" && q.GroupMaxRunning > 0 && act["qt|"+j.queue+"|"+j.group] >= q.GroupMaxRunning {
 		return queueGroupFull, nil
 	}
-	if j.pool != "" {
-		if p.Slots > 0 && act["r|"+j.pool] >= p.Slots {
-			return poolFull, nil
-		}
-		if j.group != "" && p.GroupSlots > 0 && act["rt|"+j.pool+"|"+j.group] >= p.GroupSlots {
-			return poolGroupFull, nil
-		}
+	why, take, err := admitPool(ctx, j, p, act, lim)
+	if why != admitted || err != nil {
+		return why, err
 	}
-	var take []*bucket
 	if q.Rate > 0 {
 		b, err := lim.get(ctx, "q|"+j.queue, q.Rate, q.Burst)
 		if err != nil {
@@ -132,4 +127,26 @@ func admit(ctx context.Context, j cand, q runnel.QueueConfig, p runnel.PoolConfi
 		b.dirty = true
 	}
 	return admitted, nil
+}
+
+// admitPool checks the job's pool and returns the pool's bucket to take a
+// token from when every other limit passes too.
+func admitPool(ctx context.Context, j cand, p runnel.PoolConfig, act counts, lim *limiter) (verdict, []*bucket, error) {
+	if j.pool == "" {
+		return admitted, nil, nil
+	}
+	if p.Stopped(lim.now) || (p.Slots > 0 && act["r|"+j.pool] >= p.Slots) {
+		return poolFull, nil, nil
+	}
+	if j.group != "" && p.GroupSlots > 0 && act["rt|"+j.pool+"|"+j.group] >= p.GroupSlots {
+		return poolGroupFull, nil, nil
+	}
+	if p.Rate <= 0 {
+		return admitted, nil, nil
+	}
+	b, err := lim.get(ctx, "r|"+j.pool, p.Rate, p.Burst)
+	if err != nil || b.tokens < 1 {
+		return poolFull, nil, err
+	}
+	return admitted, []*bucket{b}, nil
 }

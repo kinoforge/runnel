@@ -92,6 +92,8 @@ func Run(t *testing.T, open Opener) {
 		"QueueMaxRunning":            testMaxRunning,
 		"GroupAndPoolMaxRunning":     testGroupAndPoolMaxRunning,
 		"RateLimit":                  testRate,
+		"PoolRateLimit":              testPoolRate,
+		"PoolPause":                  testPoolPause,
 		"PausedQueue":                testPaused,
 		"ExtendAndLost":              testExtend,
 		"VersionGuard":               testVersionGuard,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // QueueConfig sets the limits and defaults of a queue. Zero values mean no
@@ -39,11 +40,18 @@ type QueueConfig struct {
 
 // PoolConfig is a number of slots shared by every job that names the pool,
 // whatever its queue, such as the calls a provider account allows at once.
-// Slots caps the pool's running jobs; GroupSlots caps them per group.
+// Slots caps the pool's running jobs; GroupSlots caps them per group. Rate
+// limits the pool's starts per second with a token bucket of Burst. A paused
+// pool starts no jobs, and neither does one before PausedUntil; jobs already
+// running or polling go on.
 type PoolConfig struct {
-	Name       string `json:"name"`
-	Slots      int    `json:"slots,omitempty"`
-	GroupSlots int    `json:"group_slots,omitempty"`
+	Name        string    `json:"name"`
+	Slots       int       `json:"slots,omitempty"`
+	GroupSlots  int       `json:"group_slots,omitempty"`
+	Rate        float64   `json:"rate,omitempty"`
+	Burst       int       `json:"burst,omitempty"`
+	Paused      bool      `json:"paused,omitempty"`
+	PausedUntil time.Time `json:"paused_until,omitzero"`
 }
 
 func (q QueueConfig) Validate() error {
@@ -69,10 +77,23 @@ func (p PoolConfig) Validate() error {
 	if err := checkName("pool", p.Name, false); err != nil {
 		return err
 	}
-	if p.Slots < 0 || p.GroupSlots < 0 {
+	if p.Slots < 0 || p.GroupSlots < 0 || p.Burst < 0 {
 		return invalid("limits must not be negative")
 	}
+	if p.Rate < 0 || p.Rate > 1e6 {
+		return invalid("rate must be between 0 and 1e6 per second")
+	}
 	return nil
+}
+
+// Limited reports whether the pool caps or holds back any start.
+func (p PoolConfig) Limited() bool {
+	return p.Slots > 0 || p.GroupSlots > 0 || p.Rate > 0 || p.Paused || !p.PausedUntil.IsZero()
+}
+
+// Stopped reports whether the pool starts no jobs at now, in Unix milliseconds.
+func (p PoolConfig) Stopped(nowMs int64) bool {
+	return p.Paused || (!p.PausedUntil.IsZero() && nowMs < p.PausedUntil.UnixMilli())
 }
 
 // Limits bounds what a single job may carry.

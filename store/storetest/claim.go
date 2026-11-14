@@ -128,6 +128,47 @@ func testRate(t *testing.T, open Opener) {
 	}
 }
 
+func testPoolRate(t *testing.T, open Opener) {
+	spec.Rule(t, "C11")
+	e := setup(t, open)
+	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "api", Rate: 1, Burst: 2}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"a", "b", "a"} {
+		e.add(q, runnel.Pool("api"))
+	}
+	free := e.add("b")
+	got := e.claim([]string{"a", "b"}, 10)
+	if len(got) != 3 || !slices.Contains(ids(got), free.ID) {
+		t.Fatalf("pool burst 2 plus a job outside it: %v", ids(got))
+	}
+	if got := e.claim([]string{"a", "b"}, 10); len(got) != 0 {
+		t.Fatalf("pool bucket empty, claimed %d", len(got))
+	}
+}
+
+func testPoolPause(t *testing.T, open Opener) {
+	spec.Rule(t, "C12")
+	e := setup(t, open)
+	until := e.now().Add(1500 * time.Millisecond)
+	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "api", PausedUntil: until}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.c.SetPool(e.ctx, runnel.PoolConfig{Name: "off", Paused: true}); err != nil {
+		t.Fatal(err)
+	}
+	held := e.add("q", runnel.Pool("api"))
+	e.add("q", runnel.Pool("off"))
+	free := e.add("q", runnel.Pool("other"))
+	if got := e.claim([]string{"q"}, 10); !slices.Equal(ids(got), []string{free.ID}) {
+		t.Fatalf("paused pools: %v want %v", ids(got), free.ID)
+	}
+	time.Sleep(until.Sub(e.now()) + 1100*time.Millisecond)
+	if got := e.claim([]string{"q"}, 10); !slices.Equal(ids(got), []string{held.ID}) {
+		t.Fatalf("after paused_until: %v want %v", ids(got), held.ID)
+	}
+}
+
 func testPaused(t *testing.T, open Opener) {
 	spec.Rule(t, "C04")
 	e := setup(t, open)

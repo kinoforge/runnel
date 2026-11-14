@@ -22,16 +22,24 @@ func (c *claimer) admit(h *job) bool {
 	if h.group != 0 && over(q.GroupMaxRunning, sp.active[qtk]) {
 		return c.refuse(qtk)
 	}
+	var take []*token
 	if h.pool != 0 {
-		r := sp.poolConfig(sp.syms.name(h.pool))
-		if over(r.Slots, sp.active[rk]) {
+		pname := sp.syms.name(h.pool)
+		r := sp.poolConfig(pname)
+		if r.Stopped(c.now) || over(r.Slots, sp.active[rk]) {
 			return c.refuse(rk)
 		}
 		if h.group != 0 && over(r.GroupSlots, sp.active[rtk]) {
 			return c.refuse(rtk)
 		}
+		if r.Rate > 0 {
+			b := c.bucket("r|"+pname, r.Rate, r.Burst)
+			if b.tokens < 1 {
+				return c.refuse(rk)
+			}
+			take = append(take, b)
+		}
 	}
-	var take []*token
 	if q.Rate > 0 {
 		b := c.bucket("q|"+qname, q.Rate, q.Burst)
 		if b.tokens < 1 {

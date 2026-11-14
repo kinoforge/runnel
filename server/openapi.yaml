@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Runnel API
-  version: 0.0.1
+  version: 0.0.1-alpha
   summary: Job queues for every service, over HTTP.
   description: |
     Producers enqueue jobs, workers claim them under a lease, heartbeat and
@@ -31,7 +31,7 @@ tags:
   - name: config
     description: Queues, pools and schedules of a namespace.
   - name: ops
-    description: Health, metrics and this document.
+    description: Health, readiness, metrics and this document.
 paths:
   /healthz:
     get:
@@ -41,6 +41,22 @@ paths:
       responses:
         "200":
           description: The store answers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, const: ok}
+        "503": {$ref: "#/components/responses/Problem"}
+  /readyz:
+    get:
+      tags: [ops]
+      summary: Readiness for traffic
+      description: Like /healthz, but 503 once the server is shutting down, so a load balancer stops sending it requests.
+      security: []
+      responses:
+        "200":
+          description: The store answers and the server takes requests.
           content:
             application/json:
               schema:
@@ -69,6 +85,21 @@ paths:
           content:
             application/yaml: {}
 
+  /v1/backup:
+    get:
+      tags: [admin]
+      summary: Copy the whole store
+      description: |
+        Streams a consistent copy of every namespace as a tar file, taken while
+        calls go on. Unpack it with `runnel restore`. Stores kept in a database
+        or Redis answer 501; back them up with their own tools. A copy cut short
+        ends with a broken connection, never a 2xx with missing data.
+      responses:
+        "200":
+          description: The backup.
+          content:
+            application/x-tar: {}
+        default: {$ref: "#/components/responses/Problem"}
   /v1/namespaces:
     get:
       tags: [admin]
@@ -869,6 +900,10 @@ components:
         name: {$ref: "#/components/schemas/Name"}
         slots: {type: integer, minimum: 0, description: "Running jobs at most across every queue that uses the pool."}
         group_slots: {type: integer, minimum: 0}
+        rate: {type: number, minimum: 0, description: "Starts per second across every queue that uses the pool."}
+        burst: {type: integer, minimum: 0}
+        paused: {type: boolean, description: "Start no jobs; running and polling ones go on."}
+        paused_until: {type: string, format: date-time, description: "Start no jobs before this time."}
     Schedule:
       type: object
       additionalProperties: false

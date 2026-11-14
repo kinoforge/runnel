@@ -59,6 +59,8 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 - **C08** A limit that holds back the first jobs in line does not hold back the jobs after them: a group at its cap or a pool with no free slot is skipped and the claim goes on to others. On Redis this holds within the first 2000 jobs a claim examines.
 - **C09** Polling jobs due for a poll are claimed before new jobs. They keep their attempt count and are not held back by limits, because they already hold their slot.
 - **C10** A claim can be limited to given job ids. It still obeys every limit and touches no other job.
+- **C11** A pool's `rate` and `burst` cap how many jobs naming it start per second over every queue, as a token bucket.
+- **C12** A paused pool, or one whose `paused_until` has not passed, starts no jobs; its running and polling jobs go on, and the claim goes on to jobs of other pools. Once `paused_until` passes the pool starts jobs again without a change.
 
 ## Leases (L)
 
@@ -93,6 +95,7 @@ What a handler returns decides what happens to the job next.
 - **R06** When its context ends, a worker stops claiming and waits up to its shutdown timeout for running jobs. Then it cancels them with `ErrShutdown` and gives them back untouched: no attempt used, no error recorded.
 - **R07** A worker needs at least one queue and one handler; otherwise `Run` returns `ErrInvalid`.
 - **R08** A busy worker claims again once a quarter of its slots are free, or after 2ms, so claims take jobs in batches. A free slot never waits longer than that for a claim.
+- **R09** With `tracing.Middleware`, each attempt is a consumer span named after its queue, a child of the trace in the job's `traceparent` meta, with an error status when it fails or retries. `tracing.Job` puts the caller's trace in a job, and `tracing.Handler` makes each API request a server span named after its route.
 
 ## Managing jobs (M)
 
@@ -126,6 +129,8 @@ What a handler returns decides what happens to the job next.
 - **H02** A delivery POSTs `{"event", "delivery", "job"}` with the headers `Runnel-Event`, `Runnel-Delivery` and, when the namespace has a secret, `Runnel-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`.
 - **H03** A 2xx answer completes the delivery. 408, 429 and 5xx retry, after `Retry-After` seconds when given (up to an hour). Any other answer, a redirect included, fails it. A delivery has 10 attempts.
 - **H04** Deliveries connect only to public addresses, checked after DNS on every connection, unless private ones are allowed.
+- **H05** `VerifySignature` and `ReadCallback` accept a delivery signed with any of the given secrets, so secrets can rotate, and refuse a missing, malformed or wrong signature and one signed more than 5 minutes (or the given age) from now, with `ErrSignature`.
+- **H06** A job whose meta holds `traceparent` or `tracestate` sends them as headers with its callback, so a trace continues to the receiver.
 
 ## Clock (K)
 
@@ -138,11 +143,13 @@ What a handler returns decides what happens to the job next.
 - **X03** Queue, pool and schedule settings are stored per namespace, replaced and deleted by name. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
 - **X04** The hybrid store restarts with every change it acknowledged, read from its snapshot and log. A record cut short by a crash is dropped, and the store opens again after it.
 - **X05** Only one process at a time opens a hybrid store's directory.
+- **X06** A hybrid store's directory has a `FORMAT` file naming the version of its files. A store refuses a directory of another version, or one that holds data without the file, with `ErrFormat`.
+- **X07** A hybrid store's backup, taken while calls go on, restores into an empty directory and opens with every job acknowledged before the backup began. Restore refuses a non-empty directory, entries outside it and a tar without `FORMAT`.
 
 ## Access (A)
 
-- **A01** Every `/v1` route needs `Authorization: Bearer <token>`; a missing or unknown token is 401. `/healthz`, `/metrics` and `/openapi.yaml` need none.
-- **A02** Only the admin token reaches the `/v1/namespaces` routes; a key there is 403. A server started without an admin token closes them.
+- **A01** Every `/v1` route needs `Authorization: Bearer <token>`; a missing or unknown token is 401. `/healthz`, `/readyz`, `/metrics` and `/openapi.yaml` need none.
+- **A02** Only the admin token reaches the `/v1/namespaces` and `/v1/backup` routes; a key there is 403. A server started without an admin token closes them.
 - **A03** A key acts in its own namespace only (403 elsewhere) and only with its roles. `reader` reads jobs, events, stats and settings. `producer` enqueues and cancels. `worker` claims, heartbeats, finishes and reads dependencies. `admin` does all of it, changes settings and retries jobs.
 - **A04** A key is `rnk_<12 hex id>_<64 hex secret>` and is shown once, when it is made. Only the SHA-256 of the secret is stored, and it is compared in constant time. An expired key is 401. A namespace holds at most 100 keys.
 - **A05** Keys made at the same time are all kept. Deleting a key or its namespace revokes it at once on the server that did it, and making the namespace again does not bring old keys back.
@@ -162,3 +169,6 @@ What a handler returns decides what happens to the job next.
 - **S10** `/openapi.yaml` documents exactly the routes the server serves.
 - **S11** `/healthz` answers 200 while the store answers and 503 when it does not. `/metrics` serves Prometheus metrics.
 - **S12** The remote client sets a queue or a pool (`SetQueue`, `SetPool`) with an admin key; a key without the admin role is 403.
+- **S13** `/readyz` answers like `/healthz` until the server starts shutting down, then 503.
+- **S14** `GET /v1/backup` streams the store's backup as a tar file, or answers 501 when the store has none.
+- **S15** An enqueue with a `traceparent` header, and `tracestate` with it, puts them in the meta of each job that has none and has room for them.

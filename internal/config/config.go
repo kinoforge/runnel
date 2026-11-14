@@ -32,6 +32,13 @@ type Config struct {
 	Limits     Limits     `yaml:"limits"`
 	Memory     Memory     `yaml:"memory"`
 	Hybrid     Hybrid     `yaml:"hybrid"`
+	Tracing    Tracing    `yaml:"tracing"`
+}
+
+// Tracing turns on OpenTelemetry spans for API requests, sent over OTLP/HTTP
+// as the standard OTEL_* variables say.
+type Tracing struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type Log struct {
@@ -53,6 +60,7 @@ type Server struct {
 	IdleTimeout        time.Duration `yaml:"idle_timeout"`
 	MaxHeaderBytes     int           `yaml:"max_header_bytes"`
 	ShutdownTimeout    time.Duration `yaml:"shutdown_timeout"`
+	DrainDelay         time.Duration `yaml:"drain_delay"`
 }
 
 type Maintainer struct {

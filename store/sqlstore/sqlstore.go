@@ -43,7 +43,7 @@ type nsConfig struct {
 
 func (c *nsConfig) poolLimits() bool {
 	for _, p := range c.pools {
-		if p.Slots > 0 || p.GroupSlots > 0 {
+		if p.Limited() {
 			return true
 		}
 	}

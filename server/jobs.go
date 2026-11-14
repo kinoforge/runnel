@@ -115,6 +115,7 @@ func (s *Server) enqueue(w http.ResponseWriter, r *http.Request, _ principal) er
 		if err != nil {
 			return fmt.Errorf("job %d: %w", i, err)
 		}
+		s.carryTrace(r, j)
 		jobs[i] = j
 	}
 	ns := r.PathValue("ns")
@@ -193,6 +194,7 @@ func (s *Server) enqueueFlow(w http.ResponseWriter, r *http.Request, _ principal
 		if err != nil {
 			return fmt.Errorf("step %q: %w", st.Name, err)
 		}
+		s.carryTrace(r, j)
 		f.Add(st.Name, j, st.After...)
 	}
 	res, err := s.client(r.PathValue("ns")).EnqueueFlow(r.Context(), f)

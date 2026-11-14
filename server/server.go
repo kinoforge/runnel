@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kinoforge/runnel"
@@ -44,15 +45,16 @@ type Config struct {
 // Server is the Runnel HTTP API: namespaces, keys, jobs, configuration and the
 // worker lease protocol. It implements http.Handler.
 type Server struct {
-	store   runnel.Store
-	clock   runnel.Clock
-	cfg     Config
-	log     *slog.Logger
-	mux     *http.ServeMux
-	obs     *metrics.Observer
-	reqs    *prometheus.CounterVec
-	admin   [32]byte
-	hasRoot bool
+	store    runnel.Store
+	clock    runnel.Clock
+	cfg      Config
+	log      *slog.Logger
+	mux      *http.ServeMux
+	obs      *metrics.Observer
+	reqs     *prometheus.CounterVec
+	admin    [32]byte
+	hasRoot  bool
+	draining atomic.Bool
 
 	patterns []string
 
@@ -152,6 +154,8 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.code = code
 	w.ResponseWriter.WriteHeader(code)
 }
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (s *Server) source(ns string) runnel.Source {
 	s.mu.Lock()

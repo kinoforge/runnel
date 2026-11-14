@@ -69,6 +69,7 @@ local fullq, fullqt, fullr, fullrt = {}, {}, {}, {}
 local offset = {}
 local function verdict(j)
   local q = qcfg[j.queue]
+  local take = {}
   if fullq[j.queue] or fullqt[j.queue .. "|" .. j.group] or fullr[j.pool] or fullrt[j.pool .. "|" .. j.group] then return "skip" end
   if n(q.max_running) > 0 and act("q|" .. j.queue) >= n(q.max_running) then fullq[j.queue] = true; return "skip" end
   if j.group ~= "" and n(q.group_max_running) > 0 and act("qt|" .. j.queue .. "|" .. j.group) >= n(q.group_max_running) then
@@ -77,12 +78,17 @@ local function verdict(j)
   if j.pool ~= "" then
     if rcfg[j.pool] == nil then rcfg[j.pool] = cfg("pool", j.pool) end
     local p = rcfg[j.pool]
+    if p.paused or now < n(p.paused_until_ms) then fullr[j.pool] = true; return "skip" end
     if n(p.slots) > 0 and act("r|" .. j.pool) >= n(p.slots) then fullr[j.pool] = true; return "skip" end
     if j.group ~= "" and n(p.group_slots) > 0 and act("rt|" .. j.pool .. "|" .. j.group) >= n(p.group_slots) then
       fullrt[j.pool .. "|" .. j.group] = true; return "skip"
     end
+    if n(p.rate) > 0 then
+      local b = bucket("r|" .. j.pool, n(p.rate), n(p.burst))
+      if b.t < 1 then fullr[j.pool] = true; return "skip" end
+      take[#take + 1] = b
+    end
   end
-  local take = {}
   if n(q.rate) > 0 then
     local b = bucket("q|" .. j.queue, n(q.rate), n(q.burst))
     if b.t < 1 then fullq[j.queue] = true; return "skip" end

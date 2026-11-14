@@ -14,6 +14,7 @@ import (
 const (
 	archiveName = "archive.jsonl"
 	filePerm    = 0o600
+	dirPerm     = 0o750
 )
 
 func (s *Store) Prune(_ context.Context, ns string, req runnel.PruneRequest) (int, error) {

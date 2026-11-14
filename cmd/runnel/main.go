@@ -28,6 +28,7 @@ usage:
   runnel jobs NS [--queue Q] [--state S] [--limit N]
   runnel job NS ID | cancel NS ID | retry NS ID | stats NS
   runnel queue|pool|schedule set NS NAME --json '{...}' | list NS | delete NS NAME
+  runnel backup -o FILE [--server URL]     restore FILE --store hybrid:DIR
   runnel version
   runnel bench [--jobs 20000] [--workers 4] [--concurrency 25] [--batch 100] [--groups N] [--group-max-running N]
 
@@ -178,6 +179,10 @@ func run(ctx context.Context, name string, args []string) error {
 		return stats(ctx, args)
 	case "bench":
 		return bench(ctx, args)
+	case "backup":
+		return backupCommand(ctx, args)
+	case "restore":
+		return restoreCommand(ctx, args)
 	case "version":
 		fmt.Println("runnel", buildVersion())
 		return nil

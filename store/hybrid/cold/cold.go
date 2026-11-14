@@ -329,3 +329,12 @@ type quiet struct{}
 func (quiet) Infof(string, ...any)              {}
 func (quiet) Errorf(format string, args ...any) { slog.Error(fmt.Sprintf("cold: "+format, args...)) }
 func (quiet) Fatalf(format string, args ...any) { panic(fmt.Sprintf("cold: "+format, args...)) }
+
+// Checkpoint writes a copy of the store as of now into dir, which must not
+// exist. Files are hard-linked where the file system allows.
+func (s *Store) Checkpoint(dir string) error {
+	if err := s.db.Flush(); err != nil {
+		return err
+	}
+	return s.db.Checkpoint(dir)
+}

@@ -6,11 +6,15 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/kinoforge/runnel"
 	"github.com/kinoforge/runnel/internal/config"
 	"github.com/kinoforge/runnel/server"
+	"github.com/kinoforge/runnel/tracing"
 )
+
+const traceFlushTimeout = 5 * time.Second
 
 type serveFlags struct {
 	addr, token                       *string
@@ -77,7 +81,23 @@ func serve(ctx context.Context, args []string) error {
 	if cfg.Maintainer.Enabled {
 		go runMaintainer(ctx, s, cfg, log)
 	}
-	hs := httpServer(cfg.Server, server.New(s, serverConfig(cfg, log)))
+	api := server.New(s, serverConfig(cfg, log))
+	var handler http.Handler = api
+	if cfg.Tracing.Enabled {
+		tp, err := tracing.Setup(ctx, buildVersion())
+		if err != nil {
+			return err
+		}
+		defer func() {
+			sctx, cancel := context.WithTimeout(context.Background(), traceFlushTimeout)
+			defer cancel()
+			if err := tp.Shutdown(sctx); err != nil {
+				log.Warn("sending the last spans failed", "err", err)
+			}
+		}()
+		handler = tracing.Handler(api, tp)
+	}
+	hs := httpServer(cfg.Server, handler)
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
 	log.Info("runnel listening", "addr", cfg.Server.Addr, "admin", cfg.Server.AdminToken != "")
@@ -85,6 +105,11 @@ func serve(ctx context.Context, args []string) error {
 	case err := <-errc:
 		return err
 	case <-ctx.Done():
+	}
+	api.Drain()
+	if cfg.Server.DrainDelay > 0 {
+		log.Info("draining", "for", cfg.Server.DrainDelay)
+		time.Sleep(cfg.Server.DrainDelay)
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()

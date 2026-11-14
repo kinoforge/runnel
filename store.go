@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -185,6 +186,12 @@ type Store interface {
 type TxInserter interface {
 	InsertTx(ctx context.Context, tx *sql.Tx, ns string, jobs []*Job, now time.Time) ([]Inserted, error)
 	ConfigsTx(ctx context.Context, tx *sql.Tx, ns string, kind ConfigKind) (map[string][]byte, error)
+}
+
+// Backuper is implemented by stores that copy themselves while calls go on.
+type Backuper interface {
+	// Backup writes a consistent copy of the store to w as a tar file.
+	Backup(ctx context.Context, w io.Writer) error
 }
 
 // Waker is implemented by stores that signal when jobs may be ready, so idle
