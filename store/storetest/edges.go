@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,5 +320,25 @@ func testClaimByIDLimits(t *testing.T, open Opener) {
 	free := e.add("q", runnel.Group("h"))
 	if got := byID(free.ID); len(got) != 1 || got[0].ID != free.ID {
 		t.Fatalf("claim by id of a free job: %v", ids(got))
+	}
+}
+
+func testStartTimeoutAfterRetry(t *testing.T, open Opener) {
+	spec.Rule(t, "T01", "O02")
+	e := setup(t, open)
+	res := e.add("q", runnel.StartTimeout(300*time.Millisecond), runnel.MaxAttempts(3))
+	j := e.claim([]string{"q"}, 1)[0]
+	retried := e.finish(j, runnel.Outcome{Kind: runnel.OutcomeRetry, Error: "provider busy", Delay: runnel.Duration(50 * time.Millisecond)})
+	if retried.State != runnel.StateWaiting || retried.StartBy.IsZero() || !retried.WaitingSince.Equal(retried.RunAt) ||
+		!retried.StartBy.Equal(retried.RunAt.Add(300*time.Millisecond)) {
+		t.Fatalf("retried job waiting since %v run at %v start by %v", retried.WaitingSince, retried.RunAt, retried.StartBy)
+	}
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "q", Paused: true}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the retried job to expire", 5*time.Second, func() bool { e.tick(); return e.get(res.ID).State == runnel.StateExpired })
+	got := e.get(res.ID)
+	if got.Attempt != 1 || len(got.Errors) != 2 || !strings.Contains(got.Errors[1].Error, "not started within") {
+		t.Fatalf("expired retried job attempt=%d errors=%+v", got.Attempt, got.Errors)
 	}
 }

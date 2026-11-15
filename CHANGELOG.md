@@ -13,6 +13,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - A worker stopped while a job runs now writes the job back before `Run` returns. Before, the write used the cancelled shutdown context and failed, so the job stayed `running` until its lease ended and then lost an attempt.
 - A running job's deadline is measured on the store's clock, like leases. Before, the worker used its own clock, so with the store's clock behind, the handler stopped early and the job ended `dead` instead of `expired`; with it ahead, the handler ran past the deadline. A job stopped by its deadline now always ends `expired`.
 - A heartbeat answered after a job finished and was claimed again by the same worker, as polls are, no longer cancels the new run. Before, the new run's result was dropped and the job stayed `running` until its lease ended.
+- A job retried after a failed attempt counts its start timeout again from when it is due, as T01 says. Before, the retry cleared the start deadline, so a retried job held back by a full pool could wait forever.
 - On Redis, Valkey and Dragonfly, jobs of the same priority are claimed by start time to the millisecond, as on the other stores. Before, start times counted only to the second, so jobs due in the same second ran in id order. `Migrate` re-scores the waiting jobs of a store made by an older version once; upgrade every server before relying on the new order.
 
 ## [0.0.3-beta.3] - 2026-11-14

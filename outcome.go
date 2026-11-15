@@ -180,7 +180,9 @@ func decide(j *Job, o Outcome, now time.Time) *Job {
 			if delay <= 0 {
 				delay = n.Backoff.Delay(n.Attempt)
 			}
-			n.State, n.RunAt, n.StartBy = StateWaiting, now.Add(delay), time.Time{}
+			n.State, n.RunAt = StateWaiting, now.Add(delay)
+			n.WaitingSince = n.RunAt
+			n.computeStartBy()
 			return n
 		}
 		end(n, StateDead, now)

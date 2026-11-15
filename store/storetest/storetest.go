@@ -138,6 +138,7 @@ func Run(t *testing.T, open Opener) {
 		"ConfigUpdate":               testUpdateConfig,
 		"QueueCallback":              testQueueCallback,
 		"WorkerResize":               testWorkerResize,
+		"EdgeStartTimeoutAfterRetry": testStartTimeoutAfterRetry,
 		"EdgeClaimTies":              testClaimTies,
 		"EdgeListPaging":             testListPaging,
 		"EdgeBatchBounds":            testBatchBounds,
