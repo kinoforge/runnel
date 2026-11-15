@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -88,15 +89,16 @@ func testStoryAsyncRender(t *testing.T, open Opener) {
 	defer stop()
 
 	res, _ := e.c.Enqueue(e.ctx, "renders", "video", nil)
-	var seen []runnel.State
+	last := ""
+	t.Logf("worker %s", w.ID())
 	waitFor(t, "render polled twice", 10*time.Second, func() bool {
 		j := e.get(res.ID)
 		if polls.Load() >= 2 && j.State == runnel.StatePolling {
 			return true
 		}
-		if len(seen) == 0 || seen[len(seen)-1] != j.State {
-			seen = append(seen, j.State)
-			t.Logf("render %s attempt=%d handle=%q polls=%d run_at=%v worker=%q lease=%v errors=%+v", j.State, j.Attempt, j.Handle, polls.Load(), j.RunAt, j.Worker, j.LeaseUntil, j.Errors)
+		if now := fmt.Sprintf("%s attempt=%d handle=%q polls=%d version=%d worker=%q", j.State, j.Attempt, j.Handle, polls.Load(), j.Version, j.Worker); now != last {
+			last = now
+			t.Logf("render %s run_at=%v lease=%v errors=%+v", now, j.RunAt, j.LeaseUntil, j.Errors)
 		}
 		return false
 	})
