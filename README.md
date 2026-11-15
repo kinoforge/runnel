@@ -103,7 +103,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md). Security reports go through [SEC
 
 ## Roadmap
 
-- SDKs for TypeScript, Python, Java and Kotlin, and PHP, generated from the gRPC and Connect API. See [SDKs](docs/sdks.md).
+- SDKs for Java and Kotlin, and PHP, generated from the gRPC and Connect API. The TypeScript and Python SDKs are in beta. See [SDKs](docs/sdks.md).
 - Worker labels, so jobs can ask for workers with certain abilities, like a GPU or a region.
 - Per-group ready sets on Redis, removing the 2,000-job examination bound.
 

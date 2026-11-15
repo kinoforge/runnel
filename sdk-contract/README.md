@@ -21,7 +21,7 @@ Each scenario starts with a fresh namespace and keys made through the admin API.
 | C06 | The handler returns `Busy(1s)` | the job runs again without using an attempt |
 | C07 | The handler returns `Pending(handle, 1s)`; the poller completes it on the third poll | the job is `completed`, and the poller saw the same handle each time |
 | C08 | Cancel a waiting job | it is `cancelled` and no worker receives it |
-| C09 | A job with a deadline 2 seconds away, the handler runs longer | the job is `expired`, and the handler's cancellation signal fired before the deadline on the server's clock |
+| C09 | A job with a deadline 2 seconds away, the handler runs longer | the job is `expired`, and the handler was cancelled at the deadline on the server's clock |
 | C10 | The worker holds a job longer than its lease, sending heartbeats | the job stays `running` and completes; no other worker received it |
 | C11 | The worker stops heartbeats and the lease runs out | the SDK reports the lease as lost, and the job runs again |
 | C12 | Shut the worker down while it holds jobs it has not started | those jobs are released untouched, with their attempt count unchanged |
