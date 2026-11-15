@@ -53,8 +53,6 @@ func (s *Store) p(ns string) string {
 	return s.prefix + ":{" + ns + "}:"
 }
 
-func (s *Store) Migrate(ctx context.Context) error { return s.rdb.Ping(ctx).Err() }
-
 // Time returns the server's clock.
 // Clock returns the store's shared clock, which follows Time.
 func (s *Store) Clock() runnel.Clock {
