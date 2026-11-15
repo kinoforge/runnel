@@ -11,6 +11,14 @@ run=${RUN:-.}
 tags=${BOX_TAGS:-}
 tmpfs=${BOX_TMPFS:-}
 timeout=${BOX_TIMEOUT:-10m}
+count=${BOX_COUNT:-1}
+race=${BOX_RACE:-}
+cgo=0
+if [ -n "$race" ]; then
+	image=${BOX_IMAGE:-golang:1.27.4}
+	cgo=1
+	race=-race
+fi
 
 disk=${BOX_DISK:-}
 if [ -z "$disk" ] && command -v lsblk >/dev/null 2>&1; then
@@ -31,5 +39,5 @@ fi
 exec docker run "$@" \
 	-v "$(pwd)":/src:ro -w /src \
 	-v runnel-gocache:/root/.cache/go-build -v runnel-gomod:/go/pkg/mod \
-	-e CGO_ENABLED=0 -e GOFLAGS=-buildvcs=false \
-	"$image" go test -p 1 -count=1 -timeout "$timeout" -tags "$tags" -run "$run" $pkg
+	-e CGO_ENABLED="$cgo" -e GOFLAGS=-buildvcs=false \
+	"$image" go test $race -p 1 -count="$count" -timeout "$timeout" -tags "$tags" -run "$run" $pkg

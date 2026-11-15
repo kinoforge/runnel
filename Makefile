@@ -23,7 +23,7 @@ test:
 test-box:
 	PKG='$(PKG)' RUN='$(RUN)' BOX_CPUS='$(BOX_CPUS)' BOX_MEMORY='$(BOX_MEMORY)' BOX_IOPS='$(BOX_IOPS)' \
 		BOX_DISK='$(BOX_DISK)' BOX_IMAGE='$(BOX_IMAGE)' BOX_TAGS='$(BOX_TAGS)' BOX_TMPFS='$(BOX_TMPFS)' \
-		BOX_TIMEOUT='$(BOX_TIMEOUT)' sh deploy/test-box.sh
+		BOX_TIMEOUT='$(BOX_TIMEOUT)' BOX_COUNT='$(BOX_COUNT)' BOX_RACE='$(BOX_RACE)' sh deploy/test-box.sh
 
 drill:
 	$(MAKE) test-box PKG=./internal/drill RUN='$(RUN)' BOX_TAGS=drill BOX_TMPFS=/drill:size=96m BOX_TIMEOUT=30m

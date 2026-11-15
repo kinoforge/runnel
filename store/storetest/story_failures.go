@@ -88,9 +88,17 @@ func testStoryAsyncRender(t *testing.T, open Opener) {
 	defer stop()
 
 	res, _ := e.c.Enqueue(e.ctx, "renders", "video", nil)
+	var seen []runnel.State
 	waitFor(t, "render polled twice", 10*time.Second, func() bool {
 		j := e.get(res.ID)
-		return polls.Load() >= 2 && j.State == runnel.StatePolling
+		if polls.Load() >= 2 && j.State == runnel.StatePolling {
+			return true
+		}
+		if len(seen) == 0 || seen[len(seen)-1] != j.State {
+			seen = append(seen, j.State)
+			t.Logf("render %s attempt=%d handle=%q polls=%d run_at=%v worker=%q lease=%v errors=%+v", j.State, j.Attempt, j.Handle, polls.Load(), j.RunAt, j.Worker, j.LeaseUntil, j.Errors)
+		}
+		return false
 	})
 	if j := e.get(res.ID); j.Attempt != 1 || j.Handle != "task-1" || len(j.Errors) != 0 {
 		t.Fatalf("polling render attempt=%d handle=%q errors=%+v", j.Attempt, j.Handle, j.Errors)
