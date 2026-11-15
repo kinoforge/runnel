@@ -117,6 +117,7 @@ func Run(t *testing.T, open Opener) {
 		"WorkerCancelRunning":        testWorkerCancel,
 		"MaintainerReapAndStart":     testMaintainer,
 		"MaintainerCron":             testCron,
+		"MaintainerCronOverlap":      testCronOverlap,
 		"StoreTime":                  testStoreTime,
 		"EventsOutliveJobPrune":      testEventsOutlivePrune,
 		"MaintainerKeepsUndelivered": testMaintainerEvents,

@@ -1040,6 +1040,10 @@ components:
         meta:
           type: object
           additionalProperties: {type: string}
+        overlap:
+          type: string
+          enum: [queue, skip]
+          description: "queue (the default) enqueues every firing; skip drops a firing while the schedule's previous job has not finished."
     QueueStats:
       type: object
       properties:

@@ -7,6 +7,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Added
 
 - The remote Go client manages schedules like queues and pools: `SetSchedule`, `Schedules`, `DeleteSchedule` and `UpdateSchedule`. `runnel.Client` gains `UpdateSchedule` too, which changes only the fields you touch.
+- A schedule's `overlap` setting: `queue` (the default) enqueues every firing as before; `skip` drops a firing while the schedule's previous job has not finished, so a slow chore never piles up runs.
+
+### Changed
+
+- A schedule firing refused because its queue or group is full is logged at debug, not as an error. Before, a refusal returned per job was not logged at all, and one returned for the call was logged as an error.
 
 ### Fixed
 

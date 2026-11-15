@@ -46,7 +46,7 @@ When a handler finishes, what it returns decides what happens next.
 | Transactional enqueue | `Client.EnqueueTx` on SQL stores: the job exists only if your own transaction commits |
 | Unique jobs | by key, while the job runs or for a time window |
 | Workflows | chains and DAGs. Steps read their parents' results, and a failure cancels everything after it |
-| Cron | cron specs, `@every`, time zones. Run as many maintainers as you like and each firing still happens once |
+| Cron | cron specs, `@every`, time zones. Run as many maintainers as you like and each firing still happens once. `overlap: skip` drops a firing while the last one is still waiting or running, for chores where a late run has no value |
 | Callbacks | signed with HMAC-SHA256, retried, never redirected, never sent to private addresses |
 | Namespaces | each service gets its own queues, pools, schedules, callback secret and API keys with roles |
 | One clock | leases and schedules are measured on the store's clock, so servers whose clocks drift still agree |

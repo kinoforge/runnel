@@ -118,7 +118,7 @@ What a handler returns decides what happens to the job next.
 ## Maintenance (T)
 
 - **T01** A waiting job that has not started within its start timeout ends `expired`, with an error recorded. Like every final state, this is an event and a callback, and the jobs that depend on it are cancelled. A retried job, whether a handler asked for the retry or an operator did, waits from the retry again, with its start timeout counted anew.
-- **T02** A schedule enqueues a job on its cron spec: five fields, or `@every 10m`, `@daily` and the like, in a time zone. Each firing is enqueued once, even with many maintainers running, and the job carries `schedule` and `fire_at` meta.
+- **T02** A schedule enqueues a job on its cron spec: five fields, or `@every 10m`, `@daily` and the like, in a time zone. Each firing is enqueued once, even with many maintainers running, and the job carries `schedule` and `fire_at` meta. With `overlap: skip`, a firing is dropped while the schedule's previous job has not finished; a dropped firing, or one refused by a full queue or group, is not an error.
 - **T03** The maintainer deletes completed and cancelled jobs after 24h and dead jobs after 7 days, unless the queue sets its own retention, and can archive them first. Only final jobs can be pruned.
 - **T04** Events outlive the jobs they describe and are deleted after their own retention, 24h by default.
 - **T05** With callbacks on, an event is not deleted before its delivery job is made, unless it has waited longer than the undelivered retention (7 days). Those are deleted and logged.

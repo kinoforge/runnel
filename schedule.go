@@ -3,6 +3,7 @@ package runnel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"strconv"
 	"time"
@@ -13,6 +14,9 @@ import (
 const (
 	maxCatchUp    = 1000
 	cronUniqueFor = 24 * time.Hour
+
+	OverlapQueue = "queue"
+	OverlapSkip  = "skip"
 )
 
 // Schedule enqueues a job on a cron spec. Each firing is enqueued once, even
@@ -32,12 +36,16 @@ type Schedule struct {
 	Timeout     Duration          `json:"timeout,omitempty"`
 	CallbackURL string            `json:"callback_url,omitempty"`
 	Meta        map[string]string `json:"meta,omitempty"`
+	Overlap     string            `json:"overlap,omitempty"`
 }
 
 // Validate checks the spec, timezone and the job the schedule makes.
 func (s Schedule) Validate() error {
 	if err := checkName("schedule", s.Name, false); err != nil {
 		return err
+	}
+	if s.Overlap != "" && s.Overlap != OverlapQueue && s.Overlap != OverlapSkip {
+		return invalid("schedule overlap must be %q or %q", OverlapQueue, OverlapSkip)
 	}
 	if _, err := parseSpec(s.Spec, s.Timezone); err != nil {
 		return invalid("schedule spec: %v", err)
@@ -118,11 +126,30 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 		j := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Group: s.Group, Pool: s.Pool,
 			MaxAttempts: s.MaxAttempts, Timeout: s.Timeout, CallbackURL: s.CallbackURL,
 			UniqueKey: "cron:" + name + ":" + strconv.FormatInt(fire.Unix(), 10), UniqueFor: Duration(cronUniqueFor)}
+		if s.Overlap == OverlapSkip {
+			j.UniqueKey, j.UniqueFor = "cron:"+name, 0
+		}
 		j.Meta = map[string]string{"schedule": name, "fire_at": fire.UTC().Format(time.RFC3339)}
 		maps.Copy(j.Meta, s.Meta)
-		if _, err := m.client(ns).EnqueueJobs(ctx, []*Job{j}); err != nil {
-			m.log.Error("runnel: scheduled job rejected", "namespace", ns, "schedule", name, "err", err)
-		}
+		m.fire(ctx, ns, name, j)
 	}
 	return nil
+}
+
+func (m *Maintainer) fire(ctx context.Context, ns, name string, j *Job) {
+	res, err := m.client(ns).EnqueueJobs(ctx, []*Job{j})
+	if err == nil && len(res) == 1 {
+		err = res[0].Err
+		if err == nil && res[0].Duplicate {
+			m.log.Debug("runnel: schedule firing skipped, its previous job has not finished", "namespace", ns, "schedule", name)
+			return
+		}
+	}
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrQueueFull), errors.Is(err, ErrGroupFull):
+		m.log.Debug("runnel: schedule firing skipped, its queue is full", "namespace", ns, "schedule", name, "err", err)
+	default:
+		m.log.Error("runnel: scheduled job rejected", "namespace", ns, "schedule", name, "err", err)
+	}
 }
