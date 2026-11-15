@@ -107,8 +107,8 @@ func TestJobBoundaries(t *testing.T) {
 		{"deadline at run_at", func(j *Job) { j.RunAt, j.Deadline = at, at }, false},
 		{"deadline before run_at", func(j *Job) { j.RunAt, j.Deadline = at, at.Add(-time.Second) }, false},
 		{"timeout filling the deadline", func(j *Job) { j.RunAt, j.Deadline, j.Timeout = at, at.Add(time.Minute), Duration(time.Minute) }, true},
-		{"timeout past the deadline", func(j *Job) { j.RunAt, j.Deadline, j.Timeout = at, at.Add(time.Minute), Duration(time.Minute + 1) }, false},
-		{"start timeout past the deadline", func(j *Job) { j.RunAt, j.Deadline, j.StartTimeout = at, at.Add(time.Minute), Duration(2 * time.Minute) }, false},
+		{"timeout past the deadline", func(j *Job) { j.RunAt, j.Deadline, j.Timeout = at, at.Add(time.Minute), Duration(time.Minute+1) }, false},
+		{"start timeout past the deadline", func(j *Job) { j.RunAt, j.Deadline, j.StartTimeout = at, at.Add(time.Minute), Duration(2*time.Minute) }, false},
 	}
 	for _, c := range cases {
 		j := &Job{Queue: "q", Kind: "k", MaxAttempts: 1}
