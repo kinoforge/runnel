@@ -194,18 +194,24 @@ func (p *proxy) accept() {
 			_ = in.Close()
 			continue
 		}
-		p.track(in, out)
+		if !p.track(in, out) {
+			continue
+		}
 		go p.pipe(in, out)
 		go p.pipe(out, in)
 	}
 }
 
-func (p *proxy) track(conns ...net.Conn) {
+func (p *proxy) track(in, out net.Conn) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, c := range conns {
-		p.conns[c] = struct{}{}
+	if p.down {
+		_ = in.Close()
+		_ = out.Close()
+		return false
 	}
+	p.conns[in], p.conns[out] = struct{}{}, struct{}{}
+	return true
 }
 
 func (p *proxy) pipe(dst, src net.Conn) {
