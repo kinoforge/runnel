@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,7 +41,18 @@ func waitFor(t *testing.T, what string, timeout time.Duration, fn func() bool) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", what)
+	buf := make([]byte, 1<<20)
+	t.Fatalf("timed out waiting for %s\n%s", what, stacks(buf[:runtime.Stack(buf, true)]))
+}
+
+func stacks(all []byte) string {
+	var keep []string
+	for g := range strings.SplitSeq(string(all), "\n\n") {
+		if strings.Contains(g, "kinoforge/runnel") && !strings.Contains(g, "storetest.waitFor") {
+			keep = append(keep, g)
+		}
+	}
+	return strings.Join(keep, "\n\n")
 }
 
 func fast(queues ...string) runnel.WorkerConfig {
