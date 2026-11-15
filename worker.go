@@ -367,8 +367,9 @@ func (w *Worker) heartbeat(ctx context.Context, stop <-chan struct{}, done chan<
 		case <-t.C:
 		}
 		w.mu.Lock()
-		ids := slices.Collect(maps.Keys(w.runs))
+		sent := maps.Clone(w.runs)
 		w.mu.Unlock()
+		ids := slices.Collect(maps.Keys(sent))
 		if len(ids) == 0 {
 			continue
 		}
@@ -381,7 +382,7 @@ func (w *Worker) heartbeat(ctx context.Context, stop <-chan struct{}, done chan<
 		}
 		w.mu.Lock()
 		for _, id := range lost {
-			if r := w.runs[id]; r != nil {
+			if r := w.runs[id]; r != nil && r == sent[id] {
 				r.lost.Store(true)
 				r.cancel(ErrLost)
 			}
