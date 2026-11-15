@@ -3,6 +3,7 @@ package runnel
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
@@ -27,9 +28,18 @@ func Attempt(ctx context.Context, j *Job, src Source) (context.Context, context.
 		ctx, stopTimeout = context.WithTimeoutCause(ctx, j.Timeout.D(), ErrTimeout)
 	}
 	if !j.Deadline.IsZero() {
-		ctx, stopDeadline = context.WithDeadlineCause(ctx, j.Deadline, ErrDeadline)
+		ctx, stopDeadline = context.WithDeadlineCause(ctx, localTime(j.Deadline, src), ErrDeadline)
 	}
 	return withJob(ctx, j, src), func() { stopDeadline(); stopTimeout() }
+}
+
+func localTime(t time.Time, src Source) time.Time {
+	owner, ok := src.(interface{ Clock() Clock })
+	if !ok {
+		return t
+	}
+	now := time.Now()
+	return t.Add(now.Sub(owner.Clock().Now()))
 }
 
 // Classify turns the result of an attempt into an outcome, telling shutdowns and

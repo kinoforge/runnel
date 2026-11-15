@@ -131,7 +131,8 @@ const deadlinePassed = "deadline passed"
 // deadline, or would run again only after it, ends as expired.
 func Decide(j *Job, o Outcome, now time.Time) *Job {
 	n := decide(j, o, now)
-	if o.Kind == OutcomeDone || (!j.late(now) && !j.late(n.RunAt)) {
+	stopped := o.Kind == OutcomeFail && o.Error == deadlinePassed && !j.Deadline.IsZero()
+	if o.Kind == OutcomeDone || (!stopped && !j.late(now) && !j.late(n.RunAt)) {
 		return n
 	}
 	if !n.State.Final() {

@@ -138,6 +138,7 @@ func Run(t *testing.T, open Opener) {
 		"ConfigUpdate":               testUpdateConfig,
 		"QueueCallback":              testQueueCallback,
 		"WorkerResize":               testWorkerResize,
+		"DeadlineOnStoreClock":       testDeadlineOnStoreClock,
 		"StoryWelcomeEmail":          testStoryWelcomeEmail,
 		"StoryNoisyCustomer":         testStoryNoisyCustomer,
 		"StoryProviderOutage":        testStoryProviderOutage,

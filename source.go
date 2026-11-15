@@ -48,6 +48,8 @@ func (s *storeSource) Claim(ctx context.Context, worker string, queues []string,
 	return s.store.Claim(ctx, s.ns, ClaimRequest{Queues: queues, Worker: worker, Limit: limit, Lease: lease, Now: s.clock.Now()})
 }
 
+func (s *storeSource) Clock() Clock { return s.clock }
+
 func (s *storeSource) Extend(ctx context.Context, worker string, ids []string, lease time.Duration) ([]string, error) {
 	return s.store.Extend(ctx, s.ns, worker, ids, s.clock.Now().Add(lease))
 }

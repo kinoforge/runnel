@@ -101,7 +101,7 @@ What a handler returns decides what happens to the job next.
 ## Managing jobs (M)
 
 - **M01** `Cancel` ends a job that is not final as `cancelled`; a running job learns it at its next heartbeat (L05). Cancelling a cancelled job changes nothing. Cancelling a completed or dead job is `ErrFinal`.
-- **M02** `Retry` runs a dead or cancelled job again from its first attempt, keeping its error history. Any other state is `ErrNotFinal`.
+- **M02** `Retry` runs a dead, cancelled or expired job again from its first attempt, keeping its error history. Any other state is `ErrNotFinal`.
 - **M03** A listing is newest first, filtered by queue, kind, group and state, in pages joined by a cursor: 50 jobs by default, at most 500.
 - **M04** Stats count a namespace's jobs per queue and state.
 - **M05** Every job that reaches a final state records one event. Events are numbered in order within a namespace and read from after a number.
@@ -135,7 +135,7 @@ What a handler returns decides what happens to the job next.
 
 ## Clock (K)
 
-- **K01** Leases, start times, retries and schedules are measured on the store's clock (database or Redis time) when it has one, so hosts with skewed clocks agree. Each process samples it about every 30 seconds and keeps the offset of the fastest of three reads.
+- **K01** Leases, start times, deadlines, retries and schedules are measured on the store's clock (database or Redis time) when it has one, so hosts with skewed clocks agree. Each process samples it about every 30 seconds and keeps the offset of the fastest of three reads.
 
 ## Stores (X)
 
