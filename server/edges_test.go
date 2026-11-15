@@ -40,6 +40,9 @@ func TestErrorStatuses(t *testing.T) {
 		{"invalid input", "POST", "/v1/ns/codes/jobs", `{"queue":"q","kind":"a b"}`, nil, 400},
 		{"unknown job", "GET", "/v1/ns/codes/jobs/" + runnel.NewID(), "", nil, 404},
 		{"unknown setting", "GET", "/v1/ns/codes/queues/missing", "", nil, 404},
+		{"delete an unknown queue", "DELETE", "/v1/ns/codes/queues/missing", "", nil, 404},
+		{"delete an unknown pool", "DELETE", "/v1/ns/codes/pools/missing", "", nil, 404},
+		{"delete an unknown schedule", "DELETE", "/v1/ns/codes/schedules/missing", "", nil, 404},
 		{"cancel a finished job", "POST", "/v1/ns/codes/jobs/" + done.ID + "/cancel", "", nil, 409},
 		{"retry a job that is not finished", "POST", "/v1/ns/codes/jobs/" + waiting.ID + "/retry", "", nil, 409},
 		{"stale tag", "PUT", "/v1/ns/codes/pools/p", `{"name":"p","slots":3}`, []string{"If-Match", tag}, 412},
@@ -63,6 +66,9 @@ func TestErrorStatuses(t *testing.T) {
 	}
 	if code, _ := call(t, srv, admin, "GET", "/v1/namespaces/missing", nil); code != 404 {
 		t.Errorf("unknown namespace: %d", code)
+	}
+	if code, _ := call(t, srv, admin, "DELETE", "/v1/namespaces/missing", nil); code != 404 {
+		t.Errorf("delete an unknown namespace: %d", code)
 	}
 	if code, _ := call(t, srv, admin, "DELETE", "/v1/namespaces/codes/keys/000000000000", nil); code != 404 {
 		t.Errorf("unknown key: %d", code)

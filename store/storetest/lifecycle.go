@@ -177,6 +177,16 @@ func testConfigs(t *testing.T, open Opener) {
 	if pools, _ := e.c.Pools(e.ctx); len(pools) != 0 {
 		t.Fatalf("pool not deleted")
 	}
+	for what, del := range map[string]func() error{
+		"pool deleted twice": func() error { return e.c.DeletePool(e.ctx, "p") },
+		"missing queue":      func() error { return e.c.DeleteQueue(e.ctx, "missing") },
+		"missing schedule":   func() error { return e.c.DeleteSchedule(e.ctx, "missing") },
+		"missing namespace":  func() error { return runnel.DeleteNamespace(e.ctx, e.s, e.ns+"-missing") },
+	} {
+		if err := del(); !errors.Is(err, runnel.ErrNotFound) {
+			t.Errorf("deleting a %s: %v, want ErrNotFound", what, err)
+		}
+	}
 	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: "bad name"}); !errors.Is(err, runnel.ErrInvalid) {
 		t.Fatalf("bad queue name accepted")
 	}
@@ -187,7 +197,9 @@ func testConfigs(t *testing.T, open Opener) {
 	if err != nil || all[e.ns].CallbackSecret != "s" {
 		t.Fatalf("namespace %+v %v", all[e.ns], err)
 	}
-	_ = runnel.DeleteNamespace(e.ctx, e.s, e.ns)
+	if err := runnel.DeleteNamespace(e.ctx, e.s, e.ns); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testStatsList(t *testing.T, open Opener) {

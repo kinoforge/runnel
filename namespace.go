@@ -2,6 +2,7 @@ package runnel
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -52,7 +53,7 @@ func DeleteNamespace(ctx context.Context, s Store, name string) error {
 		return err
 	}
 	for _, k := range keys {
-		if err := s.DeleteConfig(ctx, "", ConfigKey, k.ID); err != nil {
+		if err := s.DeleteConfig(ctx, "", ConfigKey, k.ID); err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
 	}

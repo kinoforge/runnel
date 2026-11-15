@@ -141,7 +141,7 @@ What a handler returns decides what happens to the job next.
 
 - **X01** Namespaces never see each other's jobs, settings, events or cursors.
 - **X02** `Migrate` can run again on a migrated store.
-- **X03** Queue, pool and schedule settings are stored per namespace, replaced, swapped (X09) and deleted by name. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
+- **X03** Queue, pool and schedule settings are stored per namespace, replaced, swapped (X09) and deleted by name. Deleting a setting or namespace that does not exist is `ErrNotFound`. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
 - **X04** The hybrid store restarts with every change it acknowledged, read from its snapshot and log. A record cut short by a crash is dropped, and the store opens again after it.
 - **X05** Only one process at a time opens a hybrid store's directory.
 - **X06** A hybrid store's directory has a `FORMAT` file naming the version of its files. A store refuses a directory of another version, or one that holds data without the file, with `ErrFormat`.

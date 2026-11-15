@@ -8,6 +8,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - User stories (`U` rules in SPEC.md) that walk whole uses of Runnel on every backend and over HTTP, boundary tests for each rule, and failure drills (`make drill`): a kill under load, a network cut, a full disk, kills during writes and a restore from backup.
 
+### Changed
+
+- Deleting a queue, pool, schedule or namespace that does not exist is `ErrNotFound`, and 404 over HTTP, like deleting an unknown key. Before, it answered 204.
+
 ### Fixed
 
 - A remote worker measures its jobs' deadlines on the server's clock, which claim and heartbeat answers now carry as `now`. Before, it used its own clock, so a worker whose clock was off stopped handlers early or late.

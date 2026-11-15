@@ -62,5 +62,9 @@ func (s *Store) Configs(ctx context.Context, ns string, kind runnel.ConfigKind) 
 }
 
 func (s *Store) DeleteConfig(ctx context.Context, ns string, kind runnel.ConfigKind, name string) error {
-	return s.rdb.HDel(ctx, s.p(ns)+"cfg:"+string(kind), name).Err()
+	n, err := s.rdb.HDel(ctx, s.p(ns)+"cfg:"+string(kind), name).Result()
+	if err == nil && n == 0 {
+		return runnel.ErrNotFound
+	}
+	return err
 }

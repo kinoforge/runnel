@@ -383,9 +383,10 @@ func (s *Store) SwapConfig(_ context.Context, ns string, kind runnel.ConfigKind,
 
 func (s *Store) DeleteConfig(_ context.Context, ns string, kind runnel.ConfigKind, name string) error {
 	return s.write(ns, func(t *tx) error {
-		if _, ok := t.sp.configs[kind][name]; ok {
-			t.delConfig(kind, name)
+		if _, ok := t.sp.configs[kind][name]; !ok {
+			return runnel.ErrNotFound
 		}
+		t.delConfig(kind, name)
 		return nil
 	})
 }

@@ -97,6 +97,13 @@ func (s *Store) ConfigsTx(ctx context.Context, tx *sql.Tx, ns string, kind runne
 
 func (s *Store) DeleteConfig(ctx context.Context, ns string, kind runnel.ConfigKind, name string) error {
 	defer s.forget(ns)
-	_, err := s.db.ExecContext(ctx, s.q("DELETE FROM rn_configs WHERE ns=? AND kind=? AND name=?"), ns, string(kind), name)
+	res, err := s.db.ExecContext(ctx, s.q("DELETE FROM rn_configs WHERE ns=? AND kind=? AND name=?"), ns, string(kind), name)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return runnel.ErrNotFound
+	}
 	return err
 }
