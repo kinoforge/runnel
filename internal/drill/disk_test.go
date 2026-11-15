@@ -16,7 +16,7 @@ import (
 	"github.com/kinoforge/runnel/internal/spec"
 )
 
-const ballastBytes = 16 << 20
+const ballastBytes = 24 << 20
 
 type smallDisk struct {
 	ballast string
