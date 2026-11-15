@@ -69,14 +69,21 @@ curl localhost:8700/v1/ns/shop/jobs -H "Authorization: Bearer $KEY" \
 
 ## Learn more
 
+Read in this order:
+
 | | |
 |---|---|
-| [Features](docs/features.md) | everything Runnel does, with examples |
+| [Getting started](docs/getting-started.md) | run Runnel and your first job in ten minutes |
+| [Concepts](docs/concepts.md) | jobs, states, queues, pools, groups, leases, retries and deadlines |
+| [Guides](docs/guides/README.md) | callbacks, rate-limited providers, async work, pipelines, fair sharing, schedules and more |
+| [Features](docs/features.md) | everything Runnel does, with a full example |
+| [HTTP API](docs/http-api.md) | every endpoint, its role and its errors; the schema is [openapi.yaml](server/openapi.yaml) |
+| [SDKs](docs/sdks.md) | Go today, other languages next |
+| [Configuration](docs/configuration.md) | every setting of `runnel serve` |
 | [Stores](docs/stores.md) | which store to pick, connection limits, the hybrid store |
 | [Runbook](docs/RUNBOOK.md) | running it in production: probes, metrics, tracing, backups, upgrades |
 | [Spec](docs/SPEC.md) | every rule Runnel follows, each checked by a test |
 | [Design](docs/DESIGN.md) | why it works the way it does, and its known limits |
-| [API](server/openapi.yaml) | the HTTP API as an OpenAPI 3.1 document |
 
 Runnel is in beta. The model is settled, but the API may still change before 1.0. See the [changelog](CHANGELOG.md).
 
@@ -95,8 +102,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md). Security reports go through [SEC
 
 ## Roadmap
 
-- Client libraries for Python and TypeScript.
-- A dashboard built into `runnel serve`.
+- A gRPC and Connect API, and SDKs for TypeScript, Python, Java and Kotlin, and PHP. See [SDKs](docs/sdks.md).
 - Worker labels, so jobs can ask for workers with certain abilities, like a GPU or a region.
 - Per-group ready sets on Redis, removing the 2,000-job examination bound.
 

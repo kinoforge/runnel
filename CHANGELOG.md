@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- Docs for users: getting started, concepts with a job state diagram, nine guides (callbacks, rate-limited providers, async work, pipelines, fair sharing, safe re-enqueue, scheduled chores, graceful deploys, backpressure), every setting, the HTTP API and the SDKs. Tests check that every setting and endpoint is documented and that local links resolve.
+
 ## [0.0.3-beta.5] - 2026-11-15
 
 ### Added

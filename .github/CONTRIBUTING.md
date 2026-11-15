@@ -6,7 +6,7 @@ Thank you for helping. Bug reports, fixes, docs and new store backends are all w
 
 - For anything bigger than a small fix, open an issue first so we can agree on the shape.
 - Security problems go through [SECURITY.md](SECURITY.md), not public issues.
-- By contributing you agree your work is released under the Apache License 2.0. Add yourself to [AUTHORS](AUTHORS) in your first pull request.
+- By contributing you agree your work is released under the Apache License 2.0. Add yourself to [AUTHORS](../AUTHORS) in your first pull request.
 
 ## Development
 
@@ -34,7 +34,7 @@ make down        # stop the services and drop their data
 - Tests that fail are fixed in the code, never bent to pass: no loosened assertions, skips, longer timeouts, retries or sleeps to hide a failure. Change a test only when the test itself is wrong, and say why in the pull request.
 - No hardcoded rules. Runnel is a generic tool: every limit, timeout, size or behaviour a user could need differently is a setting with a sensible default. No business rules and no special cases for one user.
 - No new dependency without a reason in the pull request.
-- An entry in [CHANGELOG.md](CHANGELOG.md) under "Unreleased" for anything a user would notice.
+- An entry in [CHANGELOG.md](../CHANGELOG.md) under "Unreleased" for anything a user would notice.
 
 ## Adding a store
 
