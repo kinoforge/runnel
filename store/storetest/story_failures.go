@@ -81,7 +81,7 @@ func testStoryAsyncRender(t *testing.T, open Opener) {
 			}
 			polls.Add(1)
 			if !ready.Load() {
-				return runnel.Pending("", 20*time.Millisecond)
+				return runnel.Pending("", 200*time.Millisecond)
 			}
 			return j.SetResult("https://cdn.example.com/" + j.Handle + ".mp4")
 		}))
