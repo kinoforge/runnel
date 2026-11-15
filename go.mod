@@ -5,6 +5,7 @@ go 1.26.0
 toolchain go1.27.4
 
 require (
+	connectrpc.com/connect v1.21.1
 	github.com/cockroachdb/pebble/v2 v2.1.7
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/btree v1.1.3
@@ -18,6 +19,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.yaml.in/yaml/v3 v3.0.6
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.62.0
 )
 
@@ -73,7 +75,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/grpc v1.85.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	modernc.org/libc v1.81.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

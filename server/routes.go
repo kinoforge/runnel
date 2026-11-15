@@ -40,11 +40,18 @@ func (s *Server) routes() {
 	s.handle("POST /v1/ns/{ns}/jobs/{id}/finish", runnel.RoleWorker, s.finish)
 	s.handle("POST /v1/ns/{ns}/dependencies", runnel.RoleWorker, s.dependencies)
 
-	configRoutes(s, "queues", runnel.ConfigQueue, func(c runnel.QueueConfig) (string, error) {
-		return c.Name, s.withCallback(c.CallbackURL, c.Validate)
-	})
-	configRoutes(s, "pools", runnel.ConfigPool, func(c runnel.PoolConfig) (string, error) { return c.Name, c.Validate() })
-	configRoutes(s, "schedules", runnel.ConfigSchedule, func(c runnel.Schedule) (string, error) {
-		return c.Name, s.withCallback(c.CallbackURL, c.Validate)
-	})
+	configRoutes(s, "queues", runnel.ConfigQueue, s.checkQueue)
+	configRoutes(s, "pools", runnel.ConfigPool, s.checkPool)
+	configRoutes(s, "schedules", runnel.ConfigSchedule, s.checkSchedule)
+	s.mountRPC()
+}
+
+func (s *Server) checkQueue(c runnel.QueueConfig) (string, error) {
+	return c.Name, s.withCallback(c.CallbackURL, c.Validate)
+}
+
+func (s *Server) checkPool(c runnel.PoolConfig) (string, error) { return c.Name, c.Validate() }
+
+func (s *Server) checkSchedule(c runnel.Schedule) (string, error) {
+	return c.Name, s.withCallback(c.CallbackURL, c.Validate)
 }

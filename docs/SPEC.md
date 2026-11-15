@@ -186,6 +186,15 @@ What a handler returns decides what happens to the job next.
 - **S20** `PATCH` on a queue, pool or schedule takes an RFC 7396 merge patch as `application/merge-patch+json` or `application/json`, any other type is 415. Named fields are set, `null` clears a field and the rest stay. A missing setting is created from the patch. The name comes from the path, and a different name, an unknown field or a setting that fails its checks is 400. It needs the admin role.
 - **S21** The remote client's `UpdateQueue` and `UpdatePool` work like X10 over the API, with `If-Match` on the tag they read and `If-None-Match: *` for a new setting, and start again on 412. A 412 is `ErrStale`.
 
+## gRPC and Connect API (G)
+
+`runnel serve` serves the services in `proto/runnel/v1` on its HTTP port, over gRPC, gRPC-Web and Connect, with HTTP/2 over TLS or plain. The HTTP API is unchanged.
+
+- **G01** JobService, WorkerService, ConfigService and AdminService take the same credentials as the HTTP API and need the same roles. Payloads and results travel as the job's raw JSON bytes, unchanged. `Enqueue` with one job answers its refusal as an error, like the HTTP API; a batch answers each job's result.
+- **G02** Errors map to codes: invalid input `InvalidArgument`; an unknown job, setting, key or namespace `NotFound`; a conflict, a finished or unfinished job or a failed dependency `FailedPrecondition`; a stale precondition `Aborted`; a full queue or group and a store low on disk `ResourceExhausted` with `Retry-After`; no credentials `Unauthenticated`; a missing role `PermissionDenied`. The `Runnel-Error` metadata names the Runnel error.
+- **G03** A `Work` stream starts with `start`. The worker sends credit for the jobs it can take, and the server sends at most that many, claimed under the lease named at start. The stream answers `extend` and `finish` in it, a refused finish with its error. Every answer carries `now`, the server's clock. When the stream ends, jobs claimed but not yet sent are given back untouched.
+- **G04** Queue, pool and schedule settings share ETags with the HTTP API. `Patch` changes only the fields in `update_mask` and never the name; `if_match` and `if_none_match` refuse a write over a changed or existing setting with `Aborted`.
+
 ## Stories (U)
 
 Each story walks one whole use of Runnel through its public API, from enqueue to the end, and checks every step on the way. Library stories run on every backend; HTTP stories run through `runnel serve`'s handler.

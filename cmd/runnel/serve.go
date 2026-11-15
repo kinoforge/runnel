@@ -153,7 +153,11 @@ func httpServer(cfg config.Server, h http.Handler) (*http.Server, error) {
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
 		MaxHeaderBytes:    cfg.MaxHeaderBytes,
+		Protocols:         new(http.Protocols),
 	}
+	hs.Protocols.SetHTTP1(true)
+	hs.Protocols.SetHTTP2(true)
+	hs.Protocols.SetUnencryptedHTTP2(true)
 	if !cfg.TLS.Enabled() {
 		return hs, nil
 	}

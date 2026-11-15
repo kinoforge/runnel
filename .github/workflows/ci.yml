@@ -14,6 +14,20 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make lint
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make proto-check
+      - name: breaking changes against main
+        run: |
+          git fetch --depth=1 origin main
+          if git cat-file -e FETCH_HEAD:proto 2>/dev/null; then
+            make proto-breaking AGAINST="https://github.com/${{ github.repository }}.git#branch=main"
+          fi
   vuln:
     runs-on: ubuntu-latest
     steps:

@@ -24,6 +24,8 @@ The API reference is on [pkg.go.dev](https://pkg.go.dev/github.com/kinoforge/run
 
 ## Other languages
 
-The other SDKs will be generated from one gRPC and Connect API that `runnel serve` will offer next to HTTP, so every language gets the same calls and a streaming worker. Each will give you a client, a worker with heartbeats and graceful shutdown, the outcome helpers (`Pending`, `RetryIn`, `Fail`, `Busy`), and a callback check.
+The other SDKs are generated from the [gRPC and Connect API](grpc-api.md) that `runnel serve` offers next to HTTP, so every language gets the same calls and a streaming worker. Each will give you a client, a worker with heartbeats and graceful shutdown, the outcome helpers (`Pending`, `RetryIn`, `Fail`, `Busy`), and a callback check.
 
-Until then, any language can use the [HTTP API](http-api.md) directly: three calls make a worker, and one makes a producer.
+Until they ship, any language can use the [HTTP API](http-api.md) directly (three calls make a worker, and one makes a producer), or generate a client from [`proto/runnel/v1`](../proto/runnel/v1) with its own gRPC or Connect tools.
+
+Every SDK passes the shared checks in [`sdk-contract/`](../sdk-contract): callback signature test vectors and a list of scenarios run against a real server.

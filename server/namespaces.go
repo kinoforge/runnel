@@ -94,26 +94,38 @@ func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request, _ principa
 		}
 	}
 	name := r.PathValue("name")
-	n, err := s.namespace(r.Context(), name)
+	n, created, err := s.upsertNamespace(r.Context(), name, body.CallbackSecret)
+	if err != nil {
+		return err
+	}
 	status := http.StatusOK
-	if errors.Is(err, runnel.ErrNotFound) {
-		n, status = runnel.Namespace{Name: name}, http.StatusCreated
-	} else if err != nil {
-		return err
+	if created {
+		status = http.StatusCreated
 	}
-	if body.CallbackSecret != nil {
-		n.CallbackSecret = *body.CallbackSecret
-	}
-	if err := runnel.PutNamespace(r.Context(), s.store, n); err != nil {
-		return err
-	}
-	_ = s.reloadKeys(r.Context())
 	keys, err := runnel.NamespaceKeys(r.Context(), s.store, name)
 	if err != nil {
 		return err
 	}
 	writeJSON(w, status, viewNamespace(n, keys))
 	return nil
+}
+
+func (s *Server) upsertNamespace(ctx context.Context, name string, secret *string) (runnel.Namespace, bool, error) {
+	n, err := s.namespace(ctx, name)
+	created := false
+	if errors.Is(err, runnel.ErrNotFound) {
+		n, created = runnel.Namespace{Name: name}, true
+	} else if err != nil {
+		return n, false, err
+	}
+	if secret != nil {
+		n.CallbackSecret = *secret
+	}
+	if err := runnel.PutNamespace(ctx, s.store, n); err != nil {
+		return n, false, err
+	}
+	_ = s.reloadKeys(ctx)
+	return n, created, nil
 }
 
 func (s *Server) getNamespace(w http.ResponseWriter, r *http.Request, _ principal) error {
@@ -151,27 +163,34 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, _ principal) 
 	if err := decode(r, &body); err != nil {
 		return err
 	}
-	ns := r.PathValue("name")
-	if _, err := s.namespace(r.Context(), ns); err != nil {
-		return err
-	}
-	existing, err := runnel.NamespaceKeys(r.Context(), s.store, ns)
+	token, key, err := s.newKey(r.Context(), r.PathValue("name"), body.Name, body.Roles, body.ExpiresAt)
 	if err != nil {
 		return err
 	}
-	if len(existing) >= maxKeysPerNamespace {
-		return fmt.Errorf("%w: at most %d keys per namespace", runnel.ErrInvalid, maxKeysPerNamespace)
-	}
-	token, key, err := runnel.NewAPIKey(ns, body.Name, body.Roles, body.ExpiresAt)
-	if err != nil {
-		return err
-	}
-	if err := runnel.PutKey(r.Context(), s.store, key); err != nil {
-		return err
-	}
-	_ = s.reloadKeys(r.Context())
 	writeJSON(w, http.StatusCreated, map[string]any{"id": key.ID, "key": token, "roles": key.Roles, "expires_at": key.ExpiresAt})
 	return nil
+}
+
+func (s *Server) newKey(ctx context.Context, ns, name string, roles []string, expires time.Time) (string, runnel.APIKey, error) {
+	if _, err := s.namespace(ctx, ns); err != nil {
+		return "", runnel.APIKey{}, err
+	}
+	existing, err := runnel.NamespaceKeys(ctx, s.store, ns)
+	if err != nil {
+		return "", runnel.APIKey{}, err
+	}
+	if len(existing) >= maxKeysPerNamespace {
+		return "", runnel.APIKey{}, fmt.Errorf("%w: at most %d keys per namespace", runnel.ErrInvalid, maxKeysPerNamespace)
+	}
+	token, key, err := runnel.NewAPIKey(ns, name, roles, expires)
+	if err != nil {
+		return "", runnel.APIKey{}, err
+	}
+	if err := runnel.PutKey(ctx, s.store, key); err != nil {
+		return "", runnel.APIKey{}, err
+	}
+	_ = s.reloadKeys(ctx)
+	return token, key, nil
 }
 
 func (s *Server) deleteKey(w http.ResponseWriter, r *http.Request, _ principal) error {

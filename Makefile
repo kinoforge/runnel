@@ -11,8 +11,10 @@ INTEGRATION = RUNNEL_TEST_POSTGRES='$(RUNNEL_TEST_POSTGRES)' RUNNEL_TEST_MYSQL='
 
 FUZZTIME ?= 30s
 GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+BUF = go run github.com/bufbuild/buf/cmd/buf@v1.74.0
+AGAINST ?= .git\#branch=main
 
-.PHONY: build test test-all test-box drill up down lint fmt vuln fuzz bench docker release-check
+.PHONY: build test test-all test-box drill up down lint fmt vuln fuzz bench docker release-check proto proto-check proto-breaking
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o bin/runnel ./cmd/runnel
@@ -59,3 +61,14 @@ docker:
 
 release-check:
 	go run github.com/goreleaser/goreleaser/v2@v2.12.7 check
+
+proto:
+	$(BUF) lint
+	$(BUF) generate
+
+proto-check: proto
+	git add -N gen
+	git diff --exit-code -- gen
+
+proto-breaking:
+	$(BUF) breaking --against '$(AGAINST)'

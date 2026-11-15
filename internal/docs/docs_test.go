@@ -67,6 +67,31 @@ func TestEveryEndpointIsDocumented(t *testing.T) {
 	}
 }
 
+func TestEveryRPCIsDocumented(t *testing.T) {
+	doc := read(t, "docs/grpc-api.md")
+	protos, err := filepath.Glob(filepath.Join(root, "proto/runnel/v1/*.proto"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := regexp.MustCompile(`(?m)^\s*rpc (\w+)\(`)
+	var n int
+	for _, p := range protos {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range rpc.FindAllStringSubmatch(string(b), -1) {
+			n++
+			if !strings.Contains(doc, "`"+m[1]+"`") {
+				t.Errorf("rpc %s is missing from docs/grpc-api.md", m[1])
+			}
+		}
+	}
+	if n < 30 {
+		t.Fatalf("found only %d rpcs in proto/runnel/v1", n)
+	}
+}
+
 func TestLocalLinksResolve(t *testing.T) {
 	link := regexp.MustCompile(`\]\(([^)\s]+)\)`)
 	var files []string

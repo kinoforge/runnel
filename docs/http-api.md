@@ -1,6 +1,6 @@
 # HTTP API
 
-`runnel serve` speaks JSON over HTTP. This page is a map of the API. The full schema of every request and answer is the OpenAPI 3.1 document at [`server/openapi.yaml`](../server/openapi.yaml), also served at `/openapi.yaml`.
+`runnel serve` speaks JSON over HTTP. This page is a map of the API. The full schema of every request and answer is the OpenAPI 3.1 document at [`server/openapi.yaml`](../server/openapi.yaml), also served at `/openapi.yaml`. The same calls are offered over gRPC and Connect: see the [gRPC and Connect API](grpc-api.md).
 
 ## Logging in
 

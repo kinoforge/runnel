@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,43 +27,57 @@ func (s *Server) claim(w http.ResponseWriter, r *http.Request, p principal) erro
 	if err != nil {
 		return err
 	}
-	if len(body.Queues) == 0 || len(body.Queues) > s.cfg.MaxClaimQueues {
-		return fmt.Errorf("%w: claim 1 to %d queues", runnel.ErrInvalid, s.cfg.MaxClaimQueues)
+	jobs, err := s.claimJobs(r.Context(), claimArgs{ns: r.PathValue("ns"), worker: worker, queues: body.Queues, limit: body.Limit, lease: body.Lease.D(), wait: body.Wait.D()})
+	if err != nil {
+		return err
 	}
-	for _, q := range body.Queues {
+	if jobs == nil {
+		jobs = []*runnel.Job{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "now": s.clock.Now()})
+	return nil
+}
+
+type claimArgs struct {
+	ns, worker  string
+	queues      []string
+	limit       int
+	lease, wait time.Duration
+}
+
+func (s *Server) claimJobs(ctx context.Context, a claimArgs) ([]*runnel.Job, error) {
+	if len(a.queues) == 0 || len(a.queues) > s.cfg.MaxClaimQueues {
+		return nil, fmt.Errorf("%w: claim 1 to %d queues", runnel.ErrInvalid, s.cfg.MaxClaimQueues)
+	}
+	for _, q := range a.queues {
 		if !runnel.ValidName(q) {
-			return fmt.Errorf("%w: bad queue %q", runnel.ErrInvalid, q)
+			return nil, fmt.Errorf("%w: bad queue %q", runnel.ErrInvalid, q)
 		}
 	}
-	body.Limit = min(max(body.Limit, 1), s.cfg.MaxClaim)
-	lease := s.clampLease(body.Lease.D())
-	if body.Lease == 0 {
+	limit := min(max(a.limit, 1), s.cfg.MaxClaim)
+	lease := s.clampLease(a.lease)
+	if a.lease == 0 {
 		lease = s.cfg.DefaultLease
 	}
-	deadline := time.Now().Add(min(max(body.Wait.D(), 0), s.cfg.MaxClaimWait))
-	ns := r.PathValue("ns")
-	h := s.hub(ns)
+	deadline := time.Now().Add(min(max(a.wait, 0), s.cfg.MaxClaimWait))
+	h := s.hub(a.ns)
 	for {
 		wake := h.wait()
-		jobs, err := s.store.Claim(r.Context(), ns, runnel.ClaimRequest{Queues: body.Queues, Worker: worker, Limit: body.Limit, Lease: lease, Now: s.clock.Now()})
+		jobs, err := s.store.Claim(ctx, a.ns, runnel.ClaimRequest{Queues: a.queues, Worker: a.worker, Limit: limit, Lease: lease, Now: s.clock.Now()})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if len(jobs) > 0 || !time.Now().Before(deadline) {
 			for _, j := range jobs {
 				s.obs.Started(j)
 			}
-			if jobs == nil {
-				jobs = []*runnel.Job{}
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "now": s.clock.Now()})
-			return nil
+			return jobs, nil
 		}
 		t := time.NewTimer(min(claimPollEvery, time.Until(deadline)))
 		select {
-		case <-r.Context().Done():
+		case <-ctx.Done():
 			t.Stop()
-			return r.Context().Err()
+			return nil, ctx.Err()
 		case <-wake:
 		case <-t.C:
 		}
@@ -83,16 +98,7 @@ func (s *Server) extend(w http.ResponseWriter, r *http.Request, p principal) err
 	if err != nil {
 		return err
 	}
-	if len(body.IDs) > s.cfg.MaxExtend {
-		return fmt.Errorf("%w: at most %d ids", runnel.ErrInvalid, s.cfg.MaxExtend)
-	}
-	for _, id := range body.IDs {
-		if !runnel.ValidID(id) {
-			return fmt.Errorf("%w: bad id", runnel.ErrInvalid)
-		}
-	}
-	lease := s.clampLease(body.Lease.D())
-	lost, err := s.store.Extend(r.Context(), r.PathValue("ns"), worker, body.IDs, s.clock.Now().Add(lease))
+	lost, err := s.extendJobs(r.Context(), r.PathValue("ns"), worker, body.IDs, body.Lease.D())
 	if err != nil {
 		return err
 	}
@@ -118,34 +124,61 @@ func (s *Server) finish(w http.ResponseWriter, r *http.Request, p principal) err
 	if err != nil {
 		return err
 	}
-	if err := body.Outcome.Validate(); err != nil {
+	f := finishArgs{ns: r.PathValue("ns"), worker: worker, id: r.PathValue("id"), version: body.Version, outcome: body.Outcome, payload: body.Payload, meta: body.Meta}
+	if err := s.finishJob(r.Context(), f); err != nil {
 		return err
 	}
-	ns := r.PathValue("ns")
-	j, err := s.client(ns).Get(r.Context(), r.PathValue("id"))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
+}
+
+func (s *Server) extendJobs(ctx context.Context, ns, worker string, ids []string, lease time.Duration) ([]string, error) {
+	if len(ids) > s.cfg.MaxExtend {
+		return nil, fmt.Errorf("%w: at most %d ids", runnel.ErrInvalid, s.cfg.MaxExtend)
+	}
+	for _, id := range ids {
+		if !runnel.ValidID(id) {
+			return nil, fmt.Errorf("%w: bad id", runnel.ErrInvalid)
+		}
+	}
+	return s.store.Extend(ctx, ns, worker, ids, s.clock.Now().Add(s.clampLease(lease)))
+}
+
+type finishArgs struct {
+	ns, worker, id string
+	version        int64
+	outcome        runnel.Outcome
+	payload        json.RawMessage
+	meta           map[string]string
+}
+
+func (s *Server) finishJob(ctx context.Context, f finishArgs) error {
+	if err := f.outcome.Validate(); err != nil {
+		return err
+	}
+	j, err := s.client(f.ns).Get(ctx, f.id)
 	if err != nil {
 		return err
 	}
-	if j.State != runnel.StateRunning || j.Worker != worker || j.Version != body.Version {
+	if j.State != runnel.StateRunning || j.Worker != f.worker || j.Version != f.version {
 		return runnel.ErrConflict
 	}
-	if body.Payload != nil {
-		if len(body.Payload) > s.cfg.Limits.MaxPayload || !json.Valid(body.Payload) {
+	if f.payload != nil {
+		if len(f.payload) > s.cfg.Limits.MaxPayload || !json.Valid(f.payload) {
 			return fmt.Errorf("%w: payload must be valid JSON under the size limit", runnel.ErrInvalid)
 		}
-		j.Payload = body.Payload
+		j.Payload = f.payload
 	}
-	if body.Meta != nil {
-		if err := runnel.ValidMeta(body.Meta, s.cfg.Limits); err != nil {
+	if f.meta != nil {
+		if err := runnel.ValidMeta(f.meta, s.cfg.Limits); err != nil {
 			return err
 		}
-		j.Meta = body.Meta
+		j.Meta = f.meta
 	}
-	if err := s.source(ns).Finish(r.Context(), worker, j, body.Outcome); err != nil {
+	if err := s.source(f.ns).Finish(ctx, f.worker, j, f.outcome); err != nil {
 		return err
 	}
-	s.obs.Finished(j, body.Outcome, 0)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	s.obs.Finished(j, f.outcome, 0)
 	return nil
 }
 

@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- A gRPC, gRPC-Web and Connect API on the HTTP port, from the schema in `proto/runnel/v1`: jobs, workers, settings and admin, with the same credentials, roles and rules as the HTTP API, and a two-way `Work` stream that pushes jobs to workers as they give credit. Errors map to standard codes and name the Runnel error in `Runnel-Error`. Generated Go code is in `gen/runnel/v1`. Plain HTTP/2 (h2c) is accepted, so gRPC works without TLS on a private network. See [the gRPC and Connect API](docs/grpc-api.md).
+- `sdk-contract/`: callback signature test vectors, checked against `VerifySignature`, and the scenarios every SDK runs against a real server.
 - Docs for users: getting started, concepts with a job state diagram, nine guides (callbacks, rate-limited providers, async work, pipelines, fair sharing, safe re-enqueue, scheduled chores, graceful deploys, backpressure), every setting, the HTTP API and the SDKs. Tests check that every setting and endpoint is documented and that local links resolve.
 
 ## [0.0.3-beta.5] - 2026-11-15
