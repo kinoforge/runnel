@@ -1,6 +1,9 @@
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG TARGETPLATFORM
 COPY $TARGETPLATFORM/runnel /runnel
+COPY --from=gcr.io/distroless/static-debian12:nonroot --chown=nonroot:nonroot /home/nonroot /data
+WORKDIR /data
+VOLUME /data
 USER nonroot
 EXPOSE 8700
 ENTRYPOINT ["/runnel"]

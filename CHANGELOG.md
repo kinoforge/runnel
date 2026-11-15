@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Fixed
+
+- The Docker image can write to a volume at `/data`, its working directory, so `runnel serve --store hybrid:/data` and the default `sqlite:runnel.db` work. Before, the image ran as a non-root user that could not write to a new volume or to `/`, and the server stopped with `permission denied`.
+
 ## [0.0.3-beta.4] - 2026-11-15
 
 ### Added

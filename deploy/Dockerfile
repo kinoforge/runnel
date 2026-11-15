@@ -8,6 +8,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}"
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/runnel /runnel
+COPY --from=gcr.io/distroless/static-debian12:nonroot --chown=nonroot:nonroot /home/nonroot /data
+WORKDIR /data
+VOLUME /data
 USER nonroot
 EXPOSE 8700
 ENTRYPOINT ["/runnel"]
