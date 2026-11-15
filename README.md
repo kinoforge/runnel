@@ -79,7 +79,7 @@ Read in this order:
 | [Features](docs/features.md) | everything Runnel does, with a full example |
 | [HTTP API](docs/http-api.md) | every endpoint, its role and its errors; the schema is [openapi.yaml](server/openapi.yaml) |
 | [gRPC and Connect API](docs/grpc-api.md) | the same calls over gRPC, gRPC-Web and Connect, and the streaming worker |
-| [SDKs](docs/sdks.md) | Go today, other languages next |
+| [SDKs](docs/sdks.md) | Go, TypeScript, Python, Java and Kotlin; PHP next |
 | [Configuration](docs/configuration.md) | every setting of `runnel serve` |
 | [Stores](docs/stores.md) | which store to pick, connection limits, the hybrid store |
 | [Runbook](docs/RUNBOOK.md) | running it in production: probes, metrics, tracing, backups, upgrades |
@@ -103,7 +103,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md). Security reports go through [SEC
 
 ## Roadmap
 
-- SDKs for Java and Kotlin, and PHP, generated from the gRPC and Connect API. The TypeScript and Python SDKs are in beta. See [SDKs](docs/sdks.md).
+- An SDK for PHP, generated from the gRPC and Connect API. The TypeScript, Python, and Java and Kotlin SDKs are in beta. See [SDKs](docs/sdks.md).
 - Worker labels, so jobs can ask for workers with certain abilities, like a GPU or a region.
 - Per-group ready sets on Redis, removing the 2,000-job examination bound.
 

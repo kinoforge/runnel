@@ -5,7 +5,7 @@
 | Go | `github.com/kinoforge/runnel` (library) and `github.com/kinoforge/runnel/remote` (over HTTP) | ready |
 | TypeScript and Node | `@kinoforge/runnel`, in [runnel-js](https://github.com/kinoforge/runnel-js) | beta, install from GitHub until it is on npm |
 | Python | `kinoforge-runnel`, in [runnel-py](https://github.com/kinoforge/runnel-py) | beta, install from GitHub until it is on PyPI |
-| Java and Kotlin | `dev.kinoforge:runnel` | planned |
+| Java and Kotlin | `dev.kinoforge:runnel`, in [runnel-jvm](https://github.com/kinoforge/runnel-jvm) | beta, install from GitHub through JitPack until it is on Maven Central |
 | PHP | `kinoforge/runnel` | planned |
 
 ## Go
@@ -56,9 +56,27 @@ worker.serve()
 
 Needs Python 3.11 or later. Workers run on asyncio and take async or plain handlers; producers can use the blocking `Client` instead. The [README](https://github.com/kinoforge/runnel-py#readme) has the rest.
 
+## Java and Kotlin
+
+```kotlin
+repositories { maven("https://jitpack.io") }
+dependencies { implementation("com.github.kinoforge:runnel-jvm:main-SNAPSHOT") }
+```
+
+```kotlin
+val runnel = RunnelClient("http://runnel.internal:8700", "shop") { token = System.getenv("RUNNEL_KEY") }
+runnel.enqueue("emails", "welcome", mapOf("to" to "ana@example.com"))
+
+val worker = Worker(runnel, listOf("emails"))
+worker.handle("welcome") { job, ctx -> mapOf("sent" to true) }
+worker.serve()
+```
+
+Needs Java 17 or later. Kotlin gets suspend calls; Java gets `BlockingClient`, `handleBlocking` and a `CompletableFuture` from `worker.start()`. The [README](https://github.com/kinoforge/runnel-jvm#readme) has the rest.
+
 ## Other languages
 
-The SDKs other than Go are generated from the [gRPC and Connect API](grpc-api.md) that `runnel serve` offers next to HTTP, so every language gets the same calls and a streaming worker. Each gives you a client, a worker with heartbeats and graceful shutdown, the outcome helpers (`Pending`, `RetryIn`, `Fail`, `Busy`), and a callback check. Java and Kotlin, then PHP, come next.
+The SDKs other than Go are generated from the [gRPC and Connect API](grpc-api.md) that `runnel serve` offers next to HTTP, so every language gets the same calls and a streaming worker. Each gives you a client, a worker with heartbeats and graceful shutdown, the outcome helpers (`Pending`, `RetryIn`, `Fail`, `Busy`), and a callback check. PHP comes next.
 
 Until yours ships, any language can use the [HTTP API](http-api.md) directly (three calls make a worker, and one makes a producer), or generate a client from [`proto/runnel/v1`](../proto/runnel/v1) with its own gRPC or Connect tools.
 
