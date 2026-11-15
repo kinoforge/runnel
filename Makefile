@@ -12,7 +12,7 @@ INTEGRATION = RUNNEL_TEST_POSTGRES='$(RUNNEL_TEST_POSTGRES)' RUNNEL_TEST_MYSQL='
 FUZZTIME ?= 30s
 GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 
-.PHONY: build test test-all test-box up down lint fmt vuln fuzz bench docker release-check
+.PHONY: build test test-all test-box drill up down lint fmt vuln fuzz bench docker release-check
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o bin/runnel ./cmd/runnel
@@ -22,7 +22,11 @@ test:
 
 test-box:
 	PKG='$(PKG)' RUN='$(RUN)' BOX_CPUS='$(BOX_CPUS)' BOX_MEMORY='$(BOX_MEMORY)' BOX_IOPS='$(BOX_IOPS)' \
-		BOX_DISK='$(BOX_DISK)' BOX_IMAGE='$(BOX_IMAGE)' sh deploy/test-box.sh
+		BOX_DISK='$(BOX_DISK)' BOX_IMAGE='$(BOX_IMAGE)' BOX_TAGS='$(BOX_TAGS)' BOX_TMPFS='$(BOX_TMPFS)' \
+		BOX_TIMEOUT='$(BOX_TIMEOUT)' sh deploy/test-box.sh
+
+drill:
+	$(MAKE) test-box PKG=./internal/drill RUN='$(RUN)' BOX_TAGS=drill BOX_TMPFS=/drill:size=96m BOX_TIMEOUT=30m
 
 test-all:
 	$(INTEGRATION) go test -race -count=1 -timeout 15m ./...

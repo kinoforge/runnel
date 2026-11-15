@@ -85,6 +85,7 @@ Runnel is in beta. The model is settled, but the API may still change before 1.0
 ```
 make up                       # postgres, mysql, redis, valkey and dragonfly on local ports
 make test-box PKG=./server    # tests in a container with CPU, memory and disk caps
+make drill                    # failure drills: kill, network cut, full disk, restart mid-write, restore
 make test-all                 # every backend with the race detector; heavy, CI runs it
 make lint vuln fuzz
 make bench                    # RUNNEL_STORE=... make bench

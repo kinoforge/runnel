@@ -30,6 +30,18 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make fuzz FUZZTIME=20s
+  drill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: small disk
+        run: sudo mkdir /drill && sudo mount -t tmpfs -o size=96m tmpfs /drill && sudo chmod 1777 /drill
+      - run: go test -tags drill -p 1 -count=1 -timeout 30m ./internal/drill
+        env:
+          RUNNEL_DRILL_DISK: /drill
   test:
     runs-on: ubuntu-latest
     services:

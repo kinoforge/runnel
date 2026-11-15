@@ -27,6 +27,7 @@ make down        # stop the services and drop their data
 
 - A rule in [SPEC.md](../docs/SPEC.md) for any behaviour change, and tests that name it with `spec.Rule(t, "C04")`. `go test ./internal/spec` fails when a rule has no test or a test names a rule that does not exist. Run one rule's tests with `RUNNEL_RULES=C04 make test-all`.
 - Tests. A behaviour change in a store goes in the shared conformance suite (`store/storetest`), so every backend proves it.
+- A story (`U` rules) when the change alters a whole use of Runnel, and a drill (`D` rules, `internal/drill`) when it changes what happens after a crash, a cut or a full disk.
 - A note in [DESIGN.md](../docs/DESIGN.md) when the change is a decision someone could make differently.
 - `make lint` and `make test-all` passing.
 - No comments in code. One short line is allowed only for a real trap a reader would fall into. Explanations go in the docs, the README or the commit.

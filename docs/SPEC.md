@@ -205,3 +205,13 @@ Each story walks one whole use of Runnel through its public API, from enqueue to
 - **U21** An app and an operator share a pool over HTTP. The app sets slots with `UpdatePool`, the operator pauses it with `PATCH` and `If-Match`, and the app sets slots again: the pool stays paused. A stale tag is 412 and a reader key is 403. Once resumed, the jobs run.
 - **U22** A key works from the moment it is made. Deleted, it is refused at once. A namespace deleted and made again does not bring its old keys back.
 - **U23** A queue with `max_queued: 2` refuses a third waiting job with 429, `Retry-After` and the title `queue full`. Once a worker claims a job, there is room again.
+
+## Failure drills (D)
+
+Each drill runs the `runnel` binary with a hybrid store in a temporary folder, behind a proxy the drill controls, and does to it what goes wrong in production. Drills build with the `drill` tag and run with `make drill`, in a container capped at 1 CPU and 2 GB.
+
+- **D01** Killed with SIGKILL while producers enqueue and workers finish jobs, then started again on the same folder, the server keeps every enqueue it acknowledged. Every job then completes, with one event.
+- **D02** While the network between the clients and the server is cut, no enqueue is acknowledged, and once the cut-off workers' leases end, none of their jobs is left running. When the network comes back, every job completes, with one event.
+- **D03** When the disk fills, the store stops: `/healthz` answers 503 and no write is acknowledged. Once space is freed and the server restarts, it has every job it acknowledged and takes writes again.
+- **D04** Killed again and again at random moments during writes, the server opens each time with every job it acknowledged, unchanged.
+- **D05** A backup taken over `GET /v1/backup` while producers enqueue restores with `runnel restore` into an empty folder, and the restored server has every job acknowledged before the backup began. Restoring into a folder that is not empty fails.

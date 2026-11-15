@@ -8,6 +8,10 @@ iops=${BOX_IOPS:-150}
 pkg=${PKG:-./...}
 run=${RUN:-.}
 
+tags=${BOX_TAGS:-}
+tmpfs=${BOX_TMPFS:-}
+timeout=${BOX_TIMEOUT:-10m}
+
 disk=${BOX_DISK:-}
 if [ -z "$disk" ] && command -v lsblk >/dev/null 2>&1; then
 	src=$(findmnt -no SOURCE /var/lib/docker 2>/dev/null || findmnt -no SOURCE /)
@@ -20,8 +24,12 @@ if [ -n "$disk" ]; then
 	set -- "$@" --device-write-iops "$disk:$iops" --device-read-iops "$disk:$iops"
 fi
 
+if [ -n "$tmpfs" ]; then
+	set -- "$@" --tmpfs "$tmpfs" -e RUNNEL_DRILL_DISK="${tmpfs%%:*}"
+fi
+
 exec docker run "$@" \
 	-v "$(pwd)":/src:ro -w /src \
 	-v runnel-gocache:/root/.cache/go-build -v runnel-gomod:/go/pkg/mod \
 	-e CGO_ENABLED=0 -e GOFLAGS=-buildvcs=false \
-	"$image" go test -p 1 -count=1 -run "$run" $pkg
+	"$image" go test -p 1 -count=1 -timeout "$timeout" -tags "$tags" -run "$run" $pkg
