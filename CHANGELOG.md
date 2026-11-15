@@ -10,6 +10,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- A remote worker measures its jobs' deadlines on the server's clock, which claim and heartbeat answers now carry as `now`. Before, it used its own clock, so a worker whose clock was off stopped handlers early or late.
 - A worker stopped while a job runs now writes the job back before `Run` returns. Before, the write used the cancelled shutdown context and failed, so the job stayed `running` until its lease ended and then lost an attempt.
 - A running job's deadline is measured on the store's clock, like leases. Before, the worker used its own clock, so with the store's clock behind, the handler stopped early and the job ended `dead` instead of `expired`; with it ahead, the handler ran past the deadline. A job stopped by its deadline now always ends `expired`.
 - A heartbeat answered after a job finished and was claimed again by the same worker, as polls are, no longer cancels the new run. Before, the new run's result was dropped and the job stayed `running` until its lease ended.

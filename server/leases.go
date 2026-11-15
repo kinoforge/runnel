@@ -55,7 +55,7 @@ func (s *Server) claim(w http.ResponseWriter, r *http.Request, p principal) erro
 			if jobs == nil {
 				jobs = []*runnel.Job{}
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+			writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "now": s.clock.Now()})
 			return nil
 		}
 		t := time.NewTimer(min(claimPollEvery, time.Until(deadline)))
@@ -99,7 +99,7 @@ func (s *Server) extend(w http.ResponseWriter, r *http.Request, p principal) err
 	if lost == nil {
 		lost = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"lost": lost})
+	writeJSON(w, http.StatusOK, map[string]any{"lost": lost, "now": s.clock.Now()})
 	return nil
 }
 

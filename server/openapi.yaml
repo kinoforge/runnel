@@ -506,7 +506,7 @@ paths:
                 wait: {$ref: "#/components/schemas/Duration"}
       responses:
         "200":
-          description: Claimed jobs, possibly none.
+          description: Claimed jobs, possibly none, and the server's time, which a worker measures the jobs' deadlines on.
           content:
             application/json:
               schema:
@@ -515,6 +515,7 @@ paths:
                   jobs:
                     type: array
                     items: {$ref: "#/components/schemas/Job"}
+                  now: {type: string, format: date-time}
         default: {$ref: "#/components/responses/Problem"}
   /v1/ns/{ns}/extend:
     parameters:
@@ -540,7 +541,7 @@ paths:
                 lease: {$ref: "#/components/schemas/Duration"}
       responses:
         "200":
-          description: Leases extended.
+          description: Leases extended, and the server's time.
           content:
             application/json:
               schema:
@@ -549,6 +550,7 @@ paths:
                   lost:
                     type: array
                     items: {type: string}
+                  now: {type: string, format: date-time}
         default: {$ref: "#/components/responses/Problem"}
   /v1/ns/{ns}/jobs/{id}/finish:
     parameters:

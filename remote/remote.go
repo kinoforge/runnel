@@ -307,8 +307,9 @@ func (c *Client) Stats(ctx context.Context) ([]runnel.QueueStats, error) {
 }
 
 type source struct {
-	c    *Client
-	wait time.Duration
+	c     *Client
+	wait  time.Duration
+	clock serverClock
 }
 
 // Source returns a runnel.Source over the server's lease protocol. Claims long-
@@ -318,18 +319,26 @@ func (c *Client) Source(longPoll time.Duration) runnel.Source { return &source{c
 func (s *source) Claim(ctx context.Context, worker string, queues []string, limit int, lease time.Duration) ([]*runnel.Job, error) {
 	var out struct {
 		Jobs []*runnel.Job `json:"jobs"`
+		Now  time.Time     `json:"now"`
 	}
 	in := map[string]any{"worker": worker, "queues": queues, "limit": limit, "lease": runnel.Duration(lease), "wait": runnel.Duration(s.wait)}
-	return out.Jobs, s.c.do(ctx, http.MethodPost, s.c.path("/claim"), in, &out)
+	err := s.c.do(ctx, http.MethodPost, s.c.path("/claim"), in, &out)
+	s.clock.observe(out.Now, time.Now())
+	return out.Jobs, err
 }
 
 func (s *source) Extend(ctx context.Context, worker string, ids []string, lease time.Duration) ([]string, error) {
 	var out struct {
-		Lost []string `json:"lost"`
+		Lost []string  `json:"lost"`
+		Now  time.Time `json:"now"`
 	}
 	in := map[string]any{"worker": worker, "ids": ids, "lease": runnel.Duration(lease)}
-	return out.Lost, s.c.do(ctx, http.MethodPost, s.c.path("/extend"), in, &out)
+	err := s.c.do(ctx, http.MethodPost, s.c.path("/extend"), in, &out)
+	s.clock.observe(out.Now, time.Now())
+	return out.Lost, err
 }
+
+func (s *source) Clock() runnel.Clock { return &s.clock }
 
 func (s *source) Finish(ctx context.Context, worker string, j *runnel.Job, o runnel.Outcome) error {
 	in := map[string]any{"worker": worker, "version": j.Version, "outcome": o, "payload": j.Payload, "meta": j.Meta}

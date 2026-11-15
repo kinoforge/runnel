@@ -135,7 +135,7 @@ What a handler returns decides what happens to the job next.
 
 ## Clock (K)
 
-- **K01** Leases, start times, deadlines, retries and schedules are measured on the store's clock (database or Redis time) when it has one, so hosts with skewed clocks agree. Each process samples it about every 30 seconds and keeps the offset of the fastest of three reads.
+- **K01** Leases, start times, deadlines, retries and schedules are measured on the store's clock (database or Redis time) when it has one, so hosts with skewed clocks agree. Each process samples it about every 30 seconds and keeps the offset of the fastest of three reads. A remote worker measures its jobs' deadlines on the server's clock, which claim and heartbeat answers carry as `now`.
 
 ## Stores (X)
 
