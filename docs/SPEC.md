@@ -185,3 +185,23 @@ What a handler returns decides what happens to the job next.
 - **S19** Reading one queue, pool or schedule answers with an `ETag`, and so does setting one. `PUT` and `PATCH` with `If-Match` write only if the setting still has one of the listed tags (`*`: if it exists), compared strongly. With `If-None-Match: *` they write only if it does not exist. Otherwise they answer 412 with the title `precondition failed`. Without these headers a `PUT` replaces the setting as before.
 - **S20** `PATCH` on a queue, pool or schedule takes an RFC 7396 merge patch as `application/merge-patch+json` or `application/json`, any other type is 415. Named fields are set, `null` clears a field and the rest stay. A missing setting is created from the patch. The name comes from the path, and a different name, an unknown field or a setting that fails its checks is 400. It needs the admin role.
 - **S21** The remote client's `UpdateQueue` and `UpdatePool` work like X10 over the API, with `If-Match` on the tag they read and `If-None-Match: *` for a new setting, and start again on 412. A 412 is `ErrStale`.
+
+## Stories (U)
+
+Each story walks one whole use of Runnel through its public API, from enqueue to the end, and checks every step on the way. Library stories run on every backend; HTTP stories run through `runnel serve`'s handler.
+
+- **U01** A shop sends a welcome email with a callback. The worker completes the job, the maintainer makes one delivery, and the shop's receiver gets one POST it can verify with the namespace secret, carrying `job.completed` and the result. A job that fails for good sends `job.dead` the same way.
+- **U02** One customer floods a queue while another adds a few jobs. With `group_max_running`, the flooding customer never runs more than its cap, and the other customer's jobs start while the flood still waits.
+- **U03** Two queues share a provider's pool. Their jobs together never run more than the pool's slots. An operator pauses the pool: running jobs finish, none start, and other pools keep working. The app sets the pool's slots again while it is paused, and the pause stays. Once resumed, every job runs.
+- **U04** A provider fails twice and then answers: the job completes on its third attempt with both errors recorded. A job that fails for good is dead after one attempt; once the cause is fixed, an operator retries it and it completes, keeping its error history.
+- **U05** A render runs on a provider that answers later. The job is `polling` between checks, keeps its first attempt through every poll and completes with the result. A poll that fails for good ends the job dead.
+- **U06** A worker crashes holding a job. Once its lease ends, the maintainer takes the job back and another worker completes it on its second attempt, with the lost attempt recorded.
+- **U07** A worker is stopped during a deploy while a job runs. The job goes back to `waiting` with no attempt used and no error, and the next worker completes it on its first attempt.
+- **U08** A fetch, resize and publish pipeline runs in order, and each step reads the results of the steps before it. When resize fails for good, publish is cancelled, and every step's final state is an event.
+- **U09** A customer cancels a running export. Its handler learns it at the next heartbeat, the job ends `cancelled`, and the job waiting on it is cancelled too. Retried, the export runs again and completes.
+- **U10** A job that cannot start in time, because its queue is paused, ends `expired` with an event. A job whose deadline passes while it runs ends `expired`, and its handler's context ends with `ErrDeadline`.
+- **U11** A client retries an enqueue that it is not sure went through. The unique key makes it one job, marked duplicate the second time. Once the job is done, the key is free; with a window, it stays taken until the window ends.
+- **U20** A service in another language uses only HTTP. The admin makes a namespace with a callback secret and keys for a producer and a worker, and sets an https callback on the queue. An enqueue with `Prefer: wait` answers 200 with the result that a remote worker set, and a signed callback arrives.
+- **U21** An app and an operator share a pool over HTTP. The app sets slots with `UpdatePool`, the operator pauses it with `PATCH` and `If-Match`, and the app sets slots again: the pool stays paused. A stale tag is 412 and a reader key is 403. Once resumed, the jobs run.
+- **U22** A key works from the moment it is made. Deleted, it is refused at once. A namespace deleted and made again does not bring its old keys back.
+- **U23** A queue with `max_queued: 2` refuses a third waiting job with 429, `Retry-After` and the title `queue full`. Once a worker claims a job, there is room again.

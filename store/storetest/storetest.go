@@ -138,6 +138,17 @@ func Run(t *testing.T, open Opener) {
 		"ConfigUpdate":               testUpdateConfig,
 		"QueueCallback":              testQueueCallback,
 		"WorkerResize":               testWorkerResize,
+		"StoryWelcomeEmail":          testStoryWelcomeEmail,
+		"StoryNoisyCustomer":         testStoryNoisyCustomer,
+		"StoryProviderOutage":        testStoryProviderOutage,
+		"StoryFlakyProvider":         testStoryFlakyProvider,
+		"StoryAsyncRender":           testStoryAsyncRender,
+		"StoryWorkerCrash":           testStoryWorkerCrash,
+		"StoryGracefulDeploy":        testStoryGracefulDeploy,
+		"StoryPipeline":              testStoryPipeline,
+		"StoryCancelExport":          testStoryCancelExport,
+		"StoryDeadlines":             testStoryDeadlines,
+		"StorySafeReenqueue":         testStorySafeReenqueue,
 	}
 	for _, n := range slices.Sorted(maps.Keys(tests)) {
 		t.Run(n, func(t *testing.T) { tests[n](t, open) })
