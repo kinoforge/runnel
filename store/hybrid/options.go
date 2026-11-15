@@ -46,6 +46,9 @@ type Options struct {
 	MaxRefills  int
 	WakeBatch   int
 
+	MinFreeBytes   int64
+	DiskCheckEvery time.Duration
+
 	// Cold sizes the cold store's caches.
 	Cold cold.Options
 }
@@ -69,6 +72,8 @@ var DefaultOptions = Options{
 	BatchBytes:     4 << 20,
 	MaxRefills:     8,
 	WakeBatch:      16 * slabSize,
+	MinFreeBytes:   64 << 20,
+	DiskCheckEvery: 100 * time.Millisecond,
 	Cold:           cold.DefaultOptions,
 }
 
@@ -91,6 +96,8 @@ func (o Options) withDefaults() Options {
 	pick(&o.BatchBytes, d.BatchBytes)
 	pick(&o.MaxRefills, d.MaxRefills)
 	pick(&o.WakeBatch, d.WakeBatch)
+	pick(&o.MinFreeBytes, d.MinFreeBytes)
+	pick(&o.DiskCheckEvery, d.DiskCheckEvery)
 	o.Cold = o.Cold.WithDefaults()
 	return o
 }

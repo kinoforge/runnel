@@ -114,7 +114,9 @@ A hybrid data directory holds a `FORMAT` file. A build that cannot read it refus
 
 ## When something goes wrong
 
-**`/healthz` answers 503, or calls fail with `hybrid: store stopped after a disk error`.** A write to disk failed (full disk, I/O error). The store refuses every call rather than answer with data the disk does not hold. Fix the disk, then restart: it replays what it had acknowledged.
+**Enqueues fail with 507 `storage full` (`runnel.ErrNoSpace`).** The disk holding a hybrid store has less free space than `hybrid.min_free_bytes` (64 MiB by default). New jobs are refused before anything is written, so nothing is lost and nothing else stops: workers go on claiming and finishing, and reads work. Free space or grow the volume, and enqueues are taken again within `hybrid.disk_check_every`, with no restart. Producers should retry after `Retry-After`.
+
+**`/healthz` answers 503, or calls fail with `hybrid: store stopped after a disk error`.** A write to disk failed (a disk that filled despite `min_free_bytes`, or an I/O error). The store refuses every call rather than answer with data the disk does not hold. Fix the disk, then restart: it replays what it had acknowledged.
 
 **The disk is filling up.** Check retention: `queue.retention` and `queue.dead_retention`, or the `maintainer.retention` defaults. Make sure a maintainer runs (`--no-maintain` turns it off). A snapshot needs room for a copy of the live jobs while it is written.
 

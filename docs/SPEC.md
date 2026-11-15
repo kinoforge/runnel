@@ -165,7 +165,7 @@ What a handler returns decides what happens to the job next.
 ## HTTP API (S)
 
 - **S01** Request bodies are strict: one JSON value, no unknown fields, no trailing data, at most 4 MiB (413 above). Errors are `application/problem+json` (RFC 9457).
-- **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a setting that changed since it was read 412; a patch of another media type 415; a failed dependency 422; a full queue or group 429. The remote client turns them back into the same Go errors.
+- **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a setting that changed since it was read 412; a patch of another media type 415; a failed dependency 422; a full queue or group 429; a store low on disk space 507. The remote client turns them back into the same Go errors.
 - **S03** Over the API a callback, whether on a job, a queue or a schedule, must use https unless the server allows http, and the reserved `runnel.callbacks` queue and `runnel.callback` kind are refused.
 - **S04** Enqueueing one job answers 201 with `Location: /v1/ns/{ns}/jobs/{id}`, or 200 for a duplicate. A batch, `{"jobs": [...]}`, answers 200 with one result per job.
 - **S05** `Prefer: wait=N` on an enqueue holds the answer for up to N seconds: 200 with the finished job, or 202 with `Location` and `Retry-After` while it is still going. `Preference-Applied` echoes the wait used. N is capped at 60 by default; a bad or non-positive N means no wait. Without a Prefer header the queue's `wait` is used.
@@ -212,6 +212,7 @@ Each drill runs the `runnel` binary with a hybrid store in a temporary folder, b
 
 - **D01** Killed with SIGKILL while producers enqueue and workers finish jobs, then started again on the same folder, the server keeps every enqueue it acknowledged. Every job then completes, with one event.
 - **D02** While the network between the clients and the server is cut, no enqueue is acknowledged, and once the cut-off workers' leases end, none of their jobs is left running. When the network comes back, every job completes, with one event.
-- **D03** When the disk fills, the store stops: `/healthz` answers 503 and no write is acknowledged. Once space is freed and the server restarts, it has every job it acknowledged and takes writes again.
+- **D03** When the disk holding a hybrid store has less free space than `min_free_bytes` (64 MiB by default), new jobs are refused with `ErrNoSpace`, 507 over HTTP, and nothing else stops: `/healthz` answers 200, and workers claim and finish the jobs already taken. Once space is freed, enqueues are taken again without a restart, and the store still has every job it acknowledged.
 - **D04** Killed again and again at random moments during writes, the server opens each time with every job it acknowledged, unchanged.
 - **D05** A backup taken over `GET /v1/backup` while producers enqueue restores with `runnel restore` into an empty folder, and the restored server has every job acknowledged before the backup began. Restoring into a folder that is not empty fails.
+- **D06** When the disk fills anyway, the store stops: `/healthz` answers 503 and no write is acknowledged. Once space is freed and the server restarts, it has every job it acknowledged and takes writes again.

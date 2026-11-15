@@ -106,6 +106,8 @@ func (e *APIError) Unwrap() error {
 		return runnel.ErrGroupFull
 	case http.StatusUnprocessableEntity:
 		return runnel.ErrDependency
+	case http.StatusInsufficientStorage:
+		return runnel.ErrNoSpace
 	case http.StatusBadRequest:
 		return runnel.ErrInvalid
 	}

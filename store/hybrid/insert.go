@@ -17,6 +17,9 @@ func (s *Store) Insert(_ context.Context, ns string, jobs []*runnel.Job, now tim
 			bodies[i] = encodeBody(j)
 		}
 	}
+	if err := s.checkDisk(); err != nil {
+		return nil, err
+	}
 	if err := s.makeRoom(); err != nil {
 		return nil, err
 	}

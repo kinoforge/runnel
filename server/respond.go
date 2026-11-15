@@ -48,6 +48,9 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, runnel.ErrQueueFull):
 		w.Header().Set("Retry-After", s.retryAfter())
 		s.problem(w, http.StatusTooManyRequests, "queue full", err.Error())
+	case errors.Is(err, runnel.ErrNoSpace):
+		w.Header().Set("Retry-After", s.retryAfter())
+		s.problem(w, http.StatusInsufficientStorage, "storage full", "the store is low on disk space")
 	case errors.Is(err, runnel.ErrDependency):
 		s.problem(w, http.StatusUnprocessableEntity, "dependency", err.Error())
 	case errors.Is(err, runnel.ErrConflict), errors.Is(err, runnel.ErrFinal), errors.Is(err, runnel.ErrNotFinal):

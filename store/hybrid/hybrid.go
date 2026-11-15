@@ -35,6 +35,9 @@ type Store struct {
 	hotJobs int64
 	hot     atomic.Int64
 
+	diskNext atomic.Int64
+	diskLow  atomic.Bool
+
 	mu     sync.RWMutex
 	spaces map[string]*space
 

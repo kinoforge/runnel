@@ -36,6 +36,9 @@ type Hybrid struct {
 	MaxRefills  int           `yaml:"max_refills"`
 	WakeBatch   int           `yaml:"wake_batch"`
 
+	MinFreeBytes   int64         `yaml:"min_free_bytes"`
+	DiskCheckEvery time.Duration `yaml:"disk_check_every"`
+
 	ColdCacheBytes    int64 `yaml:"cold_cache_bytes"`
 	ColdMemTableBytes int64 `yaml:"cold_memtable_bytes"`
 	ColdBloomBits     int   `yaml:"cold_bloom_bits"`
@@ -49,6 +52,7 @@ func defaultHybrid() Hybrid {
 		RetireAfter: d.RetireAfter, RetireEvery: d.RetireEvery, RetireBatch: d.RetireBatch,
 		SpillEvery: d.SpillEvery, SpillBatch: d.SpillBatch, RefillBatch: d.RefillBatch, RefillAhead: d.RefillAhead,
 		BatchBytes: d.BatchBytes, MaxRefills: d.MaxRefills, WakeBatch: d.WakeBatch,
+		MinFreeBytes: d.MinFreeBytes, DiskCheckEvery: d.DiskCheckEvery,
 		ColdCacheBytes: d.Cold.CacheBytes, ColdMemTableBytes: d.Cold.MemTableBytes, ColdBloomBits: d.Cold.BloomBits,
 	}
 }
@@ -61,6 +65,7 @@ func (h Hybrid) Options() (hybrid.Options, error) {
 		RetireAfter: h.RetireAfter, RetireEvery: h.RetireEvery, RetireBatch: h.RetireBatch,
 		SpillEvery: h.SpillEvery, SpillBatch: h.SpillBatch, RefillBatch: h.RefillBatch, RefillAhead: h.RefillAhead,
 		BatchBytes: h.BatchBytes, MaxRefills: h.MaxRefills, WakeBatch: h.WakeBatch,
+		MinFreeBytes: h.MinFreeBytes, DiskCheckEvery: h.DiskCheckEvery,
 		Cold: cold.Options{CacheBytes: h.ColdCacheBytes, MemTableBytes: h.ColdMemTableBytes, BloomBits: h.ColdBloomBits},
 	}, err
 }

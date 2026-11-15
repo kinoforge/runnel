@@ -109,6 +109,9 @@ hybrid:
   batch_bytes: 4194304
   max_refills: 8
   wake_batch: 65536
+  # disk
+  min_free_bytes: 67108864 # new jobs are refused with 507 below this much free space
+  disk_check_every: 100ms
   # cold store
   cold_cache_bytes: 16777216
   cold_memtable_bytes: 8388608

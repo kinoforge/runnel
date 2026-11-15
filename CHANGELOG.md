@@ -7,6 +7,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Added
 
 - User stories (`U` rules in SPEC.md) that walk whole uses of Runnel on every backend and over HTTP, boundary tests for each rule, and failure drills (`make drill`): a kill under load, a network cut, a full disk, kills during writes and a restore from backup.
+- A hybrid store refuses new jobs with `ErrNoSpace` (507 over HTTP) while its disk has less than `hybrid.min_free_bytes` free, 64 MiB by default. Workers, reads and finishes go on, and enqueues are taken again once space is freed, with no restart. Before, the disk filled until a write failed and the whole store stopped until restarted.
 
 ### Changed
 

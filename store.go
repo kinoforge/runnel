@@ -29,6 +29,7 @@ var (
 	// ErrInvalid wraps every validation error.
 	ErrInvalid = errors.New("runnel: invalid input")
 	ErrStale   = errors.New("runnel: setting changed since it was read")
+	ErrNoSpace = errors.New("runnel: store is low on disk space")
 	// ErrNoHandler means no handler is registered for the job's kind.
 	ErrNoHandler = errors.New("runnel: no handler for kind")
 )
