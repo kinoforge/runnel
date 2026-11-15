@@ -337,9 +337,10 @@ func (w *Worker) execute(base, jctx context.Context, r *inflight) {
 	o := Classify(ctx, work, err)
 	done := orig.Clone()
 	done.Payload, done.Meta, done.Result = work.Payload, work.Meta, work.Result
+	fin := context.WithoutCancel(base)
 	pause := finishRetryMin
 	for i := range finishTries {
-		ferr := w.src.Finish(base, w.cfg.ID, done, o)
+		ferr := w.src.Finish(fin, w.cfg.ID, done, o)
 		if ferr == nil || errors.Is(ferr, ErrConflict) {
 			if ferr != nil {
 				w.log.Warn("runnel: job changed while running, result dropped", "job", orig.ID)
@@ -347,7 +348,7 @@ func (w *Worker) execute(base, jctx context.Context, r *inflight) {
 			break
 		}
 		w.log.Error("runnel: finishing job failed", "job", orig.ID, "try", i+1, "err", ferr)
-		sleepCtx(base, pause)
+		sleepCtx(fin, pause)
 		pause *= 2
 	}
 	if w.cfg.Observer != nil {

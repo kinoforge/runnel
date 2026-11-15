@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Fixed
+
+- A worker stopped while a job runs now writes the job back before `Run` returns. Before, the write used the cancelled shutdown context and failed, so the job stayed `running` until its lease ended and then lost an attempt.
+
 ## [0.0.3-beta.3] - 2026-11-14
 
 ### Added
