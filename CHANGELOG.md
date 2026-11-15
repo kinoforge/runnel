@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.0.3-beta.5] - 2026-11-15
+
 ### Added
 
 - The remote Go client manages schedules like queues and pools: `SetSchedule`, `Schedules`, `DeleteSchedule` and `UpdateSchedule`. `runnel.Client` gains `UpdateSchedule` too, which changes only the fields you touch.
@@ -126,7 +128,8 @@ First release, for trying Runnel out. The model is settled; the API may still ch
 - Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
 - SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.4...HEAD
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.5...HEAD
+[0.0.3-beta.5]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.4...v0.0.3-beta.5
 [0.0.3-beta.4]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.3...v0.0.3-beta.4
 [0.0.3-beta.3]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.2...v0.0.3-beta.3
 [0.0.3-beta.2]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.1...v0.0.3-beta.2
