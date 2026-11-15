@@ -28,6 +28,16 @@ func (c *Client) UpdatePool(ctx context.Context, name string, fn func(*PoolConfi
 	return err
 }
 
+func (c *Client) UpdateSchedule(ctx context.Context, name string, fn func(*Schedule)) error {
+	_, err := UpdateTyped(ctx, c.store, c.ns, ConfigSchedule, name, func(s *Schedule, _ bool) error {
+		s.Name = name
+		fn(s)
+		s.Name = name
+		return s.Validate()
+	})
+	return err
+}
+
 func UpdateTyped[T any](ctx context.Context, s Store, ns string, kind ConfigKind, name string, fn func(v *T, found bool) error) (T, error) {
 	for {
 		var v T

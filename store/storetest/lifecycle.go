@@ -177,6 +177,18 @@ func testConfigs(t *testing.T, open Opener) {
 	if pools, _ := e.c.Pools(e.ctx); len(pools) != 0 {
 		t.Fatalf("pool not deleted")
 	}
+	if err := e.c.SetSchedule(e.ctx, runnel.Schedule{Name: "nightly", Spec: "@daily", Queue: "q", Kind: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.c.UpdateSchedule(e.ctx, "nightly", func(s *runnel.Schedule) { s.Paused = true }); err != nil {
+		t.Fatal(err)
+	}
+	if all, err := e.c.Schedules(e.ctx); err != nil || !all["nightly"].Paused || all["nightly"].Spec != "@daily" {
+		t.Fatalf("schedule after an update %+v %v", all["nightly"], err)
+	}
+	if err := e.c.DeleteSchedule(e.ctx, "nightly"); err != nil {
+		t.Fatal(err)
+	}
 	for what, del := range map[string]func() error{
 		"pool deleted twice": func() error { return e.c.DeletePool(e.ctx, "p") },
 		"missing queue":      func() error { return e.c.DeleteQueue(e.ctx, "missing") },

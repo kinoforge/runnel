@@ -39,6 +39,30 @@ func (c *Client) UpdatePool(ctx context.Context, name string, fn func(*runnel.Po
 	})
 }
 
+func (c *Client) SetSchedule(ctx context.Context, s runnel.Schedule) error {
+	return c.do(ctx, http.MethodPut, c.path("/schedules/"+url.PathEscape(s.Name)), s, nil)
+}
+
+func (c *Client) Schedules(ctx context.Context) (map[string]runnel.Schedule, error) {
+	var out struct {
+		Items map[string]runnel.Schedule `json:"items"`
+	}
+	return out.Items, c.do(ctx, http.MethodGet, c.path("/schedules"), nil, &out)
+}
+
+func (c *Client) DeleteSchedule(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodDelete, c.path("/schedules/"+url.PathEscape(name)), nil, nil)
+}
+
+func (c *Client) UpdateSchedule(ctx context.Context, name string, fn func(*runnel.Schedule)) error {
+	return update(ctx, c, "/schedules/", name, func(s *runnel.Schedule) error {
+		s.Name = name
+		fn(s)
+		s.Name = name
+		return s.Validate()
+	})
+}
+
 func update[T any](ctx context.Context, c *Client, kind, name string, fn func(*T) error) error {
 	p := c.path(kind + url.PathEscape(name))
 	for {
