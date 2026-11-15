@@ -4,9 +4,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.0.3-beta.4] - 2026-11-15
+
 ### Added
 
-- User stories (`U` rules in SPEC.md) that walk whole uses of Runnel on every backend and over HTTP, boundary tests for each rule, and failure drills (`make drill`): a kill under load, a network cut, a full disk, kills during writes and a restore from backup.
+- User stories (`U` rules in SPEC.md) that walk whole uses of Runnel on every backend and over HTTP, boundary tests for each rule, and failure drills (`make drill`): a kill under load, a network cut, a low disk, a full disk, kills during writes and a restore from backup.
 - A hybrid store refuses new jobs with `ErrNoSpace` (507 over HTTP) while its disk has less than `hybrid.min_free_bytes` free, 64 MiB by default. Workers, reads and finishes go on, and enqueues are taken again once space is freed, with no restart. Before, the disk filled until a write failed and the whole store stopped until restarted.
 
 ### Changed
@@ -111,7 +113,8 @@ First release, for trying Runnel out. The model is settled; the API may still ch
 - Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
 - SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.3...HEAD
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.4...HEAD
+[0.0.3-beta.4]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.3...v0.0.3-beta.4
 [0.0.3-beta.3]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.2...v0.0.3-beta.3
 [0.0.3-beta.2]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.1...v0.0.3-beta.2
 [0.0.3-beta.1]: https://github.com/kinoforge/runnel/compare/v0.0.2-alpha...v0.0.3-beta.1
