@@ -226,3 +226,4 @@ Each drill runs the `runnel` binary with a hybrid store in a temporary folder, b
 - **D04** Killed again and again at random moments during writes, the server opens each time with every job it acknowledged, unchanged.
 - **D05** A backup taken over `GET /v1/backup` while producers enqueue restores with `runnel restore` into an empty folder, and the restored server has every job acknowledged before the backup began. Restoring into a folder that is not empty fails.
 - **D06** When the disk fills anyway, the store stops: `/healthz` answers 503 and no write is acknowledged. Once space is freed and the server restarts, it has every job it acknowledged and takes writes again.
+- **D07** A hybrid store killed with SIGKILL right after it cancels waiting jobs kept on disk and retries a finished job kept on disk opens with them as acknowledged: the cancelled jobs stay cancelled and never run, the retried job waits, and every other job runs once.
