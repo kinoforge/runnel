@@ -141,9 +141,13 @@ func (s *Store) finalize(ctx context.Context, tx *txn, ns, id, queue, kind strin
 		return err
 	}
 	for _, v := range victims {
-		if _, err := tx.ExecContext(ctx, s.q("UPDATE rn_jobs SET state=?, finished_at=?, updated_at=?, start_by=0, version=version+1 WHERE id=?"),
-			string(runnel.StateCancelled), now, now, v.ID); err != nil {
+		res, err := tx.ExecContext(ctx, s.q("UPDATE rn_jobs SET state=?, pending=0, finished_at=?, updated_at=?, start_by=0, version=version+1 WHERE id=? AND state=?"),
+			string(runnel.StateCancelled), now, now, v.ID, blocked)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			continue
 		}
 		if err := s.finalize(ctx, tx, ns, v.ID, v.Queue, v.Kind, runnel.StateCancelled, v.UniqueKey, now); err != nil {
 			return err

@@ -182,25 +182,74 @@ func testMaintainerEvents(t *testing.T, open Opener) {
 		t.Fatal(err)
 	}
 	for range 3 {
-		e.add("short")
+		e.add("short", runnel.Callback("https://example.com/hook"))
 	}
 	for _, j := range e.claim([]string{"short"}, 3) {
 		e.finish(j, runnel.Outcome{Kind: runnel.OutcomeDone})
 	}
 	all, _ := e.c.Events(e.ctx, 0, 10)
 	time.Sleep(20 * time.Millisecond)
-	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}, Batch: 1, Callbacks: runnel.CallbackConfig{Enabled: true},
-		Retention: runnel.Retention{Completed: time.Millisecond, Events: time.Millisecond}})
+	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}, Batch: 1, PruneEvery: time.Nanosecond,
+		Callbacks: runnel.CallbackConfig{Enabled: true}, Retention: runnel.Retention{Completed: time.Millisecond, Events: time.Millisecond}})
 	if err := m.Tick(e.ctx, e.ns); err != nil {
 		t.Fatal(err)
-	}
-	if stats, _ := e.c.Stats(e.ctx); len(stats) > 0 && stats[0].Counts[runnel.StateCompleted] != 0 {
-		t.Fatalf("jobs not pruned %+v", stats)
 	}
 	cur, _ := e.s.Cursor(e.ctx, e.ns, "callbacks")
 	left, _ := e.c.Events(e.ctx, 0, 10)
 	if len(all) != 3 || cur != all[0].Seq || len(left) != 2 || left[0].Seq != all[1].Seq {
 		t.Fatalf("callback backlog lost: cursor %d, events before %d, after %+v", cur, len(all), left)
+	}
+	for _, ev := range left {
+		if _, err := e.c.Get(e.ctx, ev.JobID); err != nil {
+			t.Fatalf("job %s pruned before its callback was queued: %v", ev.JobID, err)
+		}
+	}
+	for range 2 {
+		if err := m.Tick(e.ctx, e.ns); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hooks, _, err := e.c.List(e.ctx, runnel.Query{Queue: runnel.CallbackQueue, Limit: 10})
+	if err != nil || len(hooks) != 3 || e.count("short", runnel.StateCompleted) != 0 {
+		t.Fatalf("%d deliveries, %d jobs left, %v", len(hooks), e.count("short", runnel.StateCompleted), err)
+	}
+}
+
+func testCallbackQueueFull(t *testing.T, open Opener) {
+	spec.Rule(t, "H01")
+	e := setup(t, open)
+	if err := e.c.SetQueue(e.ctx, runnel.QueueConfig{Name: runnel.CallbackQueue, MaxQueued: 1}); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		e.add("q", runnel.Callback("https://example.com/hook"))
+	}
+	for _, j := range e.claim([]string{"q"}, 3) {
+		e.finish(j, runnel.Outcome{Kind: runnel.OutcomeDone})
+	}
+	all, _ := e.c.Events(e.ctx, 0, 10)
+	if len(all) != 3 {
+		t.Fatalf("events %+v", all)
+	}
+	m := runnel.NewMaintainer(e.s, runnel.MaintainerConfig{Namespaces: []string{e.ns}, Callbacks: runnel.CallbackConfig{Enabled: true}})
+	for round, ev := range all {
+		err := m.Tick(e.ctx, e.ns)
+		cur, _ := e.s.Cursor(e.ctx, e.ns, "callbacks")
+		last := round == len(all)-1
+		if last != (err == nil) || (!last && !errors.Is(err, runnel.ErrQueueFull)) || cur < ev.Seq || (!last && cur >= all[round+1].Seq) {
+			t.Fatalf("round %d: cursor %d, events %+v, err %v", round, cur, all, err)
+		}
+		waiting, _, err := e.c.List(e.ctx, runnel.Query{Queue: runnel.CallbackQueue, State: runnel.StateWaiting, Limit: 10})
+		if err != nil || len(waiting) != 1 {
+			t.Fatalf("round %d: %d deliveries waiting, %v", round, len(waiting), err)
+		}
+		if _, err := e.c.Cancel(e.ctx, waiting[0].ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hooks, _, err := e.c.List(e.ctx, runnel.Query{Queue: runnel.CallbackQueue, Limit: 10})
+	if err != nil || len(hooks) != 3 {
+		t.Fatalf("%d deliveries for 3 events, %v", len(hooks), err)
 	}
 }
 

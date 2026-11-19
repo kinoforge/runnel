@@ -225,4 +225,12 @@ func TestQueueCallbackOverAPI(t *testing.T) {
 	if got := ask(t, srv, "PUT", "/v1/ns/default/schedules/s", fmt.Sprintf(s, hook)); got.code != 200 {
 		t.Fatalf("https schedule callback: %d %v", got.code, got.body)
 	}
+	for _, body := range []string{
+		`{"name":"r","queue":"runnel.callbacks","kind":"k","spec":"@every 1h"}`,
+		`{"name":"r","queue":"q","kind":"runnel.callback","spec":"@every 1h"}`,
+	} {
+		if got := ask(t, srv, "PUT", "/v1/ns/default/schedules/r", body); got.code != 400 {
+			t.Fatalf("reserved schedule %s: %d", body, got.code)
+		}
+	}
 }

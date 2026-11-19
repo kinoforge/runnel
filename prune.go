@@ -11,6 +11,10 @@ func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error 
 	if err := m.pruneEvents(ctx, ns, now); err != nil {
 		return err
 	}
+	hold, err := m.undeliveredSince(ctx, ns)
+	if err != nil {
+		return err
+	}
 	stats, err := m.store.Stats(ctx, ns)
 	if err != nil {
 		return err
@@ -32,7 +36,11 @@ func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error 
 				continue
 			}
 			for range maxPruneRounds {
-				n, err := m.store.Prune(ctx, ns, PruneRequest{Queue: st.Queue, States: []State{state}, Before: now.Add(-keep),
+				before := now.Add(-keep)
+				if !hold.IsZero() && hold.Before(before) {
+					before = hold
+				}
+				n, err := m.store.Prune(ctx, ns, PruneRequest{Queue: st.Queue, States: []State{state}, Before: before,
 					Limit: m.cfg.Batch, Archive: m.cfg.Archive})
 				if err != nil {
 					return err
@@ -44,6 +52,38 @@ func (m *Maintainer) prune(ctx context.Context, ns string, now time.Time) error 
 		}
 	}
 	return nil
+}
+
+func (m *Maintainer) undeliveredSince(ctx context.Context, ns string) (time.Time, error) {
+	if !m.cfg.Callbacks.Enabled {
+		return time.Time{}, nil
+	}
+	cur, err := m.store.Cursor(ctx, ns, "callbacks")
+	if err != nil {
+		return time.Time{}, err
+	}
+	next, err := m.store.Events(ctx, ns, cur, m.cfg.Batch)
+	if err != nil || len(next) == 0 {
+		return time.Time{}, err
+	}
+	hold := next[0].At
+	ids := make([]string, 0, len(next))
+	for _, e := range next {
+		ids = append(ids, e.JobID)
+		if e.At.Before(hold) {
+			hold = e.At
+		}
+	}
+	jobs, err := m.store.Get(ctx, ns, ids)
+	if err != nil {
+		return time.Time{}, err
+	}
+	for _, j := range jobs {
+		if !j.FinishedAt.IsZero() && j.FinishedAt.Before(hold) {
+			hold = j.FinishedAt
+		}
+	}
+	return hold, nil
 }
 
 func (m *Maintainer) pruneEvents(ctx context.Context, ns string, now time.Time) error {

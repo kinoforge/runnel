@@ -122,7 +122,7 @@ func (s *Store) finalize(t *tx, h job, key string, now int64) error {
 		k.updated = now
 		switch {
 		case !h.is(stCompleted):
-			k.state, k.finished, k.startBy = stCancelled, now, 0
+			k.state, k.finished, k.startBy, k.pending = stCancelled, now, 0, 0
 			t.putHot(k)
 			kkey, _, err := s.keys(sp, &k, nil)
 			if err != nil {

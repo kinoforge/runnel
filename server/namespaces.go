@@ -189,6 +189,10 @@ func (s *Server) newKey(ctx context.Context, ns, name string, roles []string, ex
 	if err := runnel.PutKey(ctx, s.store, key); err != nil {
 		return "", runnel.APIKey{}, err
 	}
+	if _, err := s.namespace(ctx, ns); err != nil {
+		_ = runnel.DeleteKey(ctx, s.store, ns, key.ID)
+		return "", runnel.APIKey{}, err
+	}
 	_ = s.reloadKeys(ctx)
 	return token, key, nil
 }

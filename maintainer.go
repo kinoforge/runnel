@@ -2,6 +2,7 @@ package runnel
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -73,15 +74,11 @@ func NewMaintainer(s Store, cfg MaintainerConfig) *Maintainer {
 	if cfg.PruneEvery <= 0 {
 		cfg.PruneEvery = defaultPruneEvery
 	}
-	if cfg.Retention.Completed == 0 && cfg.Retention.Cancelled == 0 && cfg.Retention.Dead == 0 {
-		cfg.Retention.Completed, cfg.Retention.Cancelled, cfg.Retention.Dead = DefaultRetention.Completed, DefaultRetention.Cancelled, DefaultRetention.Dead
-	}
-	if cfg.Retention.Events <= 0 {
-		cfg.Retention.Events = DefaultRetention.Events
-	}
-	if cfg.Retention.Undelivered <= 0 {
-		cfg.Retention.Undelivered = DefaultRetention.Undelivered
-	}
+	cfg.Retention.Completed = pick(cfg.Retention.Completed, DefaultRetention.Completed)
+	cfg.Retention.Cancelled = pick(cfg.Retention.Cancelled, DefaultRetention.Cancelled)
+	cfg.Retention.Dead = pick(cfg.Retention.Dead, DefaultRetention.Dead)
+	cfg.Retention.Events = pick(cfg.Retention.Events, DefaultRetention.Events)
+	cfg.Retention.Undelivered = pick(cfg.Retention.Undelivered, DefaultRetention.Undelivered)
 	cfg.Retention.Undelivered = max(cfg.Retention.Undelivered, cfg.Retention.Events)
 	if cfg.Batch <= 0 {
 		cfg.Batch = defaultMaintainBatch
@@ -284,6 +281,7 @@ func (m *Maintainer) callbacks(ctx context.Context, ns string, now time.Time) er
 		byID[j.ID] = j
 	}
 	var hooks []*Job
+	var seqs []int64
 	for _, e := range events {
 		j := byID[e.JobID]
 		if j == nil || j.CallbackURL == "" || j.Queue == m.cfg.Callbacks.Queue {
@@ -293,15 +291,30 @@ func (m *Maintainer) callbacks(ctx context.Context, ns string, now time.Time) er
 		if err != nil {
 			return err
 		}
-		hooks = append(hooks, hook)
+		hooks, seqs = append(hooks, hook), append(seqs, e.Seq)
 	}
+	upTo, failed := events[len(events)-1].Seq, error(nil)
 	if len(hooks) > 0 {
-		if _, err := m.client(ns).EnqueueJobs(ctx, hooks); err != nil {
+		res, err := m.client(ns).EnqueueJobs(ctx, hooks)
+		if err != nil {
+			return err
+		}
+		for i, r := range res {
+			if r.Err != nil {
+				upTo, failed = seqs[i]-1, r.Err
+				break
+			}
+		}
+	}
+	if upTo > cur {
+		if _, err := m.store.SwapCursor(ctx, ns, "callbacks", cur, upTo); err != nil {
 			return err
 		}
 	}
-	_, err = m.store.SwapCursor(ctx, ns, "callbacks", cur, events[len(events)-1].Seq)
-	return err
+	if failed != nil {
+		return fmt.Errorf("runnel: callback delivery not queued: %w", failed)
+	}
+	return nil
 }
 
 func pick(override, fallback time.Duration) time.Duration {

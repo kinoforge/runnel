@@ -75,7 +75,10 @@ func (h *endHub) forward(ctx context.Context, ends <-chan string) {
 		select {
 		case <-ctx.Done():
 			return
-		case id := <-ends:
+		case id, ok := <-ends:
+			if !ok {
+				return
+			}
 			h.mu.Lock()
 			for ch := range h.subs[id] {
 				select {

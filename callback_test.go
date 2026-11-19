@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,6 +85,8 @@ func TestCallbackDelivery(t *testing.T) {
 	}{
 		{http.StatusInternalServerError, "", OutcomeRetry, 0},
 		{http.StatusTooManyRequests, "7", OutcomeRetry, 7 * time.Second},
+		{http.StatusTooManyRequests, "9223372037", OutcomeRetry, 0},
+		{http.StatusServiceUnavailable, "3601", OutcomeRetry, 0},
 		{http.StatusRequestTimeout, "", OutcomeRetry, 0},
 		{http.StatusNotFound, "", OutcomeFail, 0},
 		{http.StatusFound, "", OutcomeFail, 0},
@@ -93,5 +96,45 @@ func TestCallbackDelivery(t *testing.T) {
 		if o := deliver(); o.Kind != c.want || o.Delay.D() != c.delay {
 			t.Errorf("%d became %+v, want %s after %v", c.status, o, c.want, c.delay)
 		}
+	}
+}
+
+func TestCallbackSignedWithOwnNamespace(t *testing.T) {
+	spec.Rule(t, "H07")
+	rcv := &hookReceiver{status: http.StatusOK}
+	srv := httptest.NewServer(rcv)
+	defer srv.Close()
+	secrets := map[string]string{"a": "secret-a", "b": "secret-b"}
+	var asked []string
+	sender := NewCallbackSender(func(_ context.Context, ns string) (string, error) {
+		asked = append(asked, ns)
+		return secrets[ns], nil
+	}, CallbackConfig{AllowPrivate: true})
+	own, err := NewCallbackJob(&Job{ID: NewID(), Namespace: "a", Queue: "q", Kind: "k", State: StateCompleted, CallbackURL: srv.URL}, "job.completed", 1, CallbackConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Work(context.Background(), own); err != nil {
+		t.Fatal(err)
+	}
+	rcv.mu.Lock()
+	sig, body := rcv.header.Get("Runnel-Signature"), rcv.body
+	rcv.header, rcv.body = nil, nil
+	rcv.mu.Unlock()
+	ts, _ := strconv.ParseInt(strings.TrimPrefix(strings.Split(sig, ",")[0], "t="), 10, 64)
+	if sig != Sign("secret-a", ts, body) {
+		t.Fatalf("own delivery signature %q", sig)
+	}
+	forged, err := NewCallbackJob(&Job{ID: NewID(), Namespace: "b", Queue: "q", Kind: "k", State: StateCompleted, CallbackURL: srv.URL}, "job.completed", 2, CallbackConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged.Namespace = "a"
+	o := OutcomeOf(sender.Work(context.Background(), forged), nil)
+	rcv.mu.Lock()
+	sent := rcv.body != nil
+	rcv.mu.Unlock()
+	if o.Kind != OutcomeFail || sent || slices.Contains(asked, "b") {
+		t.Fatalf("forged delivery %+v sent=%v asked=%v", o, sent, asked)
 	}
 }

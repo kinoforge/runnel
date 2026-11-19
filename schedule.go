@@ -50,6 +50,9 @@ func (s Schedule) Validate() error {
 	if _, err := parseSpec(s.Spec, s.Timezone); err != nil {
 		return invalid("schedule spec: %v", err)
 	}
+	if s.Queue == CallbackQueue || s.Kind == CallbackKind {
+		return invalid("schedule: %s is reserved", CallbackQueue)
+	}
 	probe := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Group: s.Group,
 		Pool: s.Pool, MaxAttempts: max(s.MaxAttempts, 1), Timeout: s.Timeout, CallbackURL: s.CallbackURL, Meta: s.Meta}
 	return probe.validate(DefaultLimits)

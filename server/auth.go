@@ -108,7 +108,7 @@ func (s *Server) lookupKey(ctx context.Context, id string) (keyEntry, bool) {
 	if !stale {
 		return e, ok
 	}
-	if err := s.reloadKeys(ctx); err != nil {
+	if err := s.reloadKeys(ctx); err != nil && ctx.Err() == nil {
 		s.log.Error("runnel: loading keys failed", "err", err)
 	}
 	s.mu.Lock()
@@ -118,6 +118,16 @@ func (s *Server) lookupKey(ctx context.Context, id string) (keyEntry, bool) {
 }
 
 func (s *Server) reloadKeys(ctx context.Context) error {
+	asked := time.Now()
+	s.reload.Lock()
+	defer s.reload.Unlock()
+	s.mu.Lock()
+	fresh := s.loaded.After(asked)
+	s.mu.Unlock()
+	if fresh {
+		return nil
+	}
+	began := time.Now()
 	all, err := runnel.Namespaces(ctx, s.store)
 	if err != nil {
 		return err
@@ -133,7 +143,7 @@ func (s *Server) reloadKeys(ctx context.Context) error {
 		}
 	}
 	s.mu.Lock()
-	s.keys, s.loaded = keys, time.Now()
+	s.keys, s.loaded = keys, began
 	s.mu.Unlock()
 	return nil
 }

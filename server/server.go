@@ -102,6 +102,7 @@ type Server struct {
 
 	patterns []string
 
+	reload  sync.Mutex
 	mu      sync.Mutex
 	keys    map[string]keyEntry
 	loaded  time.Time

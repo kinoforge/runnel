@@ -4,6 +4,22 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Security
+
+- A schedule can no longer target the reserved `runnel.callbacks` queue or `runnel.callback` kind. Before, a namespace admin could make one whose payload named another namespace, and Runnel signed it with that namespace's callback secret. Deliveries are now signed with the secret of the namespace they run in, and one whose job names another namespace fails without being sent.
+
+### Fixed
+
+- Callbacks are no longer lost when their delivery job cannot be queued, such as on a full `runnel.callbacks` queue: the maintainer stops at that event and tries again on the next round.
+- Jobs whose callback has not been queued yet are no longer pruned, so a queue with a short retention or a callback backlog keeps its deliveries.
+- A maintainer given only some retention fields uses the default for the others, as documented. Before, the fields left at zero were never pruned.
+- `Worker.Do` no longer holds up the worker's shutdown while it waits for a job that is not final.
+- A worker that ran a job again on the same worker before the first run had ended no longer stops heartbeats for the second run.
+- A job cancelled because a dependency failed can be retried once its dependencies complete. Before, `Retry` was always `ErrDependency`.
+- A blocked job whose dependencies fail at the same time is cancelled once, with one event, on SQL stores.
+- A `Retry-After` too large for a duration no longer wraps around to a short or negative delay.
+- Server API keys: a reload that started before a key was deleted can no longer bring it back, and a key made while its namespace is deleted is removed. A client that hangs up during a key reload no longer logs an error.
+
 ## [0.0.4-beta.1] - 2026-11-15
 
 ### Added

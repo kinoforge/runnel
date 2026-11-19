@@ -116,7 +116,7 @@ func NewCallbackJob(j *Job, event string, delivery int64, cfg CallbackConfig) (*
 	if err != nil {
 		return nil, err
 	}
-	return &Job{Queue: cfg.Queue, Kind: CallbackKind, Payload: body, MaxAttempts: cfg.MaxAttempts,
+	return &Job{Namespace: j.Namespace, Queue: cfg.Queue, Kind: CallbackKind, Payload: body, MaxAttempts: cfg.MaxAttempts,
 		UniqueKey: fmt.Sprintf("callback:%d", delivery), UniqueFor: Duration(cfg.UniqueFor), Backoff: cfg.Backoff}, nil
 }
 
@@ -186,11 +186,14 @@ func (h *callbackHandler) Work(ctx context.Context, j *Job) error {
 	if err := ValidCallbackURL(t.URL, DefaultLimits.MaxCallbackURL); err != nil {
 		return Fail(err)
 	}
+	if t.Job.Namespace != j.Namespace {
+		return Fail(fmt.Errorf("callback for namespace %q delivered from %q", t.Job.Namespace, j.Namespace))
+	}
 	body, err := json.Marshal(CallbackBody{Event: t.Event, Delivery: t.Delivery, Job: t.Job})
 	if err != nil {
 		return Fail(err)
 	}
-	secret, err := h.secret(ctx, t.Job.Namespace)
+	secret, err := h.secret(ctx, j.Namespace)
 	if err != nil {
 		return err
 	}
@@ -223,7 +226,7 @@ func (h *callbackHandler) Work(ctx context.Context, j *Job) error {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode >= 500:
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 && time.Duration(s)*time.Second <= h.maxRetryAfter {
+		if s, err := strconv.ParseInt(resp.Header.Get("Retry-After"), 10, 64); err == nil && s > 0 && s <= int64(h.maxRetryAfter/time.Second) {
 			return RetryIn(time.Duration(s)*time.Second, fmt.Errorf("callback answered %d", resp.StatusCode))
 		}
 		return fmt.Errorf("callback answered %d", resp.StatusCode)

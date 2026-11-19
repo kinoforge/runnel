@@ -256,8 +256,8 @@ func (c *Client) Retry(ctx context.Context, id string) (*Job, error) {
 		if j.State != StateDead && j.State != StateCancelled && j.State != StateExpired {
 			return nil, ErrNotFinal
 		}
-		if j.Pending > 0 {
-			return nil, ErrDependency
+		if err := c.dependenciesDone(ctx, j); err != nil {
+			return nil, err
 		}
 		n := j.Clone()
 		n.State, n.Attempt, n.RunAt, n.WaitingSince, n.UpdatedAt = StateWaiting, 0, now, now, now
@@ -268,6 +268,31 @@ func (c *Client) Retry(ctx context.Context, id string) (*Job, error) {
 		n.computeStartBy()
 		return n, nil
 	})
+}
+
+func (c *Client) dependenciesDone(ctx context.Context, j *Job) error {
+	if j.Pending > 0 {
+		return ErrDependency
+	}
+	if j.State != StateCancelled || j.Attempt > 0 || len(j.DependsOn) == 0 {
+		return nil
+	}
+	deps, err := c.store.Get(ctx, c.ns, j.DependsOn)
+	if err != nil {
+		return err
+	}
+	done := map[string]bool{}
+	for _, d := range deps {
+		if d.State == StateCompleted {
+			done[d.ID] = true
+		}
+	}
+	for _, id := range j.DependsOn {
+		if !done[id] {
+			return fmt.Errorf("%w: dependency %s has not completed; retry it first", ErrDependency, id)
+		}
+	}
+	return nil
 }
 
 func (c *Client) Stats(ctx context.Context) ([]QueueStats, error) { return c.store.Stats(ctx, c.ns) }

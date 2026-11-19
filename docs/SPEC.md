@@ -101,7 +101,7 @@ What a handler returns decides what happens to the job next.
 ## Managing jobs (M)
 
 - **M01** `Cancel` ends a job that is not final as `cancelled`; a running job learns it at its next heartbeat (L05). Cancelling a cancelled job changes nothing. Cancelling a completed or dead job is `ErrFinal`.
-- **M02** `Retry` runs a dead, cancelled or expired job again from its first attempt, keeping its error history. Any other state is `ErrNotFinal`.
+- **M02** `Retry` runs a dead, cancelled or expired job again from its first attempt, keeping its error history. Any other state is `ErrNotFinal`. A job cancelled before it ran, because a dependency did not complete, runs again once every dependency is completed; until then `Retry` is `ErrDependency`.
 - **M03** A listing is newest first, filtered by queue, kind, group and state, in pages joined by a cursor: 50 jobs by default, at most 500.
 - **M04** Stats count a namespace's jobs per queue and state.
 - **M05** Every job that reaches a final state records one event. Events are numbered in order within a namespace and read from after a number.
@@ -112,7 +112,7 @@ What a handler returns decides what happens to the job next.
 - **W01** `Wait` returns the job once it is final. Stores that announce finished jobs (Postgres and the Redis family) wake it at once; on others it reads the job again with a backoff of up to 1s.
 - **W02** When the caller's context ends first, `Wait` returns the job as last read and the context's error. Waiting on an unknown job is `ErrNotFound`.
 - **W03** `EnqueueAndWait` enqueues a job and waits for it like `Wait`. A duplicate waits for the job holding its key.
-- **W04** `Worker.Do` enqueues a job and, when the worker has a free slot and the job's limits allow, runs its first attempt at once on the caller's goroutine. Otherwise the job takes the normal path. Either way `Do` returns when the job is final, like `EnqueueAndWait`.
+- **W04** `Worker.Do` enqueues a job and, when the worker has a free slot and the job's limits allow, runs its first attempt at once on the caller's goroutine. Otherwise the job takes the normal path. Either way `Do` returns when the job is final, like `EnqueueAndWait`. Waiting does not hold up the worker's shutdown.
 - **W05** `Worker.Do` needs a running worker that reads from a store, serves the job's queue and has a handler for its kind.
 
 ## Maintenance (T)
@@ -121,17 +121,18 @@ What a handler returns decides what happens to the job next.
 - **T02** A schedule enqueues a job on its cron spec: five fields, or `@every 10m`, `@daily` and the like, in a time zone. Each firing is enqueued once, even with many maintainers running, and the job carries `schedule` and `fire_at` meta. With `overlap: skip`, a firing is dropped while the schedule's previous job has not finished; a dropped firing, or one refused by a full queue or group, is not an error.
 - **T03** The maintainer deletes completed and cancelled jobs after 24h and dead jobs after 7 days, unless the queue sets its own retention, and can archive them first. Only final jobs can be pruned.
 - **T04** Events outlive the jobs they describe and are deleted after their own retention, 24h by default.
-- **T05** With callbacks on, an event is not deleted before its delivery job is made, unless it has waited longer than the undelivered retention (7 days). Those are deleted and logged.
+- **T05** With callbacks on, an event is not deleted before its delivery job is made, unless it has waited longer than the undelivered retention (7 days). Those are deleted and logged. Jobs that finished since the oldest such event are not pruned, so their delivery can still be made.
 - **T06** A job with a deadline, set as a time or as a `ttl` after enqueue, ends `expired` once the deadline passes without it completing, whether blocked, waiting, running or polling. A running job's lease is taken, so its worker's next heartbeat fails, and the attempt's context ends with `ErrDeadline`. A retry or poll that would come after the deadline expires the job at once. A job's `start_timeout` and `timeout` must fit before its deadline; a queue default that does not fit is left out. A retried expired job keeps a deadline that has not passed.
 
 ## Callbacks (H)
 
-- **H01** A job with a callback gets one delivery for its final state. The maintainer turns the event into a delivery job on the reserved `runnel.callbacks` queue, unique per event, so the event is posted once even when it is seen twice.
+- **H01** A job with a callback gets one delivery for its final state. The maintainer turns the event into a delivery job on the reserved `runnel.callbacks` queue, unique per event, so the event is posted once even when it is seen twice. A delivery job that cannot be queued, such as on a full queue, is made again on the next round, with the events after it.
 - **H02** A delivery POSTs `{"event", "delivery", "job"}` with the headers `Runnel-Event`, `Runnel-Delivery` and, when the namespace has a secret, `Runnel-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`.
 - **H03** A 2xx answer completes the delivery. 408, 429 and 5xx retry, after `Retry-After` seconds when given (up to an hour). Any other answer, a redirect included, fails it. A delivery has 10 attempts.
 - **H04** Deliveries connect only to public addresses, checked after DNS on every connection, unless private ones are allowed.
 - **H05** `VerifySignature` and `CallbackReader` accept a delivery signed with any of the given secrets, so secrets can rotate, and refuse a missing, malformed or wrong signature and one signed more than 5 minutes (or the given age) from now, with `ErrSignature`. `CallbackReader` refuses a body over 16 MiB (or its `MaxBody`).
 - **H06** A job whose meta holds `traceparent` or `tracestate` sends them as headers with its callback, so a trace continues to the receiver.
+- **H07** A delivery is signed with the secret of the namespace it runs in. One whose job names another namespace fails without being sent.
 
 ## Clock (K)
 

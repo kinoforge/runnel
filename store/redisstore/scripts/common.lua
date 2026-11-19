@@ -119,6 +119,7 @@ finalize = function(j, now)
       else
         unindex(c)
         c.state = "cancelled"
+        c.pending = "0"
         c.finished_at = s(now)
         c.start_by = "0"
         save(c)
