@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 )
 
 // Do enqueues j and waits for it to finish, as Client.EnqueueAndWait does.
@@ -32,22 +33,15 @@ func (w *Worker) Do(ctx context.Context, j *Job) (*Job, error) {
 	if base == nil {
 		return nil, invalid("worker is not running")
 	}
+	release := sync.OnceFunc(wg.Done)
+	defer release()
 	c := ss.client()
-	id, err := w.startDirect(ctx, ss, c, j, base, freed)
-	wg.Done()
+	res, err := c.EnqueueJobs(ctx, []*Job{j})
 	if err != nil {
 		return nil, err
 	}
-	return c.Wait(ctx, id)
-}
-
-func (w *Worker) startDirect(ctx context.Context, ss *storeSource, c *Client, j *Job, base context.Context, freed chan struct{}) (string, error) {
-	res, err := c.EnqueueJobs(ctx, []*Job{j})
-	if err != nil {
-		return "", err
-	}
 	if res[0].Err != nil {
-		return "", res[0].Err
+		return nil, res[0].Err
 	}
 	if !res[0].Duplicate && base.Err() == nil && w.reserve(1) == 1 {
 		got, err := ss.store.Claim(ctx, ss.ns, ClaimRequest{Queues: []string{j.Queue}, IDs: []string{res[0].ID}, Worker: w.cfg.ID,
@@ -59,11 +53,12 @@ func (w *Worker) startDirect(ctx context.Context, ss *storeSource, c *Client, j 
 		}
 		w.unreserve(1)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if r != nil {
 			w.runOne(base, jctx, r, freed)
 		}
 	}
-	return res[0].ID, nil
+	release()
+	return c.Wait(ctx, res[0].ID)
 }
