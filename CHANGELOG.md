@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.0.4-beta.2] - 2026-11-19
+
 ### Security
 
 - A schedule can no longer target the reserved `runnel.callbacks` queue or `runnel.callback` kind. Before, a namespace admin could make one whose payload named another namespace, and Runnel signed it with that namespace's callback secret. Deliveries are now signed with the secret of the namespace they run in, and one whose job names another namespace fails without being sent.
@@ -152,7 +154,8 @@ First release, for trying Runnel out. The model is settled; the API may still ch
 - Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
 - SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.4-beta.1...HEAD
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.4-beta.2...HEAD
+[0.0.4-beta.2]: https://github.com/kinoforge/runnel/compare/v0.0.4-beta.1...v0.0.4-beta.2
 [0.0.4-beta.1]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.5...v0.0.4-beta.1
 [0.0.3-beta.5]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.4...v0.0.3-beta.5
 [0.0.3-beta.4]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.3...v0.0.3-beta.4
