@@ -96,30 +96,34 @@ func (h *endHub) forward(ctx context.Context, cancel context.CancelFunc, ends <-
 			return
 		case id, ok := <-ends:
 			if !ok {
-				h.mu.Lock()
-				if ctx.Err() == nil {
-					cancel()
-					h.stop, h.ready = nil, false
-					for _, m := range h.subs {
-						for ch := range m {
-							select {
-							case ch <- struct{}{}:
-							default:
-							}
-						}
-					}
-				}
-				h.mu.Unlock()
+				h.closed(ctx, cancel)
 				return
 			}
 			h.mu.Lock()
-			for ch := range h.subs[id] {
-				select {
-				case ch <- struct{}{}:
-				default:
-				}
-			}
+			notify(h.subs[id])
 			h.mu.Unlock()
+		}
+	}
+}
+
+func (h *endHub) closed(ctx context.Context, cancel context.CancelFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	cancel()
+	h.stop, h.ready = nil, false
+	for _, m := range h.subs {
+		notify(m)
+	}
+}
+
+func notify(subs map[chan struct{}]struct{}) {
+	for ch := range subs {
+		select {
+		case ch <- struct{}{}:
+		default:
 		}
 	}
 }

@@ -35,27 +35,9 @@ func (s *Store) Prune(ctx context.Context, ns string, req runnel.PruneRequest) (
 			n = 0
 			return err
 		}
-		ids := make([]string, 0, len(jobs))
-		for _, j := range jobs {
-			res, err := tx.ExecContext(ctx, s.q("DELETE FROM rn_jobs WHERE ns=? AND id=? AND state=? AND version=? AND finished_at>0 AND finished_at<?"),
-				ns, j.ID, string(j.State), j.Version, before)
-			if err != nil {
-				return err
-			}
-			if rows, _ := res.RowsAffected(); rows != 1 {
-				continue
-			}
-			ids = append(ids, j.ID)
-			if req.Archive {
-				full, err := json.Marshal(j)
-				if err != nil {
-					return err
-				}
-				up := s.d.Upsert("rn_archive", []string{"id", "ns", "queue", "state", "finished_at", "data"}, []string{"id"}, []string{"state", "finished_at", "data"})
-				if _, err := tx.ExecContext(ctx, s.q(up), j.ID, ns, j.Queue, string(j.State), runnel.Millis(j.FinishedAt), full); err != nil {
-					return err
-				}
-			}
+		ids, err := s.pruneJobs(ctx, tx, ns, jobs, before, req.Archive)
+		if err != nil {
+			return err
 		}
 		if len(ids) > 0 {
 			in := placeholders(len(ids))
@@ -70,6 +52,37 @@ func (s *Store) Prune(ctx context.Context, ns string, req runnel.PruneRequest) (
 		return nil
 	})
 	return n, err
+}
+
+func (s *Store) pruneJobs(ctx context.Context, tx *txn, ns string, jobs []*runnel.Job, before int64, archive bool) ([]string, error) {
+	ids := make([]string, 0, len(jobs))
+	for _, j := range jobs {
+		res, err := tx.ExecContext(ctx, s.q("DELETE FROM rn_jobs WHERE ns=? AND id=? AND state=? AND version=? AND finished_at>0 AND finished_at<?"),
+			ns, j.ID, string(j.State), j.Version, before)
+		if err != nil {
+			return nil, err
+		}
+		if rows, _ := res.RowsAffected(); rows != 1 {
+			continue
+		}
+		ids = append(ids, j.ID)
+		if archive {
+			if err := s.archive(ctx, tx, ns, j); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return ids, nil
+}
+
+func (s *Store) archive(ctx context.Context, tx *txn, ns string, j *runnel.Job) error {
+	full, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	up := s.d.Upsert("rn_archive", []string{"id", "ns", "queue", "state", "finished_at", "data"}, []string{"id"}, []string{"state", "finished_at", "data"})
+	_, err = tx.ExecContext(ctx, s.q(up), j.ID, ns, j.Queue, string(j.State), runnel.Millis(j.FinishedAt), full)
+	return err
 }
 
 func (s *Store) PruneEvents(ctx context.Context, ns string, req runnel.EventPruneRequest) (int, error) {

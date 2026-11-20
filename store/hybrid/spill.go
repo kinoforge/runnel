@@ -32,43 +32,56 @@ func (s *Store) balance() error {
 	s.waitMu.Lock()
 	defer s.waitMu.Unlock()
 	spaces := s.allSpaces()
-	total := s.hot.Load()
-	if total > s.hotJobs {
-		slices.SortFunc(spaces, func(a, b *space) int { return cmp.Compare(b.hot.Load(), a.hot.Load()) })
-		for _, sp := range spaces {
-			for total > s.hotJobs {
-				n, err := s.spillSome(sp, min(total-s.hotJobs, s.opt.SpillBatch))
-				if err != nil {
-					return err
-				}
-				if n == 0 {
-					break
-				}
-				total -= n
-			}
-			if total <= s.hotJobs {
-				break
-			}
-		}
+	total, err := s.spillDown(spaces, s.hot.Load())
+	if err != nil {
+		return err
 	}
 	for _, sp := range spaces {
 		for _, q := range sp.lowQueues(s.opt.RefillAhead) {
-			for range s.opt.RefillAhead / s.opt.RefillBatch {
-				if total+s.opt.RefillBatch > s.hotJobs {
-					return nil
-				}
-				n, err := s.refill(sp, q)
-				if err != nil {
-					return err
-				}
-				if n == 0 {
-					break
-				}
-				total += int64(n)
+			var full bool
+			if total, full, err = s.refillQueue(sp, q, total); err != nil || full {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+func (s *Store) spillDown(spaces []*space, total int64) (int64, error) {
+	if total <= s.hotJobs {
+		return total, nil
+	}
+	slices.SortFunc(spaces, func(a, b *space) int { return cmp.Compare(b.hot.Load(), a.hot.Load()) })
+	for _, sp := range spaces {
+		for total > s.hotJobs {
+			n, err := s.spillSome(sp, min(total-s.hotJobs, s.opt.SpillBatch))
+			if err != nil {
+				return total, err
+			}
+			if n == 0 {
+				break
+			}
+			total -= n
+		}
+		if total <= s.hotJobs {
+			break
+		}
+	}
+	return total, nil
+}
+
+func (s *Store) refillQueue(sp *space, q string, total int64) (int64, bool, error) {
+	for range s.opt.RefillAhead / s.opt.RefillBatch {
+		if total+s.opt.RefillBatch > s.hotJobs {
+			return total, true, nil
+		}
+		n, err := s.refill(sp, q)
+		if err != nil || n == 0 {
+			return total, false, err
+		}
+		total += int64(n)
+	}
+	return total, false, nil
 }
 
 func (s *Store) makeRoom() error {

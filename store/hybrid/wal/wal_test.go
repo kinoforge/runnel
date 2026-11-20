@@ -19,12 +19,12 @@ func start(t *testing.T, dir string, mode wal.SyncMode) *wal.Log {
 	return l
 }
 
-func records(t *testing.T, dir string, from uint64) []string {
+func records(t *testing.T, dir string) []string {
 	t.Helper()
 	l := start(t, dir, wal.SyncEach)
 	defer l.Close()
 	var out []string
-	if err := l.Replay(from, func(_ uint64, _ int64, rec []byte) error {
+	if err := l.Replay(0, func(_ uint64, _ int64, rec []byte) error {
 		out = append(out, string(rec))
 		return nil
 	}); err != nil {
@@ -60,7 +60,7 @@ func TestGroupCommitKeepsEveryRecord(t *testing.T) {
 			if err := l.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if got := records(t, dir, 0); len(got) != 800 {
+			if got := records(t, dir); len(got) != 800 {
 				t.Fatalf("replayed %d records, want 800", len(got))
 			}
 		})
@@ -92,7 +92,7 @@ func TestRotateAndRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = l.Close()
-	if got := records(t, dir, 0); len(got) != 1 || got[0] != "b" {
+	if got := records(t, dir); len(got) != 1 || got[0] != "b" {
 		t.Fatalf("after remove %v", got)
 	}
 }

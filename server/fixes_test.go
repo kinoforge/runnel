@@ -22,7 +22,7 @@ import (
 	"github.com/kinoforge/runnel/store/sqlite"
 )
 
-func setupWith(t *testing.T, cfg server.Config) (*httptest.Server, runnel.Store) {
+func setupWith(t *testing.T, cfg server.Config) *httptest.Server {
 	t.Helper()
 	s, err := sqlite.Open(filepath.Join(t.TempDir(), "r.db"))
 	if err != nil {
@@ -34,7 +34,7 @@ func setupWith(t *testing.T, cfg server.Config) (*httptest.Server, runnel.Store)
 	cfg.AdminToken = admin
 	srv := httptest.NewServer(server.New(s, cfg))
 	t.Cleanup(srv.Close)
-	return srv, s
+	return srv
 }
 
 func claimOne(t *testing.T, srv *httptest.Server, k, ns string) map[string]any {
@@ -123,7 +123,7 @@ func TestExtendWithoutLeaseUsesTheDefault(t *testing.T) {
 
 func TestFinishRefusesAResultOverTheLimit(t *testing.T) {
 	spec.Rule(t, "S16", "J02")
-	srv, _ := setupWith(t, server.Config{Limits: runnel.Limits{MaxPayload: 1 << 10}})
+	srv := setupWith(t, server.Config{Limits: runnel.Limits{MaxPayload: 1 << 10}})
 	call(t, srv, admin, "PUT", "/v1/namespaces/app", map[string]any{})
 	k := key(t, srv, "app", "admin")
 	call(t, srv, k, "POST", "/v1/ns/app/jobs", map[string]any{"queue": "q", "kind": "k"})
@@ -143,7 +143,7 @@ func jsonNumber(v any) string {
 
 func TestServerCapsReachEveryEnqueue(t *testing.T) {
 	spec.Rule(t, "S16")
-	srv, _ := setupWith(t, server.Config{MaxBatch: 2, MaxDelay: time.Hour})
+	srv := setupWith(t, server.Config{MaxBatch: 2, MaxDelay: time.Hour})
 	call(t, srv, admin, "PUT", "/v1/namespaces/app", map[string]any{})
 	k := key(t, srv, "app", "admin")
 	late := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)

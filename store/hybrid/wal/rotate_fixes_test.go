@@ -40,7 +40,7 @@ func TestAnUnfinishedRotationDoesNotBlockReplay(t *testing.T) {
 	if err := os.WriteFile(tmp, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := records(t, dir, 0); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+	if got := records(t, dir); len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("replay after a crash mid-rotation: %v", got)
 	}
 	if _, err := os.Stat(tmp); !errors.Is(err, os.ErrNotExist) {
@@ -73,7 +73,7 @@ func TestRotateKeepsRecordsInOrder(t *testing.T) {
 	if left, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(left) != 0 {
 		t.Fatalf("rotation left %v", left)
 	}
-	if got := records(t, dir, 0); len(got) != 3 || got[2] != "c" {
+	if got := records(t, dir); len(got) != 3 || got[2] != "c" {
 		t.Fatalf("records after rotation %v", got)
 	}
 }
