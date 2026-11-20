@@ -17,13 +17,15 @@ func (s *Store) Claim(_ context.Context, ns string, req runnel.ClaimRequest) ([]
 	if req.Limit <= 0 || len(req.Queues) == 0 {
 		return nil, nil
 	}
-	if sp := s.space(ns); sp.spilled.Load() && s.cold != nil {
-		if err := s.wake(sp, req); err != nil {
-			return nil, err
-		}
+	if err := s.wake(s.space(ns), req); err != nil {
+		return nil, err
 	}
+	return s.claimAll(ns, req)
+}
+
+func (s *Store) claimAll(ns string, req runnel.ClaimRequest) ([]*runnel.Job, error) {
 	out, held, err := s.claim(ns, req)
-	if err == nil && len(held) > 0 && len(out) < req.Limit {
+	if err == nil && len(out) < req.Limit && (len(held) > 0 || s.asleep(s.space(ns), req)) {
 		out, err = s.claimCold(ns, req, out)
 	}
 	if err != nil {

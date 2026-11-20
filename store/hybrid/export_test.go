@@ -1,6 +1,10 @@
 package hybrid
 
-import "time"
+import (
+	"time"
+
+	"github.com/kinoforge/runnel"
+)
 
 func OpenRetiring(opt Options, age, tick time.Duration) (*Store, error) {
 	opt.RetireAfter, opt.RetireEvery, opt.SpillEvery = age, tick, tick
@@ -33,4 +37,12 @@ func (s *Store) SpillAround(ns string, during func()) (int64, error) {
 	}
 	during()
 	return s.spillEnd(sp, p)
+}
+
+func (s *Store) ClaimAround(ns string, req runnel.ClaimRequest, between func()) ([]*runnel.Job, error) {
+	if err := s.wake(s.space(ns), req); err != nil {
+		return nil, err
+	}
+	between()
+	return s.claimAll(ns, req)
 }

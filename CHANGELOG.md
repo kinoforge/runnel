@@ -22,6 +22,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Hybrid store: a job cancelled or finished while its waiting copy was being moved to disk could come back as waiting and run. Moving jobs to disk and retiring finished ones now take turns.
 - Hybrid store: a finished job kept on disk and then retried could come back from a crash or a backup as both waiting and finished. A spilled waiting job cancelled just before a crash no longer leaves a stale entry.
 - Hybrid store: a crash while the log started a new segment could keep the store from opening again. A disk read error while opening is reported instead of being taken for a cut record, which dropped acknowledged changes.
+- Hybrid store: a claim could miss due delayed jobs, or jobs it named by ID, when a spill moved them to disk while the claim ran. It returned fewer jobs than were ready.
 - Hybrid store: a checkpoint during a spill could stop the store with `ErrBroken`. A failed write to the disk store after the log stops the store instead of going on with the two out of step.
 - Hybrid store: due polling jobs can be claimed by id, as on the other stores. Repeated ids in one claim no longer corrupt counts on disk, a queue at its limit no longer holds up the other queues of a claim, and a flow step whose unique key is held by a job on disk waits on that job.
 - SQL stores: a job enqueued while the holder of its unique key finished could be stored without its key, so duplicates got in. Pruning could delete a job that was retried at the same moment.

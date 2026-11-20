@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kinoforge/runnel"
+	"github.com/kinoforge/runnel/internal/spec"
 	"github.com/kinoforge/runnel/store/hybrid"
 )
 
@@ -166,5 +167,43 @@ func TestSpillKeepsAParentThatGainsAKid(t *testing.T) {
 	}
 	if j, err := c.Get(ctx, kid.ID); err != nil || j.State != runnel.StateCancelled {
 		t.Fatalf("kid of an expired parent %+v %v", j, err)
+	}
+}
+
+func TestClaimFindsJobsSpiltWhileItRuns(t *testing.T) {
+	spec.Rule(t, "C01")
+	later := time.Now().Add(time.Hour)
+	for name, delayed := range map[string]bool{"delayed jobs now due": true, "jobs claimed by id": false} {
+		t.Run(name, func(t *testing.T) {
+			s, err := hybrid.OpenSpilling(hybrid.Options{Dir: t.TempDir()}, 1, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = s.Close() }()
+			var opts []runnel.Option
+			if delayed {
+				opts = append(opts, runnel.At(later))
+			}
+			req := runnel.ClaimRequest{Queues: []string{"q"}, Worker: "w", Limit: 10, Lease: time.Hour, Now: later}
+			for range 3 {
+				res, err := runnel.NewClient(s, ns).Enqueue(context.Background(), "q", "k", nil, opts...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !delayed {
+					req.IDs = append(req.IDs, res.ID)
+				}
+			}
+			var spilt int64
+			got, err := s.ClaimAround(ns, req, func() {
+				var serr error
+				if spilt, serr = s.SpillAround(ns, func() {}); serr != nil {
+					t.Error(serr)
+				}
+			})
+			if err != nil || spilt != 3 || len(got) != 3 {
+				t.Fatalf("claimed %d of the %d jobs spilt while the claim ran: %v", len(got), spilt, err)
+			}
+		})
 	}
 }

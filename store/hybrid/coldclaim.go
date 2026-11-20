@@ -12,6 +12,9 @@ func (s *Store) claimCold(ns string, req runnel.ClaimRequest, out []draft) ([]dr
 	sp := s.space(ns)
 	s.waitMu.Lock()
 	defer s.waitMu.Unlock()
+	if err := s.wakeLocked(sp, req); err != nil {
+		return nil, err
+	}
 	for range s.opt.MaxRefills {
 		r := req
 		r.Limit -= len(out)
@@ -32,14 +35,29 @@ func (s *Store) claimCold(ns string, req runnel.ClaimRequest, out []draft) ([]dr
 	return out, nil
 }
 
+func (s *Store) asleep(sp *space, req runnel.ClaimRequest) bool {
+	if s.cold == nil || !sp.spilled.Load() {
+		return false
+	}
+	due, ids := sp.toWake(req, ms(req.Now))
+	return len(due) > 0 || len(ids) > 0
+}
+
 func (s *Store) wake(sp *space, req runnel.ClaimRequest) error {
+	if !s.asleep(sp, req) {
+		return nil
+	}
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
+	return s.wakeLocked(sp, req)
+}
+
+func (s *Store) wakeLocked(sp *space, req runnel.ClaimRequest) error {
 	now := ms(req.Now)
 	due, ids := sp.toWake(req, now)
 	if len(due) == 0 && len(ids) == 0 {
 		return nil
 	}
-	s.waitMu.Lock()
-	defer s.waitMu.Unlock()
 	for _, q := range due {
 		if err := s.wakeQueue(sp, q, now); err != nil {
 			return err
