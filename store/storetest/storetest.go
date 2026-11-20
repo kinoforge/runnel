@@ -162,6 +162,17 @@ func Run(t *testing.T, open Opener) {
 		"StoryCancelExport":          testStoryCancelExport,
 		"StoryDeadlines":             testStoryDeadlines,
 		"StorySafeReenqueue":         testStorySafeReenqueue,
+		"CallbackLargeResult":        testCallbackLargeResult,
+		"CronFarBehind":              testCronFarBehind,
+		"RetryBlockedEnded":          testRetryBlockedEnded,
+		"PruneSkipsRetried":          testPruneSkipsRetried,
+		"UniqueHolderEnds":           testUniqueHolderEnds,
+		"ClaimByIDDue":               testClaimByIDDue,
+		"PausedPoolSwap":             testPausedPoolSwap,
+		"DelayedBlockedStartBy":      testDelayedBlockedStartBy,
+		"PruneByState":               testPruneByState,
+		"EnqueueTxReadsSettings":     testEnqueueTxReadsSettings,
+		"FlowRetry":                  testFlowRetry,
 	}
 	for _, n := range slices.Sorted(maps.Keys(tests)) {
 		t.Run(n, func(t *testing.T) { tests[n](t, open) })

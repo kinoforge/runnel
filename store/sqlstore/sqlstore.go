@@ -58,13 +58,7 @@ func New(db *sql.DB, d Dialect) *Store {
 	return &Store{db: db, d: d, cfgs: map[string]*nsConfig{}, wakes: map[string]bool{}, ends: map[string][]string{}}
 }
 
-func (s *Store) configs(ctx context.Context, q querier, ns string) (*nsConfig, error) {
-	s.mu.Lock()
-	c := s.cfgs[ns]
-	s.mu.Unlock()
-	if c != nil && time.Since(c.at) < configTTL {
-		return c, nil
-	}
+func (s *Store) loadConfigs(ctx context.Context, q querier, ns string) (*nsConfig, error) {
 	queues, err := s.queueConfigs(ctx, q, ns)
 	if err != nil {
 		return nil, err
@@ -73,7 +67,20 @@ func (s *Store) configs(ctx context.Context, q querier, ns string) (*nsConfig, e
 	if err != nil {
 		return nil, err
 	}
-	c = &nsConfig{queues: queues, pools: pools, at: time.Now()}
+	return &nsConfig{queues: queues, pools: pools, at: time.Now()}, nil
+}
+
+func (s *Store) configs(ctx context.Context, q querier, ns string) (*nsConfig, error) {
+	s.mu.Lock()
+	c := s.cfgs[ns]
+	s.mu.Unlock()
+	if c != nil && time.Since(c.at) < configTTL {
+		return c, nil
+	}
+	c, err := s.loadConfigs(ctx, q, ns)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	s.cfgs[ns] = c
 	s.mu.Unlock()

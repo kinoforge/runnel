@@ -32,6 +32,9 @@ type workSession struct {
 }
 
 func (h *workerRPC) Work(ctx context.Context, st *connect.BidiStream[pb.WorkRequest, pb.WorkResponse]) error {
+	if err := h.s.rpcAuth(ctx); err != nil {
+		return err
+	}
 	first, err := st.Receive()
 	if err != nil {
 		return err
@@ -44,15 +47,18 @@ func (h *workerRPC) Work(ctx context.Context, st *connect.BidiStream[pb.WorkRequ
 	if err != nil {
 		return err
 	}
-	w := &workSession{h: h, st: st, ns: start.GetNamespace(), worker: worker, queues: start.GetQueues(), lease: fromDur(start.GetLease()).D()}
+	if err := h.s.checkClaimQueues(start.GetQueues()); err != nil {
+		return h.s.rpcErr(err)
+	}
+	w := &workSession{h: h, st: st, ns: start.GetNamespace(), worker: worker, queues: start.GetQueues(), lease: h.s.clampLease(fromDur(start.GetLease()).D())}
 	return w.run(ctx)
 }
 
 func (w *workSession) run(ctx context.Context) error {
 	in := make(chan *pb.WorkRequest)
 	gone := make(chan error, 1)
-	go w.pump(ctx, in, gone)
 	cctx, cancel := context.WithCancel(ctx)
+	go w.pump(cctx, in, gone)
 	results := make(chan claimed, 1)
 	claiming := false
 	defer func() {
@@ -130,7 +136,7 @@ func (w *workSession) handle(ctx context.Context, m *pb.WorkRequest) error {
 		done := &pb.WorkFinished{Id: f.GetId()}
 		if err := s.finishJob(ctx, finishArgs{ns: w.ns, worker: w.worker, id: f.GetId(), version: f.GetVersion(), outcome: fromOutcome(f.GetOutcome()),
 			payload: raw(f.GetPayload()), meta: f.GetMeta()}); err != nil {
-			done.Error = err.Error()
+			done.Error = s.rpcErrText(err)
 		}
 		return w.send(&pb.WorkResponse{Msg: &pb.WorkResponse_Finished{Finished: done}})
 	default:

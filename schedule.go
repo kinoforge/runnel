@@ -53,8 +53,17 @@ func (s Schedule) Validate() error {
 	if s.Queue == CallbackQueue || s.Kind == CallbackKind {
 		return invalid("schedule: %s is reserved", CallbackQueue)
 	}
+	if s.MaxAttempts < 0 {
+		return invalid("max_attempts must not be negative")
+	}
+	meta := maps.Clone(s.Meta)
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	meta["schedule"] = s.Name
+	meta["fire_at"] = time.RFC3339
 	probe := &Job{Queue: s.Queue, Kind: s.Kind, Payload: s.Payload, Priority: s.Priority, Group: s.Group,
-		Pool: s.Pool, MaxAttempts: max(s.MaxAttempts, 1), Timeout: s.Timeout, CallbackURL: s.CallbackURL, Meta: s.Meta}
+		Pool: s.Pool, MaxAttempts: max(s.MaxAttempts, 1), Timeout: s.Timeout, CallbackURL: s.CallbackURL, Meta: meta}
 	return probe.validate(DefaultLimits)
 }
 
@@ -112,13 +121,7 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 		if fire.IsZero() || fire.After(now) {
 			continue
 		}
-		for range maxCatchUp {
-			n := sp.Next(fire)
-			if n.IsZero() || n.After(now) {
-				break
-			}
-			fire = n
-		}
+		fire = lastTick(sp, fire, now)
 		won, err := m.store.SwapCursor(ctx, ns, cursor, last, Millis(fire))
 		if err != nil {
 			return err
@@ -132,8 +135,12 @@ func (m *Maintainer) schedules(ctx context.Context, ns string, now time.Time) er
 		if s.Overlap == OverlapSkip {
 			j.UniqueKey, j.UniqueFor = "cron:"+name, 0
 		}
-		j.Meta = map[string]string{"schedule": name, "fire_at": fire.UTC().Format(time.RFC3339)}
-		maps.Copy(j.Meta, s.Meta)
+		j.Meta = maps.Clone(s.Meta)
+		if j.Meta == nil {
+			j.Meta = map[string]string{}
+		}
+		j.Meta["schedule"] = name
+		j.Meta["fire_at"] = fire.UTC().Format(time.RFC3339)
 		m.fire(ctx, ns, name, j)
 	}
 	return nil
@@ -154,5 +161,23 @@ func (m *Maintainer) fire(ctx context.Context, ns, name string, j *Job) {
 		m.log.Debug("runnel: schedule firing skipped, its queue is full", "namespace", ns, "schedule", name, "err", err)
 	default:
 		m.log.Error("runnel: scheduled job rejected", "namespace", ns, "schedule", name, "err", err)
+	}
+}
+
+func lastTick(sp cron.Schedule, fire, now time.Time) time.Time {
+	for {
+		for range maxCatchUp {
+			n := sp.Next(fire)
+			if n.IsZero() || n.After(now) {
+				return fire
+			}
+			fire = n
+		}
+		for d := time.Second; d < now.Sub(fire); d *= 2 {
+			if t := sp.Next(now.Add(-d)); !t.IsZero() && !t.After(now) && t.After(fire) {
+				fire = t
+				break
+			}
+		}
 	}
 }

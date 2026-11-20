@@ -102,13 +102,30 @@ type Server struct {
 
 	patterns []string
 
-	reload  sync.Mutex
-	mu      sync.Mutex
-	keys    map[string]keyEntry
-	loaded  time.Time
-	clients map[string]*runnel.Client
-	sources map[string]runnel.Source
-	hubs    map[string]*hub
+	reload    sync.Mutex
+	keyMu     sync.Mutex
+	closeOnce sync.Once
+	closed    atomic.Bool
+	mu        sync.Mutex
+	keys      map[string]keyEntry
+	loaded    time.Time
+	clients   map[string]*runnel.Client
+	sources   map[string]runnel.Source
+	hubs      map[string]*hub
+}
+
+// Close stops background subscriptions held by the server.
+func (s *Server) Close() {
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		s.mu.Lock()
+		hubs := s.hubs
+		s.hubs = map[string]*hub{}
+		s.mu.Unlock()
+		for _, h := range hubs {
+			h.stop()
+		}
+	})
 }
 
 func New(store runnel.Store, cfg Config) *Server {

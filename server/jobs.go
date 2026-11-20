@@ -45,6 +45,10 @@ func (s *Server) toJob(req JobRequest) (*runnel.Job, error) {
 	if req.Delay < 0 || req.Delay.D() > s.cfg.MaxDelay || req.TTL < 0 || req.TTL.D() > s.cfg.MaxDelay {
 		return nil, fmt.Errorf("%w: delay and ttl must be between 0 and %s", runnel.ErrInvalid, s.cfg.MaxDelay)
 	}
+	maxAt := s.clock.Now().Add(s.cfg.MaxDelay)
+	if (!req.RunAt.IsZero() && req.RunAt.After(maxAt)) || (!req.Deadline.IsZero() && req.Deadline.After(maxAt)) {
+		return nil, fmt.Errorf("%w: run_at and deadline must be within %s", runnel.ErrInvalid, s.cfg.MaxDelay)
+	}
 	if req.TTL > 0 && !req.Deadline.IsZero() {
 		return nil, fmt.Errorf("%w: set deadline or ttl, not both", runnel.ErrInvalid)
 	}
@@ -150,7 +154,9 @@ func (s *Server) answerWhenDone(w http.ResponseWriter, r *http.Request, ns strin
 	if r.Context().Err() != nil {
 		return r.Context().Err()
 	}
-	w.Header().Set("Preference-Applied", "wait="+strconv.Itoa(int(wait/time.Second)))
+	if secs := int(wait / time.Second); secs > 0 {
+		w.Header().Set("Preference-Applied", "wait="+strconv.Itoa(secs))
+	}
 	if err == nil {
 		writeJSON(w, http.StatusOK, j)
 		return nil
@@ -182,6 +188,9 @@ func (s *Server) enqueueFlow(w http.ResponseWriter, r *http.Request, _ principal
 	}
 	if err := decode(r, &body); err != nil {
 		return err
+	}
+	if len(body.Steps) == 0 || len(body.Steps) > s.cfg.MaxBatch {
+		return fmt.Errorf("%w: send 1 to %d steps", runnel.ErrInvalid, s.cfg.MaxBatch)
 	}
 	f := runnel.NewFlow()
 	for _, st := range body.Steps {
@@ -238,7 +247,9 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request, _ principal) err
 		if latest != nil {
 			j = latest
 		}
-		w.Header().Set("Preference-Applied", "wait="+strconv.Itoa(int(wait/time.Second)))
+		if secs := int(wait / time.Second); secs > 0 {
+			w.Header().Set("Preference-Applied", "wait="+strconv.Itoa(secs))
+		}
 	}
 	writeJSON(w, http.StatusOK, j)
 	return nil

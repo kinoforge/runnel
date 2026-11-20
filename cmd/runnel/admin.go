@@ -95,7 +95,13 @@ func keys(ctx context.Context, args []string) error {
 		if *expires > 0 {
 			exp = time.Now().UTC().Add(*expires)
 		}
-		token, k, err := runnel.NewAPIKey(pos[0], *name, strings.Split(*roles, ","), exp)
+		var roleList []string
+		for r := range strings.SplitSeq(*roles, ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				roleList = append(roleList, r)
+			}
+		}
+		token, k, err := runnel.NewAPIKey(pos[0], *name, roleList, exp)
 		if err != nil {
 			return err
 		}

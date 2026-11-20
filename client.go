@@ -54,6 +54,18 @@ func (c *Client) queueConfig(ctx context.Context, name string) (QueueConfig, err
 	return c.queueConfigFrom(name, func() (map[string][]byte, error) { return c.store.Configs(ctx, c.ns, ConfigQueue) })
 }
 
+func parseQueueConfigs(raw map[string][]byte) (map[string]QueueConfig, error) {
+	q := make(map[string]QueueConfig, len(raw))
+	for n, b := range raw {
+		var v QueueConfig
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, fmt.Errorf("queue config %q: %w", n, err)
+		}
+		q[n] = v
+	}
+	return q, nil
+}
+
 func (c *Client) queueConfigFrom(name string, load func() (map[string][]byte, error)) (QueueConfig, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -62,13 +74,9 @@ func (c *Client) queueConfigFrom(name string, load func() (map[string][]byte, er
 		if err != nil {
 			return QueueConfig{}, err
 		}
-		q := make(map[string]QueueConfig, len(raw))
-		for n, b := range raw {
-			var v QueueConfig
-			if err := json.Unmarshal(b, &v); err != nil {
-				return QueueConfig{}, fmt.Errorf("queue config %q: %w", n, err)
-			}
-			q[n] = v
+		q, err := parseQueueConfigs(raw)
+		if err != nil {
+			return QueueConfig{}, err
 		}
 		c.queues, c.loaded = q, time.Now()
 	}
@@ -85,17 +93,20 @@ func (c *Client) forget() {
 	c.mu.Unlock()
 }
 
-func (c *Client) prepare(ctx context.Context, j *Job, now time.Time) error {
+func (c *Client) prepareWith(j *Job, now time.Time, cfgOf func(string) (QueueConfig, error)) error {
 	if !ValidNamespace(c.ns) {
 		return invalid("namespace %q is not valid", c.ns)
 	}
-	cfg, err := c.queueConfig(ctx, j.Queue)
+	cfg, err := cfgOf(j.Queue)
 	if err != nil {
 		return err
 	}
 	j.Namespace = c.ns
 	if j.Deadline.IsZero() && j.ttl == 0 {
 		j.ttl = cfg.TTL.D()
+	}
+	if j.delay < 0 || j.ttl < 0 {
+		return invalid("durations must not be negative")
 	}
 	j.settle(now)
 	if j.MaxAttempts == 0 {
@@ -152,9 +163,13 @@ func (c *Client) EnqueueJobs(ctx context.Context, jobs []*Job) ([]Inserted, erro
 }
 
 func (c *Client) prepareAll(ctx context.Context, jobs []*Job) (time.Time, error) {
+	return c.prepareBatch(jobs, func(name string) (QueueConfig, error) { return c.queueConfig(ctx, name) })
+}
+
+func (c *Client) prepareBatch(jobs []*Job, cfgOf func(string) (QueueConfig, error)) (time.Time, error) {
 	now := c.now().Truncate(time.Millisecond)
 	for _, j := range jobs {
-		if err := c.prepare(ctx, j, now); err != nil {
+		if err := c.prepareWith(j, now, cfgOf); err != nil {
 			return time.Time{}, err
 		}
 	}
@@ -172,10 +187,15 @@ func (c *Client) EnqueueTx(ctx context.Context, tx *sql.Tx, jobs ...*Job) ([]Ins
 	if len(jobs) == 0 || len(jobs) > maxBatch {
 		return nil, invalid("send 1 to %d jobs", maxBatch)
 	}
-	if _, err := c.queueConfigFrom("", func() (map[string][]byte, error) { return ti.ConfigsTx(ctx, tx, c.ns, ConfigQueue) }); err != nil {
+	raw, err := ti.ConfigsTx(ctx, tx, c.ns, ConfigQueue)
+	if err != nil {
 		return nil, err
 	}
-	now, err := c.prepareAll(ctx, jobs)
+	queues, err := parseQueueConfigs(raw)
+	if err != nil {
+		return nil, err
+	}
+	now, err := c.prepareBatch(jobs, func(name string) (QueueConfig, error) { return queues[name], nil })
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +265,7 @@ func (c *Client) Cancel(ctx context.Context, id string) (*Job, error) {
 			return nil, ErrFinal
 		}
 		n := j.Clone()
-		n.State, n.FinishedAt, n.UpdatedAt, n.Worker, n.LeaseUntil, n.StartBy = StateCancelled, now, now, "", time.Time{}, time.Time{}
+		n.State, n.Pending, n.FinishedAt, n.UpdatedAt, n.Worker, n.LeaseUntil, n.StartBy = StateCancelled, 0, now, now, "", time.Time{}, time.Time{}
 		return n, nil
 	})
 }
@@ -260,7 +280,7 @@ func (c *Client) Retry(ctx context.Context, id string) (*Job, error) {
 			return nil, err
 		}
 		n := j.Clone()
-		n.State, n.Attempt, n.RunAt, n.WaitingSince, n.UpdatedAt = StateWaiting, 0, now, now, now
+		n.State, n.Pending, n.Attempt, n.RunAt, n.WaitingSince, n.UpdatedAt = StateWaiting, 0, 0, now, now, now
 		n.FinishedAt, n.Result, n.Handle = time.Time{}, nil, ""
 		if n.late(now) {
 			n.Deadline = time.Time{}
@@ -271,26 +291,26 @@ func (c *Client) Retry(ctx context.Context, id string) (*Job, error) {
 }
 
 func (c *Client) dependenciesDone(ctx context.Context, j *Job) error {
-	if j.Pending > 0 {
-		return ErrDependency
-	}
-	if j.State != StateCancelled || j.Attempt > 0 || len(j.DependsOn) == 0 {
+	if (j.State == StateCancelled || j.State == StateExpired) && j.Attempt == 0 && len(j.DependsOn) > 0 {
+		deps, err := c.store.Get(ctx, c.ns, j.DependsOn)
+		if err != nil {
+			return err
+		}
+		done := map[string]bool{}
+		for _, d := range deps {
+			if d.State == StateCompleted {
+				done[d.ID] = true
+			}
+		}
+		for _, id := range j.DependsOn {
+			if !done[id] {
+				return fmt.Errorf("%w: dependency %s has not completed; retry it first", ErrDependency, id)
+			}
+		}
 		return nil
 	}
-	deps, err := c.store.Get(ctx, c.ns, j.DependsOn)
-	if err != nil {
-		return err
-	}
-	done := map[string]bool{}
-	for _, d := range deps {
-		if d.State == StateCompleted {
-			done[d.ID] = true
-		}
-	}
-	for _, id := range j.DependsOn {
-		if !done[id] {
-			return fmt.Errorf("%w: dependency %s has not completed; retry it first", ErrDependency, id)
-		}
+	if j.Pending > 0 {
+		return ErrDependency
 	}
 	return nil
 }

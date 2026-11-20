@@ -235,7 +235,7 @@ func (r *replayer) op(d *dec, sp *space) error {
 		}
 		if d.err == nil {
 			sp.setJob(h)
-			if !had && !h.final() {
+			if !h.final() && (!had || old.final()) {
 				return r.uncold(sp, h.id)
 			}
 		}

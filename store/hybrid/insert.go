@@ -63,11 +63,19 @@ func (s *Store) coldKnown(ns string, jobs []*runnel.Job) (map[uid]uint8, uint64,
 		if !ok || !sp.mayBeCold(id) {
 			return nil
 		}
+		if _, done := known[id]; done {
+			return nil
+		}
 		j, found, err := s.cold.Meta(ns, cold.ID(id))
+		if err != nil {
+			return err
+		}
 		if found {
 			known[id] = j.State
+		} else {
+			known[id] = 0
 		}
-		return err
+		return nil
 	}
 	for _, j := range jobs {
 		if err := look(j.ID); err != nil {
@@ -88,8 +96,9 @@ func (in *inserter) coldState(id uid) (uint8, bool) {
 		return 0, false
 	}
 	if sp.retired.Load() == in.gen {
-		st, ok := in.known[id]
-		return st, ok
+		if st, checked := in.known[id]; checked {
+			return st, st != 0
+		}
 	}
 	return in.lookup(id)
 }

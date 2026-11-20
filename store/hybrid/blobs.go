@@ -21,8 +21,12 @@ type files struct {
 
 func (fs *files) read(r ref) ([]byte, error) {
 	b := make([]byte, r.n)
-	if _, err := fs.readAt(r.file, r.off, b); err != nil {
+	n, err := fs.readAt(r.file, r.off, b)
+	if err != nil {
 		return nil, err
+	}
+	if n < len(b) {
+		return nil, io.ErrUnexpectedEOF
 	}
 	return b, nil
 }

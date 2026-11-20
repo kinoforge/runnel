@@ -108,6 +108,12 @@ func TestRejects(t *testing.T) {
 		"ca, no cert":      {yaml: "server:\n  tls:\n    client_ca: ca.pem\n", want: "client_ca needs"},
 		"names, no ca":     {env: map[string]string{"RUNNEL_SERVER_TLS_CLIENT_NAMES": "dash"}, want: "need server.tls.client_ca"},
 		"old tls":          {yaml: "server:\n  tls:\n    min_version: \"1.1\"\n", want: "min_version"},
+		"long token":       {env: map[string]string{"RUNNEL_ADMIN_TOKEN": strings.Repeat("t", 513)}, want: "admin token"},
+		"min over max":     {yaml: "server:\n  min_lease: 2m\n  max_lease: 1m\n", want: "min_lease"},
+		"default too low":  {yaml: "server:\n  min_lease: 10s\n  default_lease: 5s\n", want: "default_lease"},
+		"default too high": {yaml: "server:\n  max_lease: 1m\n  default_lease: 2m\n", want: "default_lease"},
+		"empty cert name":  {yaml: "server:\n  tls:\n    cert: a.pem\n    key: a.key\n    client_ca: ca.pem\n    client_names: [dash, \" \"]\n", want: "empty names"},
+		"negative hooks":   {yaml: "callbacks:\n  max_payload: -1\n", want: "callbacks.max_payload"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

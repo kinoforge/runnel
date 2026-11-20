@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -62,8 +63,11 @@ func (q QueueConfig) Validate() error {
 	if q.MaxRunning < 0 || q.GroupMaxRunning < 0 || q.GroupMaxQueued < 0 || q.MaxQueued < 0 || q.Burst < 0 || q.GroupBurst < 0 {
 		return invalid("limits must not be negative")
 	}
-	if q.Rate < 0 || q.GroupRate < 0 || q.Rate > 1e6 || q.GroupRate > 1e6 {
+	if math.IsNaN(q.Rate) || math.IsInf(q.Rate, 0) || math.IsNaN(q.GroupRate) || math.IsInf(q.GroupRate, 0) || q.Rate < 0 || q.GroupRate < 0 || q.Rate > 1e6 || q.GroupRate > 1e6 {
 		return invalid("rates must be between 0 and 1e6 per second")
+	}
+	if err := q.Backoff.Validate(); err != nil {
+		return err
 	}
 	if q.MaxAttempts < 0 || q.MaxAttempts > maxAttemptsLimit {
 		return invalid("max_attempts must be between 0 and %d", maxAttemptsLimit)
@@ -84,7 +88,7 @@ func (p PoolConfig) Validate() error {
 	if p.Slots < 0 || p.GroupSlots < 0 || p.Burst < 0 {
 		return invalid("limits must not be negative")
 	}
-	if p.Rate < 0 || p.Rate > 1e6 {
+	if math.IsNaN(p.Rate) || math.IsInf(p.Rate, 0) || p.Rate < 0 || p.Rate > 1e6 {
 		return invalid("rate must be between 0 and 1e6 per second")
 	}
 	return nil

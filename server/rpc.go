@@ -36,13 +36,30 @@ func (s *Server) mountRPC() {
 func (s *Server) withCaller(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := s.authenticate(r)
-		if r.URL.Path == runnelv1connect.WorkerServiceWorkProcedure {
+		if ok && r.URL.Path == runnelv1connect.WorkerServiceWorkProcedure {
 			rc := http.NewResponseController(w)
 			_ = rc.SetReadDeadline(time.Time{})
 			_ = rc.SetWriteDeadline(time.Time{})
 		}
 		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, rpcCaller{p: p, ok: ok})))
 	})
+}
+
+func (s *Server) rpcAuth(ctx context.Context) error {
+	c, _ := ctx.Value(principalKey{}).(rpcCaller)
+	if !c.ok {
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("missing or invalid credentials"))
+	}
+	return nil
+}
+
+func (s *Server) rpcErrText(err error) string {
+	mapped := s.rpcErr(err)
+	var ce *connect.Error
+	if errors.As(mapped, &ce) {
+		return ce.Message()
+	}
+	return mapped.Error()
 }
 
 func (s *Server) allow(ctx context.Context, ns, role string) (principal, error) {

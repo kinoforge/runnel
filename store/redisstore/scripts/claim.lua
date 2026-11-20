@@ -3,13 +3,37 @@ local lease = tonumber(ARGV[2])
 local worker = ARGV[3]
 local limit = tonumber(ARGV[4])
 local scan = tonumber(ARGV[5])
-local queues = cjson.decode(ARGV[6])
-local only = cjson.decode(ARGV[7])
+local raw_queues = cjson.decode(ARGV[6])
+local queues, seenq = {}, {}
+for _, q in ipairs(raw_queues) do
+  if not seenq[q] then
+    seenq[q] = true
+    queues[#queues + 1] = q
+  end
+end
+local raw_only = cjson.decode(ARGV[7])
+local only, only_seen = {}, {}
+for _, id in ipairs(raw_only) do
+  if not only_seen[id] then
+    only_seen[id] = true
+    only[#only + 1] = id
+  end
+end
 local out = {}
 for _, q in ipairs(queues) do
-  if #out >= limit or #only > 0 then break end
-  local due = redis.call("ZRANGEBYSCORE", k("poll:" .. q), "-inf", s(now), "LIMIT", 0, s(limit - #out))
+  if #out >= limit then break end
+  local due
+  if #only > 0 then
+    due = {}
+    for _, id in ipairs(only) do
+      local sc = redis.call("ZSCORE", k("poll:" .. q), id)
+      if sc and tonumber(sc) <= now then due[#due + 1] = id end
+    end
+  else
+    due = redis.call("ZRANGEBYSCORE", k("poll:" .. q), "-inf", s(now), "LIMIT", 0, s(limit - #out))
+  end
   for _, id in ipairs(due) do
+    if #out >= limit then break end
     local j = load(id)
     if j then
       unindex(j)
@@ -35,13 +59,26 @@ local qcfg, rcfg = {}, {}
 local open = {}
 for _, q in ipairs(queues) do
   qcfg[q] = cfg("queue", q)
-  if not qcfg[q].paused and #only == 0 then
-    local due = redis.call("ZRANGEBYSCORE", k("sched:" .. q), "-inf", s(now), "LIMIT", 0, 1000)
-    for _, id in ipairs(due) do
-      local v = redis.call("HMGET", k("j:" .. id), "priority", "run_at")
-      redis.call("ZREM", k("sched:" .. q), id)
-      if v[1] then
-        redis.call("ZADD", k("ready:" .. q), s(ready_score({priority = v[1], run_at = v[2]})), id)
+  if not qcfg[q].paused then
+    if #only == 0 then
+      local due = redis.call("ZRANGEBYSCORE", k("sched:" .. q), "-inf", s(now), "LIMIT", 0, 1000)
+      for _, id in ipairs(due) do
+        local v = redis.call("HMGET", k("j:" .. id), "priority", "run_at")
+        redis.call("ZREM", k("sched:" .. q), id)
+        if v[1] then
+          redis.call("ZADD", k("ready:" .. q), s(ready_score({priority = v[1], run_at = v[2]})), id)
+        end
+      end
+    else
+      for _, id in ipairs(only) do
+        local sc = redis.call("ZSCORE", k("sched:" .. q), id)
+        if sc and tonumber(sc) <= now then
+          local v = redis.call("HMGET", k("j:" .. id), "priority", "run_at")
+          redis.call("ZREM", k("sched:" .. q), id)
+          if v[1] then
+            redis.call("ZADD", k("ready:" .. q), s(ready_score({priority = v[1], run_at = v[2]})), id)
+          end
+        end
       end
     end
   end
@@ -76,7 +113,12 @@ local function verdict(j)
     fullqt[j.queue .. "|" .. j.group] = true; return "skip"
   end
   if j.pool ~= "" then
-    if rcfg[j.pool] == nil then rcfg[j.pool] = cfg("pool", j.pool) end
+    if rcfg[j.pool] == nil then
+      local p = cfg("pool", j.pool)
+      local pm = redis.call("HGET", k("cfg:pool_pause"), j.pool)
+      if pm then p.paused_until_ms = tonumber(pm) end
+      rcfg[j.pool] = p
+    end
     local p = rcfg[j.pool]
     if p.paused or now < n(p.paused_until_ms) then fullr[j.pool] = true; return "skip" end
     if n(p.slots) > 0 and act("r|" .. j.pool) >= n(p.slots) then fullr[j.pool] = true; return "skip" end

@@ -61,12 +61,15 @@ func (s *Store) List(ctx context.Context, ns string, q runnel.Query) ([]*runnel.
 	}
 	var out []*runnel.Job
 	chunk := int64(max(q.Limit*listChunkFactor, minListChunk))
+	lastID := ""
+	more := false
 	for range maxListRounds {
 		ids, err := s.rdb.ZRevRangeByLex(ctx, key, &redis.ZRangeBy{Max: maxLex, Min: "-", Count: chunk}).Result()
 		if err != nil {
 			return nil, "", err
 		}
 		if len(ids) == 0 {
+			more = false
 			break
 		}
 		jobs, err := s.Get(ctx, ns, ids)
@@ -82,10 +85,16 @@ func (s *Store) List(ctx context.Context, ns string, q runnel.Query) ([]*runnel.
 				}
 			}
 		}
-		maxLex = "(" + ids[len(ids)-1]
+		lastID = ids[len(ids)-1]
+		maxLex = "(" + lastID
 		if int64(len(ids)) < chunk {
+			more = false
 			break
 		}
+		more = true
+	}
+	if more {
+		return out, lastID, nil
 	}
 	return out, "", nil
 }

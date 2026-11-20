@@ -84,6 +84,9 @@ func (j *Job) validateSettings(l Limits) error {
 	if j.Timeout < 0 || j.StartTimeout < 0 || j.UniqueFor < 0 {
 		return invalid("durations must not be negative")
 	}
+	if err := j.Backoff.Validate(); err != nil {
+		return err
+	}
 	return j.validateDeadline()
 }
 

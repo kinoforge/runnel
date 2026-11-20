@@ -73,8 +73,10 @@ func (sp *space) toWake(req runnel.ClaimRequest, now int64) ([]string, []uid) {
 		}
 	}
 	var ids []uid
+	seen := make(map[uid]bool, len(req.IDs))
 	for _, raw := range req.IDs {
-		if id, ok := parseID(raw); ok && sp.mayBeCold(id) {
+		if id, ok := parseID(raw); ok && !seen[id] && sp.mayBeCold(id) {
+			seen[id] = true
 			if _, in := sp.get(id); !in {
 				ids = append(ids, id)
 			}
@@ -86,13 +88,17 @@ func (sp *space) toWake(req runnel.ClaimRequest, now int64) ([]string, []uid) {
 func (s *Store) wakeQueue(sp *space, q string, now int64) error {
 	sp.mu.Lock()
 	v := sp.syms.id(q)
-	h := sp.heads[v]
+	prev := sp.heads[v]
+	h := prev
 	h.Ready, h.HasReady = cold.Next{Prio: math.MaxInt32, RunAt: math.MinInt64}, true
 	sp.setHead(v, h)
 	sp.mu.Unlock()
 	for {
 		n, err := s.cold.Wake(sp.ns, q, now, s.opt.WakeBatch)
 		if err != nil {
+			sp.mu.Lock()
+			sp.setHead(v, prev)
+			sp.mu.Unlock()
 			return err
 		}
 		if n < s.opt.WakeBatch {
@@ -101,6 +107,9 @@ func (s *Store) wakeQueue(sp *space, q string, now int64) error {
 	}
 	h, err := s.cold.Front(sp.ns, q)
 	if err != nil {
+		sp.mu.Lock()
+		sp.setHead(v, prev)
+		sp.mu.Unlock()
 		return err
 	}
 	sp.mu.Lock()

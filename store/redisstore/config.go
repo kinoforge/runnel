@@ -3,50 +3,44 @@ package redisstore
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 
 	"github.com/kinoforge/runnel"
 )
 
 func (s *Store) PutConfig(ctx context.Context, ns string, kind runnel.ConfigKind, name string, value []byte) error {
-	value, err := stored(kind, value)
-	if err != nil {
-		return err
+	pipe := s.rdb.TxPipeline()
+	pipe.HSet(ctx, s.p(ns)+"cfg:"+string(kind), name, value)
+	if kind == runnel.ConfigPool {
+		if ms := pauseMillis(value); ms != "" {
+			pipe.HSet(ctx, s.p(ns)+"cfg:pool_pause", name, ms)
+		} else {
+			pipe.HDel(ctx, s.p(ns)+"cfg:pool_pause", name)
+		}
 	}
-	return s.rdb.HSet(ctx, s.p(ns)+"cfg:"+string(kind), name, value).Err()
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func (s *Store) SwapConfig(ctx context.Context, ns string, kind runnel.ConfigKind, name string, old, next []byte) (bool, error) {
-	next, err := stored(kind, next)
-	if err != nil {
-		return false, err
-	}
 	had := "0"
 	if old != nil {
 		had = "1"
 	}
-	n, err := s.swapConfig.Run(ctx, s.rdb, []string{s.p(ns)}, string(kind), name, had, old, next).Int()
+	pm := ""
+	if kind == runnel.ConfigPool {
+		pm = pauseMillis(next)
+	}
+	n, err := s.swapConfig.Run(ctx, s.rdb, []string{s.p(ns)}, string(kind), name, had, old, next, pm).Int()
 	return n == 1, err
 }
 
-func stored(kind runnel.ConfigKind, value []byte) ([]byte, error) {
-	if kind != runnel.ConfigPool {
-		return value, nil
-	}
-	return withPauseMillis(value)
-}
-
-// The claim script cannot parse RFC 3339 times.
-func withPauseMillis(value []byte) ([]byte, error) {
+func pauseMillis(value []byte) string {
 	var p runnel.PoolConfig
 	if json.Unmarshal(value, &p) != nil || p.PausedUntil.IsZero() {
-		return value, nil
+		return ""
 	}
-	var m map[string]any
-	if err := json.Unmarshal(value, &m); err != nil {
-		return nil, err
-	}
-	m["paused_until_ms"] = p.PausedUntil.UnixMilli()
-	return json.Marshal(m)
+	return strconv.FormatInt(p.PausedUntil.UnixMilli(), 10)
 }
 
 func (s *Store) Configs(ctx context.Context, ns string, kind runnel.ConfigKind) (map[string][]byte, error) {
@@ -65,6 +59,9 @@ func (s *Store) DeleteConfig(ctx context.Context, ns string, kind runnel.ConfigK
 	n, err := s.rdb.HDel(ctx, s.p(ns)+"cfg:"+string(kind), name).Result()
 	if err == nil && n == 0 {
 		return runnel.ErrNotFound
+	}
+	if err == nil && kind == runnel.ConfigPool {
+		_ = s.rdb.HDel(ctx, s.p(ns)+"cfg:pool_pause", name).Err()
 	}
 	return err
 }

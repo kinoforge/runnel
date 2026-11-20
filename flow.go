@@ -2,6 +2,7 @@ package runnel
 
 import (
 	"context"
+	"slices"
 )
 
 // Flow is a set of jobs with dependencies between them, enqueued together. A
@@ -14,9 +15,10 @@ type Flow struct {
 }
 
 type flowStep struct {
-	name  string
-	job   *Job
-	after []string
+	name     string
+	job      *Job
+	after    []string
+	origDeps []string
 }
 
 func NewFlow() *Flow { return &Flow{names: map[string]int{}} }
@@ -40,7 +42,7 @@ func (f *Flow) Add(name string, j *Job, after ...string) *Flow {
 		return f
 	}
 	f.names[name] = len(f.steps)
-	f.steps = append(f.steps, flowStep{name: name, job: j, after: after})
+	f.steps = append(f.steps, flowStep{name: name, job: j, after: after, origDeps: slices.Clone(j.DependsOn)})
 	return f
 }
 
@@ -100,9 +102,11 @@ func (c *Client) EnqueueFlow(ctx context.Context, f *Flow) (map[string]Inserted,
 	jobs := make([]*Job, 0, len(order))
 	for _, i := range order {
 		s := f.steps[i]
+		deps := slices.Clone(s.origDeps)
 		for _, a := range s.after {
-			s.job.DependsOn = append(s.job.DependsOn, ids[a])
+			deps = append(deps, ids[a])
 		}
+		s.job.DependsOn = deps
 		jobs = append(jobs, s.job)
 	}
 	res, err := c.EnqueueJobs(ctx, jobs)

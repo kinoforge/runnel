@@ -77,8 +77,14 @@ func (s *storeSource) Finish(ctx context.Context, worker string, j *Job, o Outco
 func (s *storeSource) finisher() {
 	for {
 		s.mu.Lock()
-		batch := s.pending[:min(len(s.pending), finishBatch)]
-		s.pending = s.pending[len(batch):]
+		n := min(len(s.pending), finishBatch)
+		batch := make([]finishing, n)
+		copy(batch, s.pending[:n])
+		clear(s.pending[:n])
+		s.pending = s.pending[n:]
+		if len(s.pending) == 0 {
+			s.pending = nil
+		}
 		if len(batch) == 0 {
 			s.running = false
 			s.mu.Unlock()

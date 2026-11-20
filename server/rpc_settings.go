@@ -52,10 +52,10 @@ func (st setting[T, P]) get(ctx context.Context, ns, name string) (P, string, er
 func rpcConditions(p *pb.Precondition) preconditions {
 	var c preconditions
 	if p.GetIfMatch() != "" {
-		c.match = []string{p.GetIfMatch()}
+		c.hasMatch, c.match = true, []string{p.GetIfMatch()}
 	}
 	if p.GetIfNoneMatch() {
-		c.noneMatch = []string{"*"}
+		c.hasNoneMatch, c.noneMatch = true, []string{"*"}
 	}
 	return c
 }

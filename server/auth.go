@@ -82,7 +82,7 @@ func (s *Server) apiKey(ctx context.Context, token string) (principal, bool) {
 		return principal{}, false
 	}
 	e, ok := s.lookupKey(ctx, id)
-	if !ok || !e.key.Matches(secret, time.Now()) {
+	if !ok || !e.key.Matches(secret, s.clock.Now()) {
 		return principal{}, false
 	}
 	return principal{ns: e.ns, key: e.key}, true
@@ -96,8 +96,12 @@ func (s *Server) certAdmin(r *http.Request) bool {
 		return true
 	}
 	leaf := r.TLS.VerifiedChains[0][0]
-	named := func(n string) bool { return slices.Contains(s.cfg.CertNames, n) }
-	return named(leaf.Subject.CommonName) || slices.ContainsFunc(leaf.DNSNames, named)
+	if slices.Contains(s.cfg.CertNames, leaf.Subject.CommonName) {
+		return true
+	}
+	return slices.ContainsFunc(leaf.DNSNames, func(dns string) bool {
+		return slices.ContainsFunc(s.cfg.CertNames, func(want string) bool { return strings.EqualFold(dns, want) })
+	})
 }
 
 func (s *Server) lookupKey(ctx context.Context, id string) (keyEntry, bool) {
@@ -146,6 +150,35 @@ func (s *Server) reloadKeys(ctx context.Context) error {
 	s.keys, s.loaded = keys, began
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *Server) evictKey(id string) {
+	s.mu.Lock()
+	delete(s.keys, id)
+	s.mu.Unlock()
+}
+
+func (s *Server) evictNamespace(ns string) {
+	s.mu.Lock()
+	for id, e := range s.keys {
+		if e.ns == ns {
+			delete(s.keys, id)
+		}
+	}
+	delete(s.clients, ns)
+	delete(s.sources, ns)
+	h := s.hubs[ns]
+	delete(s.hubs, ns)
+	s.mu.Unlock()
+	if h != nil {
+		h.stop()
+	}
+}
+
+func (s *Server) refreshKeys() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.reloadKeys(ctx)
 }
 
 func (s *Server) namespaceNames(ctx context.Context) ([]string, error) {

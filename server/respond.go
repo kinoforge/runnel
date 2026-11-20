@@ -53,7 +53,11 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusInsufficientStorage, "storage full", "the store is low on disk space")
 	case errors.Is(err, runnel.ErrDependency):
 		s.problem(w, http.StatusUnprocessableEntity, "dependency", err.Error())
-	case errors.Is(err, runnel.ErrConflict), errors.Is(err, runnel.ErrFinal), errors.Is(err, runnel.ErrNotFinal):
+	case errors.Is(err, runnel.ErrFinal):
+		s.problem(w, http.StatusConflict, "final", err.Error())
+	case errors.Is(err, runnel.ErrNotFinal):
+		s.problem(w, http.StatusConflict, "not final", err.Error())
+	case errors.Is(err, runnel.ErrConflict):
 		s.problem(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, context.Canceled):
 		s.problem(w, statusClientClosed, "cancelled", "")
@@ -120,6 +124,10 @@ func decode(r *http.Request, v any) error {
 		return fmt.Errorf("%w: body must hold one JSON value", runnel.ErrInvalid)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			return err
+		}
 		return fmt.Errorf("%w: trailing data after body", runnel.ErrInvalid)
 	}
 	return nil
@@ -138,7 +146,7 @@ func (s *Server) checkCallback(u string) error {
 	if err := runnel.ValidCallbackURL(u, s.cfg.Limits.MaxCallbackURL); err != nil {
 		return err
 	}
-	if !s.cfg.AllowHTTPCallbacks && !strings.HasPrefix(u, "https://") {
+	if !s.cfg.AllowHTTPCallbacks && !strings.HasPrefix(strings.ToLower(u), "https://") {
 		return fmt.Errorf("%w: callback must use https", runnel.ErrInvalid)
 	}
 	return nil

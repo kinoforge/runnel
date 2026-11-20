@@ -69,6 +69,7 @@ callbacks:
   max_retry_after: 0s   # 1h, longest Retry-After a receiver may ask for
   unique_for: 0s        # 48h, an event seen twice in this window is posted once
   secret_ttl: 0s        # 30s, how long namespace secrets are cached
+  max_payload: 0        # limits.max_payload + 65536, largest delivery body; a result that does not fit is left out
 
 limits:
   max_payload: 1048576

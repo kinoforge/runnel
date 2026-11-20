@@ -15,6 +15,9 @@ type Pos struct {
 // Append queues rec and returns its position. It never touches the disk, so
 // callers may hold their own locks around it.
 func (l *Log) Append(rec []byte) (Pos, error) {
+	if len(rec) > maxRecord {
+		return Pos{}, ErrTooLarge
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.err != nil {

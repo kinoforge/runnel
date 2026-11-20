@@ -30,14 +30,22 @@ func (s *Store) Prune(ctx context.Context, ns string, req runnel.PruneRequest) (
 			where += " AND queue=?"
 			args = append(args, req.Queue)
 		}
-		jobs, err := collect(tx.QueryContext(ctx, s.q("SELECT "+jobCols+" FROM rn_jobs WHERE "+where+" ORDER BY finished_at LIMIT ?"), append(args, req.Limit)...))
+		jobs, err := collect(tx.QueryContext(ctx, s.q("SELECT "+jobCols+" FROM rn_jobs WHERE "+where+" ORDER BY finished_at LIMIT ?"+s.d.skipLocked()), append(args, req.Limit)...))
 		if err != nil || len(jobs) == 0 {
 			n = 0
 			return err
 		}
-		ids := make([]string, len(jobs))
-		for i, j := range jobs {
-			ids[i] = j.ID
+		ids := make([]string, 0, len(jobs))
+		for _, j := range jobs {
+			res, err := tx.ExecContext(ctx, s.q("DELETE FROM rn_jobs WHERE ns=? AND id=? AND state=? AND version=? AND finished_at>0 AND finished_at<?"),
+				ns, j.ID, string(j.State), j.Version, before)
+			if err != nil {
+				return err
+			}
+			if rows, _ := res.RowsAffected(); rows != 1 {
+				continue
+			}
+			ids = append(ids, j.ID)
 			if req.Archive {
 				full, err := json.Marshal(j)
 				if err != nil {
@@ -49,12 +57,11 @@ func (s *Store) Prune(ctx context.Context, ns string, req runnel.PruneRequest) (
 				}
 			}
 		}
-		in := placeholders(len(ids))
-		if _, err := tx.ExecContext(ctx, s.q("DELETE FROM rn_jobs WHERE ns=? AND id IN ("+in+")"), strArgs([]any{ns}, ids)...); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, s.q("DELETE FROM rn_deps WHERE job_id IN ("+in+")"), strArgs(nil, ids)...); err != nil {
-			return err
+		if len(ids) > 0 {
+			in := placeholders(len(ids))
+			if _, err := tx.ExecContext(ctx, s.q("DELETE FROM rn_deps WHERE job_id IN ("+in+")"), strArgs(nil, ids)...); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, s.q("DELETE FROM rn_uniques WHERE ns=? AND until_at>0 AND until_at<?"), ns, before); err != nil {
 			return err

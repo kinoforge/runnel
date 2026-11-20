@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/kinoforge/runnel"
@@ -47,6 +48,9 @@ func (s *Server) routes() {
 }
 
 func (s *Server) checkQueue(c runnel.QueueConfig) (string, error) {
+	if c.Name == runnel.CallbackQueue {
+		return "", fmt.Errorf("%w: %s is reserved", runnel.ErrInvalid, runnel.CallbackQueue)
+	}
 	return c.Name, s.withCallback(c.CallbackURL, c.Validate)
 }
 

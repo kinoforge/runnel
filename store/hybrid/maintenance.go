@@ -61,7 +61,10 @@ func (s *Store) Prune(_ context.Context, ns string, req runnel.PruneRequest) (in
 		return nil
 	})
 	if err == nil && len(dropped) > 0 {
-		err = s.dropCold(s.space(ns), dropped)
+		if err = s.dropCold(s.space(ns), dropped); err != nil {
+			s.fail(err)
+			return n, s.broken()
+		}
 	}
 	return n, err
 }
@@ -184,7 +187,7 @@ func (s *Store) PruneEvents(_ context.Context, ns string, req runnel.EventPruneR
 			last = e.seq
 			n++
 		}
-		if n > 0 {
+		if last > 0 {
 			t.dropEvents(last)
 		}
 		return nil

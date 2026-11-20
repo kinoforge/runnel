@@ -32,10 +32,10 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 - **J03** Options a job leaves unset come from its queue's settings: max attempts, backoff, timeout, start timeout and callback. With neither set, a job has 5 attempts.
 - **J04** One call enqueues 1 to 1000 jobs. Each job gets its own answer: its id; or, as a duplicate, the id of the job holding its unique key; or its own error (`ErrDependency`, `ErrQueueFull`, `ErrGroupFull`) while the others go in.
 - **J05** A job given a start time (`At`, `In`, `run_at`, `delay`) is not claimed before it. `In` is measured on the store's clock.
-- **J06** While a job with a unique key is not final, enqueueing the same key adds nothing and returns that job's id, marked duplicate. Once the job is final, the key is free.
+- **J06** While a job with a unique key is not final, enqueueing the same key adds nothing and returns that job's id, marked duplicate. Once the job is final, the key is free. This holds when the holder finishes while the new job is enqueued: the new job then holds the key.
 - **J07** A unique key with a window stays taken for the window after enqueue, even when the job finishes sooner, and is free after it.
 - **J08** A queue with `max_queued` refuses a job with `ErrQueueFull` once that many of its jobs are waiting or blocked; with `group_max_queued`, it refuses with `ErrGroupFull` once the job's group has that many. Running jobs do not count, and one queue's cap does not touch another queue.
-- **J09** `EnqueueTx` writes jobs inside the caller's SQL transaction: they exist only if it commits, and the queue settings are read through it.
+- **J09** `EnqueueTx` writes jobs inside the caller's SQL transaction: they exist only if it commits, and the queue settings are read through it, never from a cache.
 - **J10** Durations in JSON are strings such as `"30s"` or numbers of seconds, and are written back as strings.
 
 ## Flows and dependencies (F)
@@ -43,7 +43,7 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 - **F01** A job enqueued `After` other jobs is `blocked` until all of them complete, then `waiting`. A dependency that already completed counts as done.
 - **F02** A dependency that is missing, dead or cancelled refuses the job with `ErrDependency`.
 - **F03** When a job ends dead or cancelled, every blocked job that depends on it is cancelled, and so on down the chain.
-- **F04** A flow enqueues all its steps in one call. A step that waits on an unknown step, a cycle, or a flow without steps or with more than 1000 is `ErrInvalid`.
+- **F04** A flow enqueues all its steps in one call. A step that waits on an unknown step, a cycle, or a flow without steps or with more than 1000 is `ErrInvalid`. A flow enqueued again after a try that failed gives each step its dependencies once.
 - **F05** A flow step whose unique key is taken becomes the job holding it, and the steps after it wait on that job.
 - **F06** A step's handler reads the jobs it depended on, with their results, through `Dependencies(ctx)`.
 
@@ -58,7 +58,7 @@ A job is `blocked` (waiting for other jobs), `waiting`, `running`, `polling` (an
 - **C07** `rate` and `burst` cap how many jobs of a queue start per second, as a token bucket. `group_rate` and `group_burst` do the same per group.
 - **C08** A limit that holds back the first jobs in line does not hold back the jobs after them: a group at its cap or a pool with no free slot is skipped and the claim goes on to others. On Redis this holds within the first 2000 jobs a claim examines.
 - **C09** Polling jobs due for a poll are claimed before new jobs. They keep their attempt count and are not held back by limits, because they already hold their slot.
-- **C10** A claim can be limited to given job ids. It still obeys every limit and touches no other job.
+- **C10** A claim can be limited to given job ids. It still obeys every limit and touches no other job. Polling jobs due for a poll and delayed jobs whose start time has passed can be claimed by id too. An id or queue named twice counts once.
 - **C11** A pool's `rate` and `burst` cap how many jobs naming it start per second over every queue, as a token bucket.
 - **C12** A paused pool, or one whose `paused_until` has not passed, starts no jobs; its running and polling jobs go on, and the claim goes on to jobs of other pools. Once `paused_until` passes the pool starts jobs again without a change.
 
@@ -101,7 +101,7 @@ What a handler returns decides what happens to the job next.
 ## Managing jobs (M)
 
 - **M01** `Cancel` ends a job that is not final as `cancelled`; a running job learns it at its next heartbeat (L05). Cancelling a cancelled job changes nothing. Cancelling a completed or dead job is `ErrFinal`.
-- **M02** `Retry` runs a dead, cancelled or expired job again from its first attempt, keeping its error history. Any other state is `ErrNotFinal`. A job cancelled before it ran, because a dependency did not complete, runs again once every dependency is completed; until then `Retry` is `ErrDependency`.
+- **M02** `Retry` runs a dead, cancelled or expired job again from its first attempt, keeping its error history. Any other state is `ErrNotFinal`. A job that ended before it ran while it waited on dependencies, cancelled directly, by a dependency that did not complete or by its deadline, runs again once every dependency is completed; until then `Retry` is `ErrDependency`.
 - **M03** A listing is newest first, filtered by queue, kind, group and state, in pages joined by a cursor: 50 jobs by default, at most 500.
 - **M04** Stats count a namespace's jobs per queue and state.
 - **M05** Every job that reaches a final state records one event. Events are numbered in order within a namespace and read from after a number.
@@ -109,7 +109,7 @@ What a handler returns decides what happens to the job next.
 
 ## Waiting for results (W)
 
-- **W01** `Wait` returns the job once it is final. Stores that announce finished jobs (Postgres and the Redis family) wake it at once; on others it reads the job again with a backoff of up to 1s.
+- **W01** `Wait` returns the job once it is final. Stores that announce finished jobs (Postgres and the Redis family) wake it at once; on others it reads the job again with a backoff of up to 1s. When a store's feed of finished jobs ends, the waits on it are woken and the next wait opens it again.
 - **W02** When the caller's context ends first, `Wait` returns the job as last read and the context's error. Waiting on an unknown job is `ErrNotFound`.
 - **W03** `EnqueueAndWait` enqueues a job and waits for it like `Wait`. A duplicate waits for the job holding its key.
 - **W04** `Worker.Do` enqueues a job and, when the worker has a free slot and the job's limits allow, runs its first attempt at once on the caller's goroutine. Otherwise the job takes the normal path. Either way `Do` returns when the job is final, like `EnqueueAndWait`. Waiting does not hold up the worker's shutdown.
@@ -117,16 +117,16 @@ What a handler returns decides what happens to the job next.
 
 ## Maintenance (T)
 
-- **T01** A waiting job that has not started within its start timeout ends `expired`, with an error recorded. Like every final state, this is an event and a callback, and the jobs that depend on it are cancelled. A retried job, whether a handler asked for the retry or an operator did, waits from the retry again, with its start timeout counted anew.
-- **T02** A schedule enqueues a job on its cron spec: five fields, or `@every 10m`, `@daily` and the like, in a time zone. Each firing is enqueued once, even with many maintainers running, and the job carries `schedule` and `fire_at` meta. With `overlap: skip`, a firing is dropped while the schedule's previous job has not finished; a dropped firing, or one refused by a full queue or group, is not an error.
-- **T03** The maintainer deletes completed and cancelled jobs after 24h and dead jobs after 7 days, unless the queue sets its own retention, and can archive them first. Only final jobs can be pruned.
+- **T01** A waiting job that has not started within its start timeout ends `expired`, with an error recorded. Like every final state, this is an event and a callback, and the jobs that depend on it are cancelled. A retried job, whether a handler asked for the retry or an operator did, waits from the retry again, with its start timeout counted anew. A blocked job with a later start time counts its start timeout from that start time once its dependencies complete.
+- **T02** A schedule enqueues a job on its cron spec: five fields, or `@every 10m`, `@daily` and the like, in a time zone. Each firing is enqueued once, even with many maintainers running, and the job carries `schedule` and `fire_at` meta. With `overlap: skip`, a firing is dropped while the schedule's previous job has not finished; a dropped firing, or one refused by a full queue or group, is not an error. A maintainer that is far behind fires once, for the latest time the spec gives before now. The schedule's own meta cannot replace `schedule` or `fire_at`, and a schedule must leave room for both in the job's meta.
+- **T03** The maintainer deletes completed and cancelled jobs after 24h and dead jobs after 7 days, unless the queue sets its own retention, and can archive them first. Only final jobs can be pruned. A job retried while it is pruned is kept. Pruning one state is never held up by older jobs in another, also on a Redis store first used by an older version.
 - **T04** Events outlive the jobs they describe and are deleted after their own retention, 24h by default.
 - **T05** With callbacks on, an event is not deleted before its delivery job is made, unless it has waited longer than the undelivered retention (7 days). Those are deleted and logged. Jobs that finished since the oldest such event are not pruned, so their delivery can still be made.
 - **T06** A job with a deadline, set as a time or as a `ttl` after enqueue, ends `expired` once the deadline passes without it completing, whether blocked, waiting, running or polling. A running job's lease is taken, so its worker's next heartbeat fails, and the attempt's context ends with `ErrDeadline`. A retry or poll that would come after the deadline expires the job at once. A job's `start_timeout` and `timeout` must fit before its deadline; a queue default that does not fit is left out. A retried expired job keeps a deadline that has not passed.
 
 ## Callbacks (H)
 
-- **H01** A job with a callback gets one delivery for its final state. The maintainer turns the event into a delivery job on the reserved `runnel.callbacks` queue, unique per event, so the event is posted once even when it is seen twice. A delivery job that cannot be queued, such as on a full queue, is made again on the next round, with the events after it.
+- **H01** A job with a callback gets one delivery for its final state. The maintainer turns the event into a delivery job on the reserved `runnel.callbacks` queue, unique per event, so the event is posted once even when it is seen twice. A delivery job that cannot be queued, such as on a full queue, is made again on the next round, with the events after it. A delivery whose body would be larger than `callbacks.max_payload` (the job size limit plus 64 KiB by default) is made without the job's result. One that is still not valid is dropped and logged, so it never holds up the deliveries after it.
 - **H02** A delivery POSTs `{"event", "delivery", "job"}` with the headers `Runnel-Event`, `Runnel-Delivery` and, when the namespace has a secret, `Runnel-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`.
 - **H03** A 2xx answer completes the delivery. 408, 429 and 5xx retry, after `Retry-After` seconds when given (up to an hour). Any other answer, a redirect included, fails it. A delivery has 10 attempts.
 - **H04** Deliveries connect only to public addresses, checked after DNS on every connection, unless private ones are allowed.
@@ -143,7 +143,7 @@ What a handler returns decides what happens to the job next.
 - **X01** Namespaces never see each other's jobs, settings, events or cursors.
 - **X02** `Migrate` can run again on a migrated store.
 - **X03** Queue, pool and schedule settings are stored per namespace, replaced, swapped (X09) and deleted by name. Deleting a setting or namespace that does not exist is `ErrNotFound`. Bad settings are `ErrInvalid`: bad names, negative limits, rates over 1e6 per second, more than 1000 attempts.
-- **X04** The hybrid store restarts with every change it acknowledged, read from its snapshot and log. A record cut short by a crash is dropped, and the store opens again after it.
+- **X04** The hybrid store restarts with every change it acknowledged, read from its snapshot and log. A record cut short by a crash is dropped, and the store opens again after it. A crash while the log starts a new segment loses nothing it acknowledged. A read error from the disk stops the open instead of being taken for a cut record. A finished job kept on disk and then retried comes back once, as retried.
 - **X05** Only one process at a time opens a hybrid store's directory.
 - **X06** A hybrid store's directory has a `FORMAT` file naming the version of its files. A store refuses a directory of another version, or one that holds data without the file, with `ErrFormat`.
 - **X07** A hybrid store's backup, taken while calls go on, restores into an empty directory and opens with every job acknowledged before the backup began. Restore refuses a non-empty directory, entries outside it and a tar without `FORMAT`.
@@ -161,13 +161,13 @@ What a handler returns decides what happens to the job next.
 - **A06** No answer contains a callback secret or a key hash.
 - **A07** Basic auth works like a bearer token. The admin user (`admin` unless `server.admin_user` names another) with the admin token as password acts as admin. A key's id as user and its secret as password acts as that key. Anything else is 401.
 - **A08** With `server.auth: none` every request acts as admin, with or without credentials, and the server logs a warning at start. The setting refuses to start next to an admin token or a client CA.
-- **A09** With `server.tls.client_ca`, a client certificate signed by that CA acts as admin. With `client_names`, only a certificate whose common name or DNS name is listed does. A certificate from another CA fails the handshake, and with `require_client_cert` so does a client without one.
+- **A09** With `server.tls.client_ca`, a client certificate signed by that CA acts as admin. With `client_names`, only a certificate whose common name or DNS name is listed does. A certificate from another CA fails the handshake, and with `require_client_cert` so does a client without one. DNS names are compared without regard to case.
 
 ## HTTP API (S)
 
 - **S01** Request bodies are strict: one JSON value, no unknown fields, no trailing data, at most 4 MiB (413 above). Errors are `application/problem+json` (RFC 9457).
-- **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a setting that changed since it was read 412; a patch of another media type 415; a failed dependency 422; a full queue or group 429; a store low on disk space 507. The remote client turns them back into the same Go errors.
-- **S03** Over the API a callback, whether on a job, a queue or a schedule, must use https unless the server allows http, and the reserved `runnel.callbacks` queue and `runnel.callback` kind are refused.
+- **S02** Errors map to status codes: invalid input 400; an unknown job, setting, key or namespace 404; a conflict, a finished job or a job that is not finished 409; a setting that changed since it was read 412; a patch of another media type 415; a failed dependency 422; a full queue or group 429; a store low on disk space 507. The remote client turns them back into the same Go errors, telling a finished job from one not finished by the problem title `final` or `not final`.
+- **S03** Over the API a callback, whether on a job, a queue or a schedule, must use https unless the server allows http, and the reserved `runnel.callbacks` queue and `runnel.callback` kind are refused. No key can claim from that queue or change its settings, over HTTP or gRPC.
 - **S04** Enqueueing one job answers 201 with `Location: /v1/ns/{ns}/jobs/{id}`, or 200 for a duplicate. A batch, `{"jobs": [...]}`, answers 200 with one result per job.
 - **S05** `Prefer: wait=N` on an enqueue holds the answer for up to N seconds: 200 with the finished job, or 202 with `Location` and `Retry-After` while it is still going. `Preference-Applied` echoes the wait used. N is capped at 60 by default; a bad or non-positive N means no wait. Without a Prefer header the queue's `wait` is used.
 - **S06** A `GET` of a job with `Prefer: wait=N` answers when the job is final or N seconds pass, with its latest state.
@@ -180,10 +180,10 @@ What a handler returns decides what happens to the job next.
 - **S13** `/readyz` answers like `/healthz` until the server starts shutting down, then 503.
 - **S14** `GET /v1/backup` streams the store's backup as a tar file, or answers 501 when the store has none.
 - **S15** An enqueue with a `traceparent` header, and `tracestate` with it, puts them in the meta of each job that has none and has room for them.
-- **S16** The server takes its caps from its settings: jobs per enqueue, how far ahead a job may run or live, queues and jobs per claim, the default lease and its range, and jobs per heartbeat.
-- **S18** The remote client and the CLI connect with one URL: `http(s)://[user:password@]host[:port][/path]`, with optional `ca`, `cert` and `key` files for https. User and password go out as Basic auth. Unknown options, a bad scheme or TLS options on plain http are refused, and no error or printed endpoint shows the password.
+- **S16** The server takes its caps from its settings: jobs per enqueue, how far ahead a job may run or live, queues and jobs per claim, the default lease and its range, and jobs per heartbeat. `run_at` and `deadline` must fall within the delay cap, a flow's steps within the batch cap and a result within the payload limit, or the call is 400. A heartbeat that names no lease gets the default lease.
+- **S18** The remote client and the CLI connect with one URL: `http(s)://[user:password@]host[:port][/path]`, with optional `ca`, `cert` and `key` files for https. User and password go out as Basic auth. Unknown options, a bad scheme or TLS options on plain http are refused, and no error or printed endpoint shows the password. The remote client never follows a redirect.
 - **S17** `GET /v1/system` needs the admin token and reports the version, start time, Go memory and the store's storage, or `null` when the store reports none.
-- **S19** Reading one queue, pool or schedule answers with an `ETag`, and so does setting one. `PUT` and `PATCH` with `If-Match` write only if the setting still has one of the listed tags (`*`: if it exists), compared strongly. With `If-None-Match: *` they write only if it does not exist. Otherwise they answer 412 with the title `precondition failed`. Without these headers a `PUT` replaces the setting as before.
+- **S19** Reading one queue, pool or schedule answers with an `ETag`, and so does setting one. `PUT` and `PATCH` with `If-Match` write only if the setting still has one of the listed tags (`*`: if it exists), compared strongly. With `If-None-Match: *` they write only if it does not exist. Otherwise they answer 412 with the title `precondition failed`. Without these headers a `PUT` replaces the setting as before. An empty `If-Match` matches no tag.
 - **S20** `PATCH` on a queue, pool or schedule takes an RFC 7396 merge patch as `application/merge-patch+json` or `application/json`, any other type is 415. Named fields are set, `null` clears a field and the rest stay. A missing setting is created from the patch. The name comes from the path, and a different name, an unknown field or a setting that fails its checks is 400. It needs the admin role.
 - **S21** The remote client's `UpdateQueue` and `UpdatePool` work like X10 over the API, with `If-Match` on the tag they read and `If-None-Match: *` for a new setting, and start again on 412. A 412 is `ErrStale`.
 
@@ -191,7 +191,7 @@ What a handler returns decides what happens to the job next.
 
 `runnel serve` serves the services in `proto/runnel/v1` on its HTTP port, over gRPC, gRPC-Web and Connect, with HTTP/2 over TLS or plain. The HTTP API is unchanged.
 
-- **G01** JobService, WorkerService, ConfigService and AdminService take the same credentials as the HTTP API and need the same roles. Payloads and results travel as the job's raw JSON bytes, unchanged. `Enqueue` with one job answers its refusal as an error, like the HTTP API; a batch answers each job's result.
+- **G01** JobService, WorkerService, ConfigService and AdminService take the same credentials as the HTTP API and need the same roles. Payloads and results travel as the job's raw JSON bytes, unchanged. `Enqueue` with one job answers its refusal as an error, like the HTTP API; a batch answers each job's result. A call without valid credentials ends at once, before the server reads a message from it.
 - **G02** Errors map to codes: invalid input `InvalidArgument`; an unknown job, setting, key or namespace `NotFound`; a conflict, a finished or unfinished job or a failed dependency `FailedPrecondition`; a stale precondition `Aborted`; a full queue or group and a store low on disk `ResourceExhausted` with `Retry-After`; no credentials `Unauthenticated`; a missing role `PermissionDenied`. The `Runnel-Error` metadata names the Runnel error.
 - **G03** A `Work` stream starts with `start`. The worker sends credit for the jobs it can take, and the server sends at most that many, claimed under the lease named at start. The stream answers `extend` and `finish` in it, a refused finish with its error. Every answer carries `now`, the server's clock. When the stream ends, jobs claimed but not yet sent are given back untouched.
 - **G04** Queue, pool and schedule settings share ETags with the HTTP API. `Patch` changes only the fields in `update_mask` and never the name; `if_match` and `if_none_match` refuse a write over a changed or existing setting with `Aborted`.

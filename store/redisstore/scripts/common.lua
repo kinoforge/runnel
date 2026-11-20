@@ -3,7 +3,7 @@ local unpack = unpack or table.unpack
 local P = KEYS[1]
 local function k(s) return P .. s end
 local F = {"id","queue","kind","state","priority","group","pool","attempt","max_attempts","run_at","waiting_since","start_by","start_timeout","deadline","worker","lease_until","version","pending","unique_key","created_at","updated_at","started_at","finished_at","data","deps"}
-local function s(n) return string.format("%d", n) end
+local function s(n) return string.format("%.0f", n) end
 local function num(j, f) return tonumber(j[f]) or 0 end
 local function load(id)
   local v = redis.call("HMGET", k("j:" .. id), unpack(F))
@@ -57,7 +57,7 @@ local function index(j, now)
     redis.call("ZADD", k("poll:" .. j.queue), s(num(j, "run_at")), j.id)
     active(j, 1)
   else
-    redis.call("ZADD", k("fin"), s(num(j, "finished_at")), j.id)
+    redis.call("ZADD", k("fin:" .. st), s(num(j, "finished_at")), j.id)
   end
 end
 local function unindex(j)
@@ -80,6 +80,7 @@ local function unindex(j)
     active(j, -1)
   else
     redis.call("ZREM", k("fin"), j.id)
+    redis.call("ZREM", k("fin:" .. st), j.id)
   end
 end
 local function wake() redis.call("PUBLISH", P .. "wake", "1") end
@@ -106,10 +107,11 @@ finalize = function(j, now)
         if p <= 0 then
           unindex(c)
           c.state = "waiting"
-          if num(c, "run_at") < now then c.run_at = s(now) end
-          c.waiting_since = s(now)
+          local base = math.max(num(c, "run_at"), now)
+          c.run_at = s(base)
+          c.waiting_since = s(base)
           local sw = num(c, "start_timeout")
-          if sw > 0 then c.start_by = s(now + sw) else c.start_by = "0" end
+          if sw > 0 then c.start_by = s(base + sw) else c.start_by = "0" end
           save(c)
           index(c, now)
           released = true

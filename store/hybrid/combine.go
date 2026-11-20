@@ -59,22 +59,32 @@ func (s *Store) run(sp *space, c *call) {
 
 func (s *Store) round(sp *space, self *call) {
 	batch := sp.queue.take()
-	sp.mu.Lock()
-	for _, c := range batch {
-		s.apply(sp, c)
-	}
-	sp.mu.Unlock()
-	sp.queue.pass()
-	for _, c := range batch {
-		if c != self {
-			c.turn <- false
+	defer func() {
+		sp.queue.pass()
+		for _, c := range batch {
+			if c != self {
+				c.turn <- false
+			}
 		}
-	}
+	}()
+	func() {
+		sp.mu.Lock()
+		defer sp.mu.Unlock()
+		for _, c := range batch {
+			s.apply(sp, c)
+		}
+	}()
 }
 
 func (s *Store) apply(sp *space, c *call) {
 	c.t = newTx(sp, s.log != nil)
 	c.err = c.fn(c.t)
+	if c.err != nil {
+		if c.t.changed() {
+			c.logErr = c.err
+		}
+		return
+	}
 	if c.t.changed() {
 		if c.pos, c.logErr = s.log.Append(c.t.rec.b); c.logErr == nil {
 			s.place(sp, c.t, c.pos)

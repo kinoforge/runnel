@@ -16,13 +16,24 @@ func (s *Store) Insert(ctx context.Context, ns string, jobs []*runnel.Job, now t
 		return nil, err
 	}
 	var out []runnel.Inserted
+	var final []*runnel.Job
 	err = s.tx(ctx, ns, capped(cfg, jobs) && s.d.LockRows, func(tx *txn) error {
+		cloned := make([]*runnel.Job, len(jobs))
+		for i, j := range jobs {
+			cloned[i] = j.Clone()
+		}
 		var err error
-		out, err = s.insertWith(ctx, tx, ns, cfg, jobs, now)
+		out, err = s.insertWith(ctx, tx, ns, cfg, cloned, now)
+		if err == nil {
+			final = cloned
+		}
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	for i, j := range final {
+		jobs[i].DependsOn, jobs[i].Pending, jobs[i].State, jobs[i].StartBy = j.DependsOn, j.Pending, j.State, j.StartBy
 	}
 	return out, nil
 }
@@ -32,7 +43,7 @@ func (s *Store) Insert(ctx context.Context, ns string, jobs []*runnel.Job, now t
 // database that holds the Runnel tables. When the queue has a waiting cap the
 // namespace lock is held until the caller commits or rolls back.
 func (s *Store) InsertTx(ctx context.Context, raw *sql.Tx, ns string, jobs []*runnel.Job, now time.Time) ([]runnel.Inserted, error) {
-	cfg, err := s.configs(ctx, raw, ns)
+	cfg, err := s.loadConfigs(ctx, raw, ns)
 	if err != nil {
 		return nil, err
 	}
@@ -211,19 +222,27 @@ func (b *batchInsert) write(ctx context.Context, j *runnel.Job, d depInfo) error
 }
 
 func (s *Store) claimUnique(ctx context.Context, tx *txn, ns, key, id string, until, now int64) (string, error) {
-	res, err := tx.ExecContext(ctx, s.q(s.d.Ignore("rn_uniques", []string{"ns", "ukey", "job_id", "until_at"})), ns, key, id, until)
-	if err != nil {
-		return "", err
+	for range 4 {
+		res, err := tx.ExecContext(ctx, s.q(s.d.Ignore("rn_uniques", []string{"ns", "ukey", "job_id", "until_at"})), ns, key, id, until)
+		if err != nil {
+			return "", err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			return "", nil
+		}
+		holder, err := s.uniqueHolder(ctx, tx, ns, key, now, true)
+		if err != nil || holder != "" {
+			return holder, err
+		}
+		res, err = tx.ExecContext(ctx, s.q("UPDATE rn_uniques SET job_id=?, until_at=? WHERE ns=? AND ukey=?"), id, until, ns, key)
+		if err != nil {
+			return "", err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			return "", nil
+		}
 	}
-	if n, _ := res.RowsAffected(); n == 1 {
-		return "", nil
-	}
-	holder, err := s.uniqueHolder(ctx, tx, ns, key, now, true)
-	if err != nil || holder != "" {
-		return holder, err
-	}
-	_, err = tx.ExecContext(ctx, s.q("UPDATE rn_uniques SET job_id=?, until_at=? WHERE ns=? AND ukey=?"), id, until, ns, key)
-	return "", err
+	return "", runnel.ErrConflict
 }
 
 func remapDeps(deps []string, remap map[string]string) ([]string, bool) {

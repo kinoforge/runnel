@@ -27,7 +27,7 @@ func (s *Store) Prune(ctx context.Context, ns string, req runnel.PruneRequest) (
 	if req.Archive {
 		archive = "1"
 	}
-	n, err := s.prune.Run(ctx, s.rdb, []string{s.p(ns)}, ms(req.Before), req.Limit, states, req.Queue, archive).Int()
+	n, err := s.prune.Run(ctx, s.rdb, []string{s.p(ns)}, ms(req.Before), req.Limit, states, req.Queue, archive, max(req.Limit*5, 500)).Int()
 	return n, err
 }
 

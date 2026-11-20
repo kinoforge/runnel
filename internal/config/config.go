@@ -15,7 +15,10 @@ import (
 	"github.com/kinoforge/runnel"
 )
 
-const minAdminToken = 24
+const (
+	minAdminToken = 24
+	maxAdminToken = 512
+)
 
 type Config struct {
 	Store      string     `yaml:"store"`
@@ -97,6 +100,7 @@ type Callbacks struct {
 	MaxRetryAfter time.Duration `yaml:"max_retry_after"`
 	UniqueFor     time.Duration `yaml:"unique_for"`
 	SecretTTL     time.Duration `yaml:"secret_ttl"`
+	MaxPayload    int           `yaml:"max_payload"`
 }
 
 type Limits struct {
@@ -158,8 +162,19 @@ func (c Config) Validate() error {
 	if c.Store == "" {
 		errs = append(errs, errors.New("store is required"))
 	}
-	if c.Server.AdminToken != "" && len(c.Server.AdminToken) < minAdminToken {
-		errs = append(errs, fmt.Errorf("admin token must be at least %d characters", minAdminToken))
+	if c.Server.AdminToken != "" && (len(c.Server.AdminToken) < minAdminToken || len(c.Server.AdminToken) > maxAdminToken) {
+		errs = append(errs, fmt.Errorf("admin token must be %d to %d characters", minAdminToken, maxAdminToken))
+	}
+	if c.Server.MinLease > 0 && c.Server.MaxLease > 0 && c.Server.MinLease > c.Server.MaxLease {
+		errs = append(errs, errors.New("server.min_lease must not exceed server.max_lease"))
+	}
+	if c.Server.DefaultLease > 0 {
+		if c.Server.MinLease > 0 && c.Server.DefaultLease < c.Server.MinLease {
+			errs = append(errs, errors.New("server.default_lease must be at least server.min_lease"))
+		}
+		if c.Server.MaxLease > 0 && c.Server.DefaultLease > c.Server.MaxLease {
+			errs = append(errs, errors.New("server.default_lease must not exceed server.max_lease"))
+		}
 	}
 	errs = append(errs, c.Server.checkAuth()...)
 	errs = append(errs, c.Server.TLS.check()...)

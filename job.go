@@ -104,6 +104,16 @@ type Backoff struct {
 
 func (b Backoff) IsZero() bool { return b == Backoff{} }
 
+func (b Backoff) Validate() error {
+	if b.Base < 0 || b.Max < 0 {
+		return invalid("backoff durations must not be negative")
+	}
+	if math.IsNaN(b.Factor) || math.IsInf(b.Factor, 0) || math.IsNaN(b.Jitter) || math.IsInf(b.Jitter, 0) {
+		return invalid("backoff factor and jitter must be finite numbers")
+	}
+	return nil
+}
+
 func (b Backoff) Delay(attempt int) time.Duration {
 	base, maxd, factor, jitter := b.Base.D(), b.Max.D(), b.Factor, b.Jitter
 	if base <= 0 {
@@ -112,17 +122,17 @@ func (b Backoff) Delay(attempt int) time.Duration {
 	if maxd <= 0 {
 		maxd = defaultBackoffMax
 	}
-	if factor < 1 {
+	if math.IsNaN(factor) || math.IsInf(factor, 0) || factor < 1 {
 		factor = defaultBackoffFactor
 	}
-	if jitter == 0 {
+	if math.IsNaN(jitter) || math.IsInf(jitter, 0) || jitter == 0 {
 		jitter = defaultBackoffJitter
 	}
 	if jitter < 0 || jitter > 1 {
 		jitter = 0
 	}
 	d := float64(base) * math.Pow(factor, float64(max(attempt-1, 0)))
-	if d > float64(maxd) || math.IsInf(d, 0) {
+	if math.IsNaN(d) || d > float64(maxd) || math.IsInf(d, 0) {
 		d = float64(maxd)
 	}
 	if jitter > 0 {
@@ -257,6 +267,9 @@ func (j *Job) late(t time.Time) bool { return !j.Deadline.IsZero() && !t.Before(
 // Prepare fills defaults, resets the fields stores own and validates the job
 // against l. Clients call it before Store.Insert.
 func (j *Job) Prepare(now time.Time, l Limits) error {
+	if j.delay < 0 || j.ttl < 0 {
+		return invalid("durations must not be negative")
+	}
 	if !ValidID(j.ID) {
 		j.ID = NewID()
 	}

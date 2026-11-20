@@ -43,7 +43,10 @@ func ReadFrames(r io.Reader, fn func(off int64, rec []byte) error) (int64, error
 			if errors.Is(err, io.EOF) {
 				return good, nil
 			}
-			return good, ErrTorn
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				return good, ErrTorn
+			}
+			return good, err
 		}
 		n := binary.LittleEndian.Uint32(h[:4])
 		if n > maxRecord {
@@ -54,7 +57,10 @@ func ReadFrames(r io.Reader, fn func(off int64, rec []byte) error) (int64, error
 		}
 		rec = rec[:n]
 		if _, err := io.ReadFull(br, rec); err != nil {
-			return good, ErrTorn
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return good, ErrTorn
+			}
+			return good, err
 		}
 		if crc32.Checksum(rec, table) != binary.LittleEndian.Uint32(h[4:]) {
 			return good, ErrTorn

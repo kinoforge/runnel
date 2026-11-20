@@ -90,12 +90,18 @@ func (e Endpoint) Authorize(r *http.Request) {
 	}
 }
 
+func noRedirectClient(timeout time.Duration, transport http.RoundTripper) *http.Client {
+	return &http.Client{Timeout: timeout, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+}
+
 func (e Endpoint) HTTPClient(timeout time.Duration) *http.Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	if e.TLS != nil {
 		t.TLSClientConfig = e.TLS
 	}
-	return &http.Client{Timeout: timeout, Transport: t}
+	return noRedirectClient(timeout, t)
 }
 
 func (e Endpoint) String() string { return e.Base }

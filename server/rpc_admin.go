@@ -54,7 +54,8 @@ func (h *adminRPC) DeleteNamespace(ctx context.Context, req *connect.Request[pb.
 	if err := runnel.DeleteNamespace(ctx, h.s.store, req.Msg.GetName()); err != nil {
 		return nil, h.s.rpcErr(err)
 	}
-	_ = h.s.reloadKeys(ctx)
+	h.s.evictNamespace(req.Msg.GetName())
+	h.s.refreshKeys()
 	return connect.NewResponse(&pb.DeleteNamespaceResponse{}), nil
 }
 
@@ -92,6 +93,7 @@ func (h *adminRPC) DeleteKey(ctx context.Context, req *connect.Request[pb.Delete
 	if err := runnel.DeleteKey(ctx, h.s.store, req.Msg.GetNamespace(), req.Msg.GetId()); err != nil {
 		return nil, h.s.rpcErr(err)
 	}
-	_ = h.s.reloadKeys(ctx)
+	h.s.evictKey(req.Msg.GetId())
+	h.s.refreshKeys()
 	return connect.NewResponse(&pb.DeleteKeyResponse{}), nil
 }

@@ -4,6 +4,40 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `callbacks.max_payload` sets the largest callback delivery body (the job size limit plus 64 KiB by default). A delivery that would be larger is sent without the job's result. The maintainer also takes its job limits from `limits`, like the server.
+
+### Security
+
+- No key can claim from the reserved `runnel.callbacks` queue or change its settings, over HTTP or gRPC. Before, a key with only the `worker` role could take delivery jobs and have the server sign and send a payload of its choosing.
+- A gRPC `Work` stream without valid credentials ends at once. Before, it held its connection open forever.
+- Deleting a key or namespace removes it from the server's cache at once, even when the reload that follows fails.
+- Callbacks also refuse the documentation, benchmarking, 6to4, Teredo, NAT64 and other reserved address ranges.
+- The remote Go client never follows a redirect, so its credentials never go to another host.
+- A finish over the API refuses a result larger than `limits.max_payload`.
+
+### Fixed
+
+- Hybrid store: a job cancelled or finished while its waiting copy was being moved to disk could come back as waiting and run. Moving jobs to disk and retiring finished ones now take turns.
+- Hybrid store: a finished job kept on disk and then retried could come back from a crash or a backup as both waiting and finished. A spilled waiting job cancelled just before a crash no longer leaves a stale entry.
+- Hybrid store: a crash while the log started a new segment could keep the store from opening again. A disk read error while opening is reported instead of being taken for a cut record, which dropped acknowledged changes.
+- Hybrid store: a checkpoint during a spill could stop the store with `ErrBroken`. A failed write to the disk store after the log stops the store instead of going on with the two out of step.
+- Hybrid store: due polling jobs can be claimed by id, as on the other stores. Repeated ids in one claim no longer corrupt counts on disk, a queue at its limit no longer holds up the other queues of a claim, and a flow step whose unique key is held by a job on disk waits on that job.
+- SQL stores: a job enqueued while the holder of its unique key finished could be stored without its key, so duplicates got in. Pruning could delete a job that was retried at the same moment.
+- Redis: pruning is no longer held up by thousands of older jobs in another state, and no longer reads every unique key on each run. Jobs and unique keys written by older versions are reached too, a little on each run.
+- Redis: a paused pool with `paused_until` can be swapped and reads back as written. A claim limited to ids also takes due polling and delayed jobs. A list that stops early returns a cursor for the rest. A write checks the state it expects.
+- A blocked job cancelled directly or expired by its deadline can be retried once its dependencies complete. A blocked job with a later start time counts its start timeout from that time once released.
+- `EnqueueTx` reads queue settings through the transaction every time. Before, it could use cached settings, cache settings that were rolled back, or deadlock SQLite.
+- A delivery job that cannot be made, such as one too large, no longer holds up every callback after it.
+- A schedule far behind fires once at its latest due time, instead of at an off-schedule time or in a burst. Its own meta can no longer replace `schedule` or `fire_at`, a schedule needs room for both, and negative `max_attempts` is refused.
+- A heartbeat that names no lease gets the default lease, not the shortest one. `run_at` and `deadline` must fall within `server.max_delay`, and a flow within `server.max_batch`.
+- The remote client tells `ErrFinal` from `ErrNotFinal` again. An empty `If-Match` no longer skips the check. `Prefer: wait` under a second is not echoed as `wait=0`.
+- Waits wake up and reconnect when the store's feed of finished jobs ends, instead of falling back to polling for good.
+- Rates, backoff factors and jitter that are not finite numbers, and negative delays and TTLs, are refused.
+- `runnel serve` waits for the maintainer and its callback workers before closing the store. A job run again on the same worker cancels its older run.
+- Config: an admin token over 512 characters, lease bounds that contradict each other and empty `client_names` are refused. Certificate DNS names match without regard to case. `runnel bench` hides passwords that contain `@`. `runnel admin` trims spaces around roles.
+
 ## [0.0.4-beta.2] - 2026-11-19
 
 ### Security

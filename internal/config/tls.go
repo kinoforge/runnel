@@ -55,6 +55,12 @@ func (t TLS) check() []error {
 	if t.ClientCA == "" && (t.RequireClientCert || len(t.ClientNames) > 0) {
 		errs = append(errs, errors.New("server.tls.require_client_cert and client_names need server.tls.client_ca"))
 	}
+	for _, name := range t.ClientNames {
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, errors.New("server.tls.client_names must not contain empty names"))
+			break
+		}
+	}
 	if _, ok := tlsVersions[t.MinVersion]; !ok {
 		errs = append(errs, fmt.Errorf("server.tls.min_version must be 1.2 or 1.3, not %q", t.MinVersion))
 	}

@@ -91,6 +91,7 @@ A queue's own `retention` and `dead_retention` win over these.
 | `callbacks.max_retry_after` | `1h` | the longest `Retry-After` a receiver may ask for |
 | `callbacks.unique_for` | `48h` | an event seen twice in this window is posted once |
 | `callbacks.secret_ttl` | `30s` | how long namespace secrets are cached |
+| `callbacks.max_payload` | `limits.max_payload` + 64 KiB | the largest delivery body. A delivery that would be larger is sent without the job's result |
 
 ## Limits
 

@@ -72,7 +72,15 @@ for i, j in ipairs(jobs) do
     end
   end
   if status == "ok" then
-    if j.unique_key ~= "" then redis.call("HSET", k("uniq"), j.unique_key, j.id .. "|" .. j.unique_until) end
+    if j.unique_key ~= "" then
+      redis.call("HSET", k("uniq"), j.unique_key, j.id .. "|" .. j.unique_until)
+      local uu = tonumber(j.unique_until) or 0
+      if uu > 0 then
+        redis.call("ZADD", k("uniq_exp"), s(uu), j.unique_key)
+      else
+        redis.call("ZREM", k("uniq_exp"), j.unique_key)
+      end
+    end
     j.pending = s(#waiton)
     j.deps = table.concat(deps, ",")
     j.dep_ids = nil

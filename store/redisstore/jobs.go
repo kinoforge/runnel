@@ -139,7 +139,7 @@ func (s *Store) Apply(ctx context.Context, ns string, changes []runnel.Change, n
 		for _, k := range mutable {
 			f[k] = m[k]
 		}
-		payload[i] = map[string]any{"id": c.Job.ID, "expect": m["version"], "lease_before": ms(c.LeaseBefore), "f": f}
+		payload[i] = map[string]any{"id": c.Job.ID, "expect": m["version"], "from": string(c.From), "lease_before": ms(c.LeaseBefore), "f": f}
 	}
 	arg, err := jsonArg(payload)
 	if err != nil {

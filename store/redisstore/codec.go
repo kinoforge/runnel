@@ -15,7 +15,7 @@ var fields = []string{"id", "queue", "kind", "state", "priority", "group", "pool
 	"updated_at", "started_at", "finished_at", "data", "deps"}
 
 var mutable = []string{"queue", "kind", "state", "priority", "group", "pool", "attempt", "max_attempts", "run_at",
-	"waiting_since", "start_by", "start_timeout", "deadline", "worker", "lease_until", "updated_at", "started_at", "finished_at", "data"}
+	"waiting_since", "start_by", "start_timeout", "deadline", "worker", "lease_until", "pending", "updated_at", "started_at", "finished_at", "data"}
 
 func ms(t time.Time) string { return strconv.FormatInt(runnel.Millis(t), 10) }
 

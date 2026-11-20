@@ -2,6 +2,25 @@ package hybrid
 
 import "math"
 
+func (c *claimer) queueFull(q sym) bool {
+	qk := countKey{cQueue, q, 0}
+	if c.full[qk] {
+		return true
+	}
+	sp := c.sp
+	qname := sp.syms.name(q)
+	cfg := sp.queueConfig(qname)
+	if over(cfg.MaxRunning, sp.active[qk]) {
+		c.full[qk] = true
+		return true
+	}
+	if cfg.Rate > 0 && c.bucket("q|"+qname, cfg.Rate, cfg.Burst).tokens < 1 {
+		c.full[qk] = true
+		return true
+	}
+	return false
+}
+
 func (c *claimer) admit(h *job) bool {
 	sp := c.sp
 	qk := countKey{cQueue, h.queue, 0}

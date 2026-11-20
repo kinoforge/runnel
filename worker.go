@@ -241,6 +241,10 @@ func (w *Worker) track(base context.Context, j *Job) (*inflight, context.Context
 	jctx, cancel := context.WithCancelCause(base)
 	r := &inflight{job: j, cancel: cancel}
 	w.mu.Lock()
+	if old := w.runs[j.ID]; old != nil {
+		old.lost.Store(true)
+		old.cancel(ErrLost)
+	}
 	w.runs[j.ID] = r
 	w.mu.Unlock()
 	return r, jctx

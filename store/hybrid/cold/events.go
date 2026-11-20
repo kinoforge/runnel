@@ -44,6 +44,9 @@ func (s *Store) PutEvents(ns string, evs []Event) error {
 
 // Events returns up to limit events of ns after sequence number after.
 func (s *Store) Events(ns string, after int64, limit int) ([]Event, error) {
+	if after < -1 {
+		after = -1
+	}
 	it, err := s.eventIter(ns)
 	if err != nil {
 		return nil, err

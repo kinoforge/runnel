@@ -1,6 +1,7 @@
 package hybrid
 
 import (
+	"errors"
 	"slices"
 	"time"
 
@@ -57,8 +58,10 @@ func (s *Store) retireSome(sp *space, cutoff int64, replace bool) (int, error) {
 	if len(ds) == 0 {
 		return 0, nil
 	}
-	jobs, err := s.coldJobs(sp.ns, ds, 0)
-	if err != nil {
+	var jobs []cold.Job
+	var err error
+	ds, jobs, err = s.coldJobs(sp.ns, ds, 0)
+	if err != nil || len(jobs) == 0 {
 		return 0, err
 	}
 	put := s.cold.Add
@@ -77,25 +80,30 @@ func (s *Store) retireSome(sp *space, cutoff int64, replace bool) (int, error) {
 	return len(ds), nil
 }
 
-func (s *Store) coldJobs(ns string, ds []draft, now int64) ([]cold.Job, error) {
+func (s *Store) coldJobs(ns string, ds []draft, now int64) ([]draft, []cold.Job, error) {
 	s.fill(ds)
-	out := make([]cold.Job, len(ds))
+	kept := make([]draft, 0, len(ds))
+	out := make([]cold.Job, 0, len(ds))
 	for i := range ds {
 		d := &ds[i]
 		if d.body == nil {
 			if err := s.fetch(ns, d); err != nil {
-				return nil, err
+				if errors.Is(err, errNoBody) {
+					continue
+				}
+				return nil, nil, err
 			}
 		}
 		var e enc
 		e.named(&d.h, d.names)
 		e.bytes(d.body)
 		h := &d.h
-		out[i] = cold.Job{NS: ns, ID: cold.ID(h.id), State: h.state, Finished: h.finished,
+		kept = append(kept, *d)
+		out = append(out, cold.Job{NS: ns, ID: cold.ID(h.id), State: h.state, Finished: h.finished,
 			Prio: h.prio, RunAt: h.runAt, StartBy: h.startBy, Deadline: h.deadline, Ready: h.runAt <= now,
-			Queue: d.names[0], Kind: d.names[1], Group: d.names[2], Data: e.b}
+			Queue: d.names[0], Kind: d.names[1], Group: d.names[2], Data: e.b})
 	}
-	return out, nil
+	return kept, out, nil
 }
 
 func (s *Store) dropCold(sp *space, ids []uid) error {
@@ -109,6 +117,7 @@ func (s *Store) dropCold(sp *space, ids []uid) error {
 	}
 	sp.mu.Lock()
 	sp.addCold(delta)
+	sp.retired.Add(1)
 	sp.mu.Unlock()
 	return nil
 }
@@ -134,6 +143,20 @@ func (s *Store) coldGet(ns string, id uid) (*runnel.Job, error) {
 		return nil, err
 	}
 	return t.full(ns, &h, body)
+}
+
+func (s *Store) rebuildOne(ns string, d *draft) (*runnel.Job, error) {
+	if d.body == nil {
+		if err := s.fetch(ns, d); err != nil {
+			if errors.Is(err, errNoBody) {
+				if cj, cerr := s.coldGet(ns, d.h.id); cerr == nil && cj != nil {
+					return cj, nil
+				}
+			}
+			return nil, err
+		}
+	}
+	return d.job(ns)
 }
 
 func (sp *space) retirable(cutoff int64, n int) []draft {

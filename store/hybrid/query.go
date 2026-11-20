@@ -29,15 +29,9 @@ func (s *Store) rebuild(ns string, ds []draft) ([]*runnel.Job, error) {
 	s.fill(ds)
 	out := make([]*runnel.Job, len(ds))
 	for i := range ds {
-		d := &ds[i]
-		if d.body == nil {
-			if err := s.fetch(ns, d); err != nil {
-				return nil, fmt.Errorf("hybrid: job %s: %w", d.h.id, err)
-			}
-		}
-		j, err := d.job(ns)
+		j, err := s.rebuildOne(ns, &ds[i])
 		if err != nil {
-			return nil, fmt.Errorf("hybrid: job %s: %w", d.h.id, err)
+			return nil, fmt.Errorf("hybrid: job %s: %w", ds[i].h.id, err)
 		}
 		out[i] = j
 	}
@@ -233,7 +227,10 @@ func (s *Store) Due(_ context.Context, ns string, kind runnel.DueKind, now time.
 		})
 		return nil
 	})
-	if err != nil || len(want) == len(ds) {
+	if err != nil {
+		return nil, err
+	}
+	if len(want) == len(ds) {
 		return s.rebuild(ns, ds)
 	}
 	ids := make([]uid, len(want))

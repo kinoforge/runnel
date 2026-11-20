@@ -134,11 +134,13 @@ func etag(v any) (string, error) {
 }
 
 type preconditions struct {
-	match, noneMatch []string
+	hasMatch, hasNoneMatch bool
+	match, noneMatch       []string
 }
 
 func conditions(r *http.Request) preconditions {
-	return preconditions{match: tags(r.Header.Values("If-Match")), noneMatch: tags(r.Header.Values("If-None-Match"))}
+	mv, nv := r.Header.Values("If-Match"), r.Header.Values("If-None-Match")
+	return preconditions{hasMatch: len(mv) > 0, hasNoneMatch: len(nv) > 0, match: tags(mv), noneMatch: tags(nv)}
 }
 
 func tags(values []string) []string {
@@ -153,7 +155,7 @@ func tags(values []string) []string {
 	return out
 }
 
-func (p preconditions) set() bool { return p.match != nil || p.noneMatch != nil }
+func (p preconditions) set() bool { return p.hasMatch || p.hasNoneMatch }
 
 func (p preconditions) check(cur any, found bool) error {
 	if !p.set() {
@@ -167,10 +169,10 @@ func (p preconditions) check(cur any, found bool) error {
 		}
 		tag = t
 	}
-	if p.match != nil && (!found || !matches(p.match, tag, false)) {
+	if p.hasMatch && (!found || !matches(p.match, tag, false)) {
 		return runnel.ErrStale
 	}
-	if p.noneMatch != nil && found && matches(p.noneMatch, tag, true) {
+	if p.hasNoneMatch && found && matches(p.noneMatch, tag, true) {
 		return runnel.ErrStale
 	}
 	return nil
@@ -178,10 +180,13 @@ func (p preconditions) check(cur any, found bool) error {
 
 func matches(list []string, tag string, weak bool) bool {
 	for _, t := range list {
+		if t == "*" {
+			return true
+		}
 		if weak {
 			t = strings.TrimPrefix(t, "W/")
 		}
-		if t == "*" || t == tag {
+		if t == tag {
 			return true
 		}
 	}

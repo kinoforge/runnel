@@ -79,6 +79,9 @@ func (s *Store) applyOne(t *tx, c runnel.Change, body []byte, now int64) (bool, 
 	}
 	h := sp.syms.hot(c.Job, &old)
 	h.id, h.version, h.pending, h.created, h.flags = id, old.version+1, old.pending, old.created, old.flags
+	if h.final() || h.is(stWaiting) {
+		h.pending = 0
+	}
 	t.put(h, body)
 	if h.final() && !old.final() {
 		return true, s.finalize(t, h, key, now)
@@ -135,11 +138,11 @@ func (s *Store) finalize(t *tx, h job, key string, now int64) error {
 		case k.pending > 1:
 			k.pending--
 		default:
-			k.pending, k.state, k.waitingSince = 0, stWaiting, now
-			k.runAt = max(k.runAt, now)
+			base := max(k.runAt, now)
+			k.pending, k.state, k.runAt, k.waitingSince = 0, stWaiting, base, base
 			k.startBy = 0
 			if k.window > 0 {
-				k.startBy = now + k.window
+				k.startBy = base + k.window
 			}
 		}
 		t.putHot(k)

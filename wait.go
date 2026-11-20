@@ -16,31 +16,49 @@ type endHub struct {
 	src EndWatcher
 	ns  string
 
-	mu    sync.Mutex
-	subs  map[string]map[chan struct{}]struct{}
-	n     int
-	stop  context.CancelFunc
-	idle  *time.Timer
-	ready bool
+	startMu sync.Mutex
+	mu      sync.Mutex
+	subs    map[string]map[chan struct{}]struct{}
+	n       int
+	stop    context.CancelFunc
+	idle    *time.Timer
+	ready   bool
+}
+
+func (h *endHub) ensure() {
+	h.mu.Lock()
+	active := h.stop != nil
+	h.mu.Unlock()
+	if active {
+		return
+	}
+	h.startMu.Lock()
+	defer h.startMu.Unlock()
+	h.mu.Lock()
+	active = h.stop != nil
+	h.mu.Unlock()
+	if active {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ends, err := h.src.Ended(ctx, h.ns)
+	if err != nil {
+		cancel()
+		return
+	}
+	h.mu.Lock()
+	h.stop, h.ready = cancel, true
+	h.mu.Unlock()
+	go h.forward(ctx, cancel, ends)
 }
 
 func (h *endHub) watch(id string) (<-chan struct{}, bool, func()) {
 	ch := make(chan struct{}, 1)
+	h.ensure()
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if h.idle != nil {
 		h.idle.Stop()
 		h.idle = nil
-	}
-	if h.stop == nil {
-		ctx, cancel := context.WithCancel(context.Background())
-		ends, err := h.src.Ended(ctx, h.ns)
-		if err != nil {
-			cancel()
-		} else {
-			h.stop, h.ready = cancel, true
-			go h.forward(ctx, ends)
-		}
 	}
 	if h.subs[id] == nil {
 		h.subs[id] = map[chan struct{}]struct{}{}
@@ -48,6 +66,7 @@ func (h *endHub) watch(id string) (<-chan struct{}, bool, func()) {
 	h.subs[id][ch] = struct{}{}
 	h.n++
 	live := h.ready
+	h.mu.Unlock()
 	return ch, live, func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -70,13 +89,27 @@ func (h *endHub) shutdown() {
 	}
 }
 
-func (h *endHub) forward(ctx context.Context, ends <-chan string) {
+func (h *endHub) forward(ctx context.Context, cancel context.CancelFunc, ends <-chan string) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case id, ok := <-ends:
 			if !ok {
+				h.mu.Lock()
+				if ctx.Err() == nil {
+					cancel()
+					h.stop, h.ready = nil, false
+					for _, m := range h.subs {
+						for ch := range m {
+							select {
+							case ch <- struct{}{}:
+							default:
+							}
+						}
+					}
+				}
+				h.mu.Unlock()
 				return
 			}
 			h.mu.Lock()

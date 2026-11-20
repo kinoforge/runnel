@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -157,17 +158,17 @@ func pct(d []time.Duration, p int) time.Duration {
 	return s[min(len(s)-1, len(s)*p/100)].Round(latencyRound)
 }
 
-func redact(u string) string {
-	for i := range u {
-		if u[i] == '@' {
-			for k := i; k >= 0; k-- {
-				if u[k] == '/' {
-					return u[:k+1] + "***" + u[i:]
-				}
-			}
-		}
+func redact(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.User != nil {
+		return u.Redacted()
 	}
-	return u
+	if i := strings.LastIndexByte(raw, '@'); i >= 0 {
+		if k := strings.LastIndexByte(raw[:i], '/'); k >= 0 {
+			return raw[:k+1] + "***" + raw[i:]
+		}
+		return "***" + raw[i:]
+	}
+	return raw
 }
 
 func cleanup(ctx context.Context, s runnel.Store, ns string) {

@@ -2,7 +2,6 @@ package runnel
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -47,6 +46,7 @@ type MaintainerConfig struct {
 	Archive    bool
 	Batch      int
 	Callbacks  CallbackConfig
+	Limits     Limits
 	Logger     *slog.Logger
 }
 
@@ -61,7 +61,9 @@ type Maintainer struct {
 	clock Clock
 
 	mu        sync.Mutex
+	wg        sync.WaitGroup
 	clients   map[string]*Client
+	hookCli   map[string]*Client
 	lastPrune map[string]time.Time
 	specs     map[string]cron.Schedule
 	hooks     map[string]context.CancelFunc
@@ -86,8 +88,14 @@ func NewMaintainer(s Store, cfg MaintainerConfig) *Maintainer {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.Limits == (Limits{}) {
+		cfg.Limits = DefaultLimits
+	}
 	cfg.Callbacks = cfg.Callbacks.withDefaults()
-	return &Maintainer{store: s, cfg: cfg, log: cfg.Logger, clock: ClockOf(s), clients: map[string]*Client{}, lastPrune: map[string]time.Time{},
+	if cfg.Callbacks.MaxPayload <= 0 {
+		cfg.Callbacks.MaxPayload = cfg.Limits.MaxPayload + defaultCallbackRoom
+	}
+	return &Maintainer{store: s, cfg: cfg, log: cfg.Logger, clock: ClockOf(s), clients: map[string]*Client{}, hookCli: map[string]*Client{}, lastPrune: map[string]time.Time{},
 		specs: map[string]cron.Schedule{}, hooks: map[string]context.CancelFunc{}}
 }
 
@@ -96,7 +104,7 @@ func (m *Maintainer) client(ns string) *Client {
 	defer m.mu.Unlock()
 	c := m.clients[ns]
 	if c == nil {
-		c = NewClient(m.store, ns)
+		c = NewClient(m.store, ns).WithLimits(m.cfg.Limits)
 		m.clients[ns] = c
 	}
 	return c
@@ -123,6 +131,8 @@ func (m *Maintainer) Run(ctx context.Context) error {
 		nss, err := m.namespaces(ctx)
 		if err != nil && ctx.Err() == nil {
 			m.log.Error("runnel: listing namespaces failed", "err", err)
+		} else if err == nil && len(m.cfg.Namespaces) == 0 {
+			m.dropNamespaces(nss)
 		}
 		for _, ns := range nss {
 			if ctx.Err() != nil {
@@ -143,29 +153,33 @@ func (m *Maintainer) Run(ctx context.Context) error {
 	}
 }
 
-func (m *Maintainer) ensureHookWorker(ctx context.Context, ns string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.hooks[ns]; ok {
-		return
+func (m *Maintainer) dropNamespaces(active []string) {
+	live := make(map[string]bool, len(active))
+	for _, ns := range active {
+		live[ns] = true
 	}
-	hctx, cancel := context.WithCancel(ctx)
-	m.hooks[ns] = cancel
-	w := NewWorker(m.store, ns, WorkerConfig{Queues: []string{m.cfg.Callbacks.Queue}, Concurrency: m.cfg.Callbacks.Concurrency, Logger: m.log})
-	w.Handle(CallbackKind, NewCallbackHandler(m.store, m.cfg.Callbacks))
-	go func() {
-		if err := w.Run(hctx); err != nil {
-			m.log.Error("runnel: callback worker stopped", "namespace", ns, "err", err)
-		}
-	}()
-}
-
-func (m *Maintainer) stopHooks() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for ns, cancel := range m.hooks {
-		cancel()
-		delete(m.hooks, ns)
+		if !live[ns] {
+			cancel()
+			delete(m.hooks, ns)
+		}
+	}
+	for ns := range m.clients {
+		if !live[ns] {
+			delete(m.clients, ns)
+		}
+	}
+	for ns := range m.hookCli {
+		if !live[ns] {
+			delete(m.hookCli, ns)
+		}
+	}
+	for ns := range m.lastPrune {
+		if !live[ns] {
+			delete(m.lastPrune, ns)
+		}
 	}
 }
 
@@ -248,7 +262,7 @@ func (m *Maintainer) deadlines(ctx context.Context, ns string, now time.Time) er
 		}
 		n := j.Clone()
 		n.addError(deadlinePassed, now)
-		n.Worker, n.LeaseUntil, n.UpdatedAt = "", time.Time{}, now
+		n.Pending, n.Worker, n.LeaseUntil, n.UpdatedAt = 0, "", time.Time{}, now
 		end(n, StateExpired, now)
 		changes = append(changes, Change{Job: n, From: j.State})
 	}
@@ -257,64 +271,6 @@ func (m *Maintainer) deadlines(ctx context.Context, ns string, now time.Time) er
 	}
 	_, err = m.store.Apply(ctx, ns, changes, now)
 	return err
-}
-
-func (m *Maintainer) callbacks(ctx context.Context, ns string, now time.Time) error {
-	cur, err := m.store.Cursor(ctx, ns, "callbacks")
-	if err != nil {
-		return err
-	}
-	events, err := m.store.Events(ctx, ns, cur, m.cfg.Batch)
-	if err != nil || len(events) == 0 {
-		return err
-	}
-	ids := make([]string, 0, len(events))
-	for _, e := range events {
-		ids = append(ids, e.JobID)
-	}
-	found, err := m.store.Get(ctx, ns, ids)
-	if err != nil {
-		return err
-	}
-	byID := make(map[string]*Job, len(found))
-	for _, j := range found {
-		byID[j.ID] = j
-	}
-	var hooks []*Job
-	var seqs []int64
-	for _, e := range events {
-		j := byID[e.JobID]
-		if j == nil || j.CallbackURL == "" || j.Queue == m.cfg.Callbacks.Queue {
-			continue
-		}
-		hook, err := NewCallbackJob(j, "job."+string(e.State), e.Seq, m.cfg.Callbacks)
-		if err != nil {
-			return err
-		}
-		hooks, seqs = append(hooks, hook), append(seqs, e.Seq)
-	}
-	upTo, failed := events[len(events)-1].Seq, error(nil)
-	if len(hooks) > 0 {
-		res, err := m.client(ns).EnqueueJobs(ctx, hooks)
-		if err != nil {
-			return err
-		}
-		for i, r := range res {
-			if r.Err != nil {
-				upTo, failed = seqs[i]-1, r.Err
-				break
-			}
-		}
-	}
-	if upTo > cur {
-		if _, err := m.store.SwapCursor(ctx, ns, "callbacks", cur, upTo); err != nil {
-			return err
-		}
-	}
-	if failed != nil {
-		return fmt.Errorf("runnel: callback delivery not queued: %w", failed)
-	}
-	return nil
 }
 
 func pick(override, fallback time.Duration) time.Duration {

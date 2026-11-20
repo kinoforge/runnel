@@ -55,6 +55,8 @@ var (
 	ErrLocked = errors.New("wal: directory is in use by another process")
 	// ErrClosed means the log was closed.
 	ErrClosed = errors.New("wal: closed")
+	// ErrTooLarge means a single record exceeded the maximum frame size.
+	ErrTooLarge = errors.New("wal: record exceeds maximum size")
 )
 
 type Options struct {
@@ -143,6 +145,7 @@ func (l *Log) Path(seg uint64) string {
 // the segment and offset where the record starts. A torn frame at the end of the
 // newest segment is cut off; anywhere else it is an error.
 func (l *Log) Replay(from uint64, fn func(seg uint64, off int64, rec []byte) error) error {
+	l.cleanTmp()
 	segs, err := l.Segments()
 	if err != nil {
 		return err
@@ -207,6 +210,19 @@ func (l *Log) openSegment(seg uint64) error {
 	return SyncDir(l.dir)
 }
 
+func (l *Log) cleanTmp() {
+	entries, err := os.ReadDir(l.dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, segPrefix) && strings.HasSuffix(name, segSuffix+".tmp") {
+			_ = os.Remove(filepath.Join(l.dir, name))
+		}
+	}
+}
+
 // Rotate starts the next segment and returns its number. Records appended
 // before the switch go to the older segments, which are written and synced
 // before it returns; appends go on meanwhile, into the new segment.
@@ -215,18 +231,29 @@ func (l *Log) Rotate() (uint64, error) {
 	defer l.io.Unlock()
 	l.syncMu.Lock()
 	defer l.syncMu.Unlock()
-	next, err := os.OpenFile(l.Path(l.seg+1), os.O_CREATE|os.O_WRONLY|os.O_APPEND, filePerm)
+	nextSeg := l.seg + 1
+	tmpPath := l.Path(nextSeg) + ".tmp"
+	next, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, filePerm)
 	if err != nil {
 		return 0, err
 	}
 	l.mu.Lock()
 	old, data, upto := l.f, l.buf, l.appended
 	l.buf, l.spare = l.spare[:0], nil
-	l.f, l.seg, l.end = next, l.seg+1, 0
-	seg := l.seg
+	l.f, l.seg, l.end = next, nextSeg, 0
 	l.mu.Unlock()
 	l.size.Store(0)
 	if err := finish(old, data); err != nil {
+		_ = next.Close()
+		_ = os.Remove(tmpPath)
+		l.fail(err)
+		return 0, err
+	}
+	if err := os.Rename(tmpPath, l.Path(nextSeg)); err != nil {
+		l.fail(err)
+		return 0, err
+	}
+	if err := SyncDir(l.dir); err != nil {
 		l.fail(err)
 		return 0, err
 	}
@@ -235,16 +262,18 @@ func (l *Log) Rotate() (uint64, error) {
 	l.spare = data
 	l.cond.Broadcast()
 	l.mu.Unlock()
-	return seg, SyncDir(l.dir)
+	return nextSeg, nil
 }
 
 func finish(f *os.File, data []byte) error {
+	var err error
 	if len(data) > 0 {
-		if _, err := f.Write(data); err != nil {
-			return err
-		}
+		_, err = f.Write(data)
 	}
-	return errors.Join(f.Sync(), f.Close())
+	if err == nil {
+		err = f.Sync()
+	}
+	return errors.Join(err, f.Close())
 }
 
 // Sync writes and syncs every record appended so far. Writers carry on
@@ -256,6 +285,7 @@ func (l *Log) Sync() error {
 	if err == nil {
 		err = l.syncWritten()
 	}
+	l.fail(err)
 	return err
 }
 
@@ -278,15 +308,17 @@ func (l *Log) Remove(before uint64) error {
 // Close flushes and syncs what is queued and releases the directory.
 func (l *Log) Close() error {
 	var err error
+	l.fail(ErrClosed)
 	if l.f != nil {
 		close(l.done)
 		l.wg.Wait()
 		l.io.Lock()
+		l.syncMu.Lock()
 		err = l.flushLocked(true)
 		err = errors.Join(err, l.f.Close())
+		l.syncMu.Unlock()
 		l.io.Unlock()
 	}
-	l.fail(ErrClosed)
 	return errors.Join(err, l.lock.Close())
 }
 

@@ -41,13 +41,14 @@ type Store struct {
 	mu     sync.RWMutex
 	spaces map[string]*space
 
-	hub    hub
-	failed atomic.Bool
-	errMu  sync.Mutex
-	err    error
-	snapMu sync.Mutex
-	done   chan struct{}
-	wg     sync.WaitGroup
+	hub       hub
+	failed    atomic.Bool
+	errMu     sync.Mutex
+	err       error
+	snapMu    sync.Mutex
+	closeOnce sync.Once
+	done      chan struct{}
+	wg        sync.WaitGroup
 }
 
 // Memory returns a store that keeps nothing on disk.
@@ -130,13 +131,13 @@ func (s *Store) load() error {
 	if err := s.recover(); err != nil {
 		return err
 	}
-	if err := s.loadWaiting(); err != nil {
-		return err
-	}
 	if err := s.log.Start(); err != nil {
 		return err
 	}
-	return s.retire(math.MaxInt64, true)
+	if err := s.retire(math.MaxInt64, true); err != nil {
+		return err
+	}
+	return s.loadWaiting()
 }
 
 func (s *Store) space(ns string) *space {
@@ -237,19 +238,18 @@ func (s *Store) Migrate(context.Context) error { return s.broken() }
 
 // Close stops background work and flushes the log.
 func (s *Store) Close() error {
-	select {
-	case <-s.done:
-		return nil
-	default:
-	}
-	close(s.done)
-	s.wg.Wait()
-	if s.log == nil {
-		return nil
-	}
-	err := s.log.Close()
-	s.files.close()
-	return errors.Join(err, s.cold.Close())
+	var err error
+	s.closeOnce.Do(func() {
+		close(s.done)
+		s.wg.Wait()
+		if s.log == nil {
+			return
+		}
+		err = s.log.Close()
+		s.files.close()
+		err = errors.Join(err, s.cold.Close())
+	})
+	return err
 }
 
 // Subscribe signals when jobs in ns may be ready to claim.

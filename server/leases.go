@@ -45,20 +45,27 @@ type claimArgs struct {
 	lease, wait time.Duration
 }
 
-func (s *Server) claimJobs(ctx context.Context, a claimArgs) ([]*runnel.Job, error) {
-	if len(a.queues) == 0 || len(a.queues) > s.cfg.MaxClaimQueues {
-		return nil, fmt.Errorf("%w: claim 1 to %d queues", runnel.ErrInvalid, s.cfg.MaxClaimQueues)
+func (s *Server) checkClaimQueues(queues []string) error {
+	if len(queues) == 0 || len(queues) > s.cfg.MaxClaimQueues {
+		return fmt.Errorf("%w: claim 1 to %d queues", runnel.ErrInvalid, s.cfg.MaxClaimQueues)
 	}
-	for _, q := range a.queues {
-		if !runnel.ValidName(q) {
-			return nil, fmt.Errorf("%w: bad queue %q", runnel.ErrInvalid, q)
+	for _, q := range queues {
+		if q == runnel.CallbackQueue {
+			return fmt.Errorf("%w: %s is reserved", runnel.ErrInvalid, runnel.CallbackQueue)
 		}
+		if !runnel.ValidName(q) {
+			return fmt.Errorf("%w: bad queue %q", runnel.ErrInvalid, q)
+		}
+	}
+	return nil
+}
+
+func (s *Server) claimJobs(ctx context.Context, a claimArgs) ([]*runnel.Job, error) {
+	if err := s.checkClaimQueues(a.queues); err != nil {
+		return nil, err
 	}
 	limit := min(max(a.limit, 1), s.cfg.MaxClaim)
 	lease := s.clampLease(a.lease)
-	if a.lease == 0 {
-		lease = s.cfg.DefaultLease
-	}
 	deadline := time.Now().Add(min(max(a.wait, 0), s.cfg.MaxClaimWait))
 	h := s.hub(a.ns)
 	for {
@@ -156,6 +163,9 @@ func (s *Server) finishJob(ctx context.Context, f finishArgs) error {
 	if err := f.outcome.Validate(); err != nil {
 		return err
 	}
+	if len(f.outcome.Result) > s.cfg.Limits.MaxPayload {
+		return fmt.Errorf("%w: result exceeds the size limit", runnel.ErrInvalid)
+	}
 	j, err := s.client(f.ns).Get(ctx, f.id)
 	if err != nil {
 		return err
@@ -204,5 +214,8 @@ func (s *Server) dependencies(w http.ResponseWriter, r *http.Request, _ principa
 }
 
 func (s *Server) clampLease(d time.Duration) time.Duration {
+	if d == 0 {
+		return s.cfg.DefaultLease
+	}
 	return min(max(d, s.cfg.MinLease), s.cfg.MaxLease)
 }

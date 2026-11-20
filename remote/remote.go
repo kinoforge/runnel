@@ -38,7 +38,7 @@ type Client struct {
 // New returns a client for the server at baseURL, authenticating with an API
 // key.
 func New(baseURL, key, namespace string) *Client {
-	return &Client{base: strings.TrimRight(baseURL, "/"), auth: bearer(key), ns: namespace, http: &http.Client{Timeout: httpTimeout},
+	return &Client{base: strings.TrimRight(baseURL, "/"), auth: bearer(key), ns: namespace, http: noRedirectClient(httpTimeout, nil),
 		resultWait: resultWait, claimWait: workerClaimWait}
 }
 
@@ -96,14 +96,23 @@ func (e *APIError) Unwrap() error {
 	case http.StatusNotFound:
 		return runnel.ErrNotFound
 	case http.StatusConflict:
-		return runnel.ErrConflict
+		switch e.Title {
+		case "final":
+			return runnel.ErrFinal
+		case "not final":
+			return runnel.ErrNotFinal
+		default:
+			return runnel.ErrConflict
+		}
 	case http.StatusPreconditionFailed:
 		return runnel.ErrStale
 	case http.StatusTooManyRequests:
-		if e.Title == "queue full" {
+		switch e.Title {
+		case "queue full":
 			return runnel.ErrQueueFull
+		case "group full":
+			return runnel.ErrGroupFull
 		}
-		return runnel.ErrGroupFull
 	case http.StatusUnprocessableEntity:
 		return runnel.ErrDependency
 	case http.StatusInsufficientStorage:

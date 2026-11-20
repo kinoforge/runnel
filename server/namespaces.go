@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"time"
@@ -89,7 +90,7 @@ func (s *Server) putNamespace(w http.ResponseWriter, r *http.Request, _ principa
 		CallbackSecret *string `json:"callback_secret"`
 	}
 	if r.ContentLength != 0 {
-		if err := decode(r, &body); err != nil {
+		if err := decode(r, &body); err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
 	}
@@ -124,7 +125,7 @@ func (s *Server) upsertNamespace(ctx context.Context, name string, secret *strin
 	if err := runnel.PutNamespace(ctx, s.store, n); err != nil {
 		return n, false, err
 	}
-	_ = s.reloadKeys(ctx)
+	s.refreshKeys()
 	return n, created, nil
 }
 
@@ -146,10 +147,12 @@ func (s *Server) getNamespace(w http.ResponseWriter, r *http.Request, _ principa
 }
 
 func (s *Server) deleteNamespace(w http.ResponseWriter, r *http.Request, _ principal) error {
-	if err := runnel.DeleteNamespace(r.Context(), s.store, r.PathValue("name")); err != nil {
+	ns := r.PathValue("name")
+	if err := runnel.DeleteNamespace(r.Context(), s.store, ns); err != nil {
 		return err
 	}
-	_ = s.reloadKeys(r.Context())
+	s.evictNamespace(ns)
+	s.refreshKeys()
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -172,6 +175,8 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, _ principal) 
 }
 
 func (s *Server) newKey(ctx context.Context, ns, name string, roles []string, expires time.Time) (string, runnel.APIKey, error) {
+	s.keyMu.Lock()
+	defer s.keyMu.Unlock()
 	if _, err := s.namespace(ctx, ns); err != nil {
 		return "", runnel.APIKey{}, err
 	}
@@ -193,15 +198,17 @@ func (s *Server) newKey(ctx context.Context, ns, name string, roles []string, ex
 		_ = runnel.DeleteKey(ctx, s.store, ns, key.ID)
 		return "", runnel.APIKey{}, err
 	}
-	_ = s.reloadKeys(ctx)
+	s.refreshKeys()
 	return token, key, nil
 }
 
 func (s *Server) deleteKey(w http.ResponseWriter, r *http.Request, _ principal) error {
-	if err := runnel.DeleteKey(r.Context(), s.store, r.PathValue("name"), r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	if err := runnel.DeleteKey(r.Context(), s.store, r.PathValue("name"), id); err != nil {
 		return err
 	}
-	_ = s.reloadKeys(r.Context())
+	s.evictKey(id)
+	s.refreshKeys()
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

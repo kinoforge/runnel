@@ -27,17 +27,29 @@ func (s *Store) spiller() {
 }
 
 func (s *Store) balance() error {
+	s.coldMu.Lock()
+	defer s.coldMu.Unlock()
 	s.waitMu.Lock()
 	defer s.waitMu.Unlock()
 	spaces := s.allSpaces()
 	total := s.hot.Load()
-	for total > s.hotJobs {
-		sp := slices.MaxFunc(spaces, func(a, b *space) int { return cmp.Compare(a.hot.Load(), b.hot.Load()) })
-		n, err := s.spillSome(sp, min(total-s.hotJobs, s.opt.SpillBatch))
-		if err != nil || n == 0 {
-			return err
+	if total > s.hotJobs {
+		slices.SortFunc(spaces, func(a, b *space) int { return cmp.Compare(b.hot.Load(), a.hot.Load()) })
+		for _, sp := range spaces {
+			for total > s.hotJobs {
+				n, err := s.spillSome(sp, min(total-s.hotJobs, s.opt.SpillBatch))
+				if err != nil {
+					return err
+				}
+				if n == 0 {
+					break
+				}
+				total -= n
+			}
+			if total <= s.hotJobs {
+				break
+			}
 		}
-		total -= n
 	}
 	for _, sp := range spaces {
 		for _, q := range sp.lowQueues(s.opt.RefillAhead) {
@@ -46,8 +58,11 @@ func (s *Store) balance() error {
 					return nil
 				}
 				n, err := s.refill(sp, q)
-				if err != nil || n == 0 {
+				if err != nil {
 					return err
+				}
+				if n == 0 {
+					break
 				}
 				total += int64(n)
 			}
@@ -83,8 +98,10 @@ func (s *Store) spillStart(sp *space, n int64) (*spill, error) {
 	if len(p.ds) == 0 {
 		return nil, nil
 	}
-	jobs, err := s.coldJobs(sp.ns, p.ds, p.now)
-	if err != nil {
+	var jobs []cold.Job
+	var err error
+	p.ds, jobs, err = s.coldJobs(sp.ns, p.ds, p.now)
+	if err != nil || len(jobs) == 0 {
 		return nil, err
 	}
 	if p.delta, err = s.cold.Add(jobs); err != nil {
@@ -223,7 +240,8 @@ func (s *Store) bring(sp *space, jobs []cold.Job, q string, head *cold.Head) err
 	}
 	delta, err := s.cold.Remove(jobs)
 	if err != nil {
-		return err
+		s.fail(err)
+		return s.broken()
 	}
 	sp.mu.Lock()
 	sp.addCold(delta)

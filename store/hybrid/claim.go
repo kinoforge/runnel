@@ -70,6 +70,8 @@ func (c *claimer) run() {
 	}
 	if len(c.req.IDs) == 0 {
 		c.polls(queues)
+	} else {
+		c.pollsByID(queues)
 	}
 	var open []sym
 	for _, q := range queues {
@@ -114,6 +116,22 @@ func (c *claimer) polls(queues []sym) {
 	}
 }
 
+func (c *claimer) pollsByID(queues []sym) {
+	for _, s := range slices.Compact(slices.Sorted(slices.Values(c.req.IDs))) {
+		if len(c.out) >= c.req.Limit {
+			return
+		}
+		id, ok := parseID(s)
+		if !ok {
+			continue
+		}
+		if h, ok := c.sp.get(id); ok && h.is(stPolling) && h.runAt <= c.now && slices.Contains(queues, h.queue) {
+			h.state, h.worker, h.lease = stRunning, c.worker, c.lease
+			c.save(h)
+		}
+	}
+}
+
 func (c *claimer) save(h job) {
 	h.version++
 	h.updated = c.now
@@ -142,10 +160,14 @@ func (c *claimer) byID(open []sym) {
 		}
 	}
 	slices.SortFunc(cands, func(a, b job) int {
-		if lessReady(readyOf(&a), readyOf(&b)) {
+		ra, rb := readyOf(&a), readyOf(&b)
+		if lessReady(ra, rb) {
 			return -1
 		}
-		return 1
+		if lessReady(rb, ra) {
+			return 1
+		}
+		return 0
 	})
 	for _, h := range cands {
 		if len(c.out) >= c.req.Limit {
@@ -160,6 +182,9 @@ func (c *claimer) byID(open []sym) {
 func (c *claimer) ready(open []sym) {
 	h := &merge{}
 	for _, q := range open {
+		if c.queueFull(q) {
+			continue
+		}
 		t, stop := c.sp.ready[q], c.sp.stop(q)
 		if t == nil && stop == nil {
 			continue
@@ -172,6 +197,10 @@ func (c *claimer) ready(open []sym) {
 	examined := 0
 	for h.Len() > 0 && len(c.out) < c.req.Limit && examined < maxExamine {
 		cur := h.items[0]
+		if c.full[countKey{cQueue, cur.q, 0}] {
+			heap.Pop(h)
+			continue
+		}
 		if cur.held() {
 			c.held = append(c.held, c.sp.syms.name(cur.q))
 			return
@@ -181,6 +210,10 @@ func (c *claimer) ready(open []sym) {
 				c.take(j)
 			} else {
 				examined++
+				if c.full[countKey{cQueue, cur.q, 0}] {
+					heap.Pop(h)
+					continue
+				}
 			}
 		}
 		if cur.next() {

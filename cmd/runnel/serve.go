@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/kinoforge/runnel"
@@ -75,10 +76,17 @@ func serve(ctx context.Context, args []string) error {
 	}
 	defer s.Close()
 	log := cfg.Log.NewLogger(os.Stderr)
+	mctx, stopMaint := context.WithCancel(ctx)
+	var mwg sync.WaitGroup
+	defer func() {
+		stopMaint()
+		mwg.Wait()
+	}()
 	if cfg.Maintainer.Enabled {
-		go runMaintainer(ctx, s, cfg, log)
+		mwg.Go(func() { runMaintainer(mctx, s, cfg, log) })
 	}
 	api := server.New(s, serverConfig(cfg, log))
+	defer api.Close()
 	var handler http.Handler = api
 	if cfg.Tracing.Enabled {
 		tp, err := tracing.Setup(ctx, buildVersion())
@@ -202,7 +210,9 @@ func runMaintainer(ctx context.Context, s runnel.Store, cfg config.Config, log *
 			MaxRetryAfter: cfg.Callbacks.MaxRetryAfter,
 			UniqueFor:     cfg.Callbacks.UniqueFor,
 			SecretTTL:     cfg.Callbacks.SecretTTL,
+			MaxPayload:    cfg.Callbacks.MaxPayload,
 		},
+		Limits: runnel.Limits(cfg.Limits),
 	})
 	if err := m.Run(ctx); err != nil {
 		log.Error("maintainer stopped", "err", err)
