@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.0.4-beta.3] - 2026-11-21
+
 ### Added
 
 - `callbacks.max_payload` sets the largest callback delivery body (the job size limit plus 64 KiB by default). A delivery that would be larger is sent without the job's result. The maintainer also takes its job limits from `limits`, like the server.
@@ -189,7 +191,8 @@ First release, for trying Runnel out. The model is settled; the API may still ch
 - Prometheus metrics, OpenAPI 3.1 document at `/openapi.yaml`, `runnel bench`, and signed multi-platform releases with SBOMs.
 - SPEC.md, every rule with an ID and the tests that check it; DESIGN.md, the decisions behind them; RUNBOOK.md, how to operate it.
 
-[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.4-beta.2...HEAD
+[Unreleased]: https://github.com/kinoforge/runnel/compare/v0.0.4-beta.3...HEAD
+[0.0.4-beta.3]: https://github.com/kinoforge/runnel/compare/v0.0.4-beta.2...v0.0.4-beta.3
 [0.0.4-beta.2]: https://github.com/kinoforge/runnel/compare/v0.0.4-beta.1...v0.0.4-beta.2
 [0.0.4-beta.1]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.5...v0.0.4-beta.1
 [0.0.3-beta.5]: https://github.com/kinoforge/runnel/compare/v0.0.3-beta.4...v0.0.3-beta.5
